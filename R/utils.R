@@ -83,6 +83,10 @@ canonical <- function(x, depth = 0L) {
     cls <- paste(class(x), collapse = "/")
     return(paste0(cls, "(", paste(parts, collapse = ","), ")"))
   }
+  if (is.atomic(x) && length(x) > 1000L) {
+    # large data: hash the serialization (deterministic for atomic data)
+    return(paste0("<", typeof(x), ":", md5_bytes(serialize(x, NULL, version = 2L)), ">"))
+  }
   if (is.atomic(x)) {
     vals <- if (is.double(x)) {
       ifelse(is.na(x) & !is.nan(x), "NA", formatC(x, digits = 17, format = "g"))
@@ -108,19 +112,36 @@ canonical_function <- function(f, depth = 0L) {
   }, character(1)), sep = "=", collapse = ",")
   body_txt <- paste(deparse(body(f), control = c("keepNA", "keepInteger")),
                     collapse = "\n")
+  env_txt <- if (depth < 4L) canonical_free_variables(f, depth) else ""
+  paste0("function(", fo_txt, ")", body_txt, "|free:", env_txt)
+}
+
+# Values of the free variables a function refers to, looked up along its
+# enclosing environments until a package namespace or the base environment.
+# Only referenced names are included, so unrelated variables that happen to
+# live in the same environment do not change the fingerprint. Objects from
+# package namespaces are represented by the package version instead.
+canonical_free_variables <- function(f, depth) {
   env <- environment(f)
-  env_txt <- ""
-  if (!is.null(env) && !identical(env, globalenv()) && !isNamespace(env) &&
-      !identical(env, baseenv()) && !identical(env, emptyenv()) &&
-      depth < 3L) {
-    vars <- sort(ls(env, all.names = TRUE))
-    if (length(vars) > 200L) vars <- vars[seq_len(200L)]
-    env_txt <- paste(vapply(vars, function(v) {
-      val <- get(v, envir = env, inherits = FALSE)
-      paste0(v, "=", canonical(val, depth + 1L))
-    }, character(1)), collapse = ";")
+  if (is.null(env)) return("")
+  vars <- tryCatch(codetools::findGlobals(f), error = function(e) character())
+  vars <- sort(unique(vars))
+  out <- character()
+  for (v in vars) {
+    e <- env
+    while (!identical(e, emptyenv())) {
+      if (isNamespace(e) || identical(e, baseenv())) {
+        e <- NULL
+        break
+      }
+      if (exists(v, envir = e, inherits = FALSE)) break
+      e <- parent.env(e)
+    }
+    if (is.null(e) || identical(e, emptyenv())) next
+    val <- get(v, envir = e, inherits = FALSE)
+    out <- c(out, paste0(v, "=", canonical(val, depth + 1L)))
   }
-  paste0("function(", fo_txt, ")", body_txt, "|env:", env_txt)
+  paste(out, collapse = ";")
 }
 
 fingerprint <- function(...) {

@@ -115,10 +115,10 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   add("<h1>Simulation study report: ", html_escape(study$name), "</h1>")
   add("<p class=\"note\">Generated ", now_utc(), " by adempR ",
       as.character(utils::packageVersion("adempR")), ". Run label: ", html_escape(man$label),
-      ". Study fingerprint: <code>", man$study_fingerprint, "</code>.</p>")
+      ". Study fingerprint: <code>", html_escape(man$study_fingerprint), "</code>.</p>")
   frozen <- study$status$frozen
   add("<p>", if (is.null(frozen)) "The protocol was not frozen before this run." else
-    paste0("The protocol was frozen on ", frozen$time, " with hash <code>", frozen$hash,
+    paste0("The protocol was frozen on ", html_escape(frozen$time), " with hash <code>", html_escape(frozen$hash),
            "</code>. A frozen hash proves identity of the specification, not that it was fixed before results were seen."),
     " ", if (is.null(study$protocol$registration)) "No external registration is recorded." else
       paste0("External registration: ", html_escape(paste(unlist(study$protocol$registration), collapse = ", ")), "."),
@@ -179,15 +179,15 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   add("<h2>5. Performance measures and failure handling</h2>")
   mi <- MEASURE_INFO[MEASURE_INFO$measure %in% unique(s$measure), , drop = FALSE]
   add(html_table(mi[c("measure", "eligibility", "direction", "mcse_method")]))
-  f <- study$failure
+  f <- lapply(unclass(study$failure), html_escape)
   add("<p>Failure policy: nonconverged estimates are ", f$nonconverged,
       "; outputs with warnings are ", if (f$warnings == "record") "kept (warnings recorded)" else "invalid",
       "; boundary estimates are ", if (f$boundary == "record") "kept (flag recorded)" else "invalid",
       "; infinite estimates are ", if (f$infinite == "include") "kept as extended real values" else "invalid",
       "; infrastructure retries: ", f$retries, ". Data sets are never redrawn after a method fails.",
       " Performance is reported conditional on each measure's eligibility rule, next to the probability of a usable result.</p>")
-  add("<h2>6. Execution</h2><p>Replications planned per scenario: ", man$replications,
-      ". Base seed: ", man$seed, ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
+  add("<h2>6. Execution</h2><p>Replications planned per scenario: ", html_escape(man$replications),
+      ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
       nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>")
   env <- man$environment
   add(html_table(data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK",
@@ -271,6 +271,10 @@ csv_safe <- function(df) {
 #' every file. Paths inside the bundle are relative. No host names, user
 #' names or absolute paths are written. Generated data are copied only with
 #' `include_data = TRUE`, because they may be large or private.
+#'
+#' A bundle contains R code (the study's functions). The checksums detect
+#' corruption, not tampering: import bundles only from trusted sources, as
+#' you would source an R script.
 #'
 #' `sim_import()` verifies the checksums and returns results that work with
 #' [sim_summarise()], [sim_compare()], [sim_diagnose()], [sim_plot()] and
@@ -382,6 +386,9 @@ sim_import <- function(dir) {
   ck <- file.path(dir, "CHECKSUMS.md5")
   if (!file.exists(ck)) stopf("No CHECKSUMS.md5 in %s; not an adempR bundle.", dir)
   lines <- readLines(ck)
+  if (!any(grepl("  results\\.rds$", lines))) {
+    stopf("CHECKSUMS.md5 does not list results.rds; not a valid adempR bundle.")
+  }
   sums <- sub("  .*$", "", lines)
   files <- sub("^[0-9a-f]+  ", "", lines)
   actual <- unname(tools::md5sum(file.path(dir, files)))

@@ -35,6 +35,10 @@ names or absolute paths are written. Generated data are copied only with
 \code{include_data = TRUE}, because they may be large or private.
 }
 \details{
+A bundle contains R code (the study's functions). The checksums detect
+corruption, not tampering: import bundles only from trusted sources, as
+you would source an R script.
+
 \code{sim_import()} verifies the checksums and returns results that work with
 \code{\link[=sim_summarise]{sim_summarise()}}, \code{\link[=sim_compare]{sim_compare()}}, \code{\link[=sim_diagnose]{sim_diagnose()}}, \code{\link[=sim_plot]{sim_plot()}} and
 \code{\link[=sim_report]{sim_report()}}.

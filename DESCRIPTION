@@ -35,6 +35,7 @@ Roxygen: list(markdown = TRUE)
 Depends:
     R (>= 4.2.0)
 Imports:
+    codetools,
     graphics,
     grDevices,
     jsonlite,
@@ -44,6 +45,7 @@ Imports:
     utils
 Suggests:
     callr,
+    data.table,
     future,
     future.apply,
     geepack,
