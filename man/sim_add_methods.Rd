@@ -7,7 +7,8 @@
 sim_add_methods(run, methods, reason = NULL, ...)
 }
 \arguments{
-\item{run}{A run or a run directory.}
+\item{run}{A run or a run directory. The current manifest in the
+directory is used, so a handle from before an earlier addition is safe.}
 
 \item{methods}{Named list of new methods (functions or \code{\link[=sim_method]{sim_method()}}).}
 

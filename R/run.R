@@ -354,6 +354,8 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
                     progress = interactive(), rng_registry = NULL, cost = NULL,
                     scenario_replications = NULL, gpus = NULL) {
   stopifnot(inherits(study, "adempr_study"))
+  base_fp <- attr(study, "adempr_base")
+  attr(study, "adempr_base") <- NULL
   backend <- match.arg(backend)
   if (!is.null(gpus) && (!length(gpus) || anyNA(gpus) || !(is.numeric(gpus) || is.character(gpus)))) {
     stopf("`gpus` must be device identifiers, for example 0:1.")
@@ -387,7 +389,11 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   on.exit(release_lock(p, lock_token), add = TRUE)
   existing <- file.exists(p$manifest)
   man <- if (existing) {
-    reconcile_manifest(read_manifest(path), study, seed, replications, update)
+    cur <- read_manifest(path)
+    if (!is.null(base_fp) && !identical(cur$study_fingerprint, base_fp)) {
+      stopf("The study in %s changed after it was read (another addition was committed meanwhile). Call sim_add_methods() again.", path)
+    }
+    reconcile_manifest(cur, study, seed, replications, update)
   } else {
     new_manifest(study, seed, replications,
                  label %||% study$status$label, rng_registry)
