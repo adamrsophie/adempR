@@ -72,9 +72,14 @@ number assignment is preserved.
 \details{
 The run directory refuses incompatible work: a different seed or data
 generating mechanism is an error, and a changed method is refit only
-with \code{update = TRUE}. Changes to truth, measures or the failure policy
-need no recomputation of fits and are applied by \code{\link[=sim_summarise]{sim_summarise()}}.
-Every change is recorded as a revision in the manifest.
+with \code{update = TRUE}. Changes to truth, estimand metadata, measures or
+the failure policy need no recomputation of fits and are applied by
+\code{\link[=sim_summarise]{sim_summarise()}}. Added scenarios and methods are run; removed ones keep
+their committed results on disk but are excluded from summaries. A
+changed \code{timeout} or number of \code{retries} applies to new work only;
+committed fits keep the settings they ran with. Requesting fewer
+replications than the directory holds gives a warning and keeps them all.
+Each of these changes is recorded as a revision in the manifest.
 
 Backends: \code{"sequential"} is the reference implementation. \code{"future"}
 distributes chunks of tasks with \pkg{future.apply} using the current

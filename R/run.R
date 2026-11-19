@@ -47,6 +47,18 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   }
   added_scen <- setdiff(names(new$scenarios), names(old$scenarios))
   if (length(added_scen)) changes <- c(changes, sprintf("added %d scenario(s)", length(added_scen)))
+  removed_scen <- setdiff(names(old$scenarios), names(new$scenarios))
+  if (length(removed_scen)) {
+    changes <- c(changes, sprintf(
+      "removed %d scenario(s): their committed results stay on disk and are excluded from summaries",
+      length(removed_scen)))
+  }
+  removed_m <- setdiff(names(old$methods), names(new$methods))
+  if (length(removed_m)) {
+    changes <- c(changes, sprintf(
+      "removed method %s: its committed results stay on disk and are excluded from summaries",
+      removed_m))
+  }
   changed_m <- character()
   for (mn in names(new$methods)) {
     if (is.null(old$methods[[mn]])) {
@@ -65,12 +77,35 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
       changes <- c(changes, sprintf("truth of %s changed: re-evaluate", en))
     }
   }
+  for (en in union(names(old$estimands), names(new$estimands))) {
+    if (!is.null(old$estimands[[en]]) && !is.null(new$estimands[[en]]) &&
+        !identical(old$estimands[[en]], new$estimands[[en]])) {
+      changes <- c(changes, sprintf("metadata of estimand %s changed: re-evaluate", en))
+    }
+  }
   if (!identical(old$evaluation, new$evaluation)) {
     changes <- c(changes, "performance measures or failure policy changed: re-evaluate")
+  }
+  if (!identical(old$execution, new$execution)) {
+    what <- character()
+    if (!identical(old$execution$retries, new$execution$retries)) what <- "retries"
+    for (mn in intersect(names(old$execution$timeout), names(new$execution$timeout))) {
+      if (!identical(old$execution$timeout[[mn]], new$execution$timeout[[mn]])) {
+        what <- c(what, sprintf("timeout of %s", mn))
+      }
+    }
+    if (length(what)) {
+      changes <- c(changes, sprintf(
+        "execution settings changed (%s): committed fits keep the old settings; only new work uses the new ones (use `retry_failed = TRUE` to rerun failed fits)",
+        paste(what, collapse = ", ")))
+    }
   }
   if (replications > man$replications) {
     changes <- c(changes, sprintf("replications extended from %d to %d", man$replications,
                                   as.integer(replications)))
+  } else if (replications < man$replications) {
+    warnf("This run directory holds %d replications per scenario; %d were requested. All %d are kept and summarized.",
+             man$replications, as.integer(replications), man$replications)
   }
   if (length(changes)) {
     man$revisions <- c(man$revisions, list(list(time = now_utc(), changes = changes,
@@ -98,9 +133,14 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
 #'
 #' The run directory refuses incompatible work: a different seed or data
 #' generating mechanism is an error, and a changed method is refit only
-#' with `update = TRUE`. Changes to truth, measures or the failure policy
-#' need no recomputation of fits and are applied by [sim_summarise()].
-#' Every change is recorded as a revision in the manifest.
+#' with `update = TRUE`. Changes to truth, estimand metadata, measures or
+#' the failure policy need no recomputation of fits and are applied by
+#' [sim_summarise()]. Added scenarios and methods are run; removed ones keep
+#' their committed results on disk but are excluded from summaries. A
+#' changed `timeout` or number of `retries` applies to new work only;
+#' committed fits keep the settings they ran with. Requesting fewer
+#' replications than the directory holds gives a warning and keeps them all.
+#' Each of these changes is recorded as a revision in the manifest.
 #'
 #' Backends: `"sequential"` is the reference implementation. `"future"`
 #' distributes chunks of tasks with \pkg{future.apply} using the current

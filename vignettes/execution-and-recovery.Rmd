@@ -76,18 +76,24 @@ them must be wrong. Timing columns are not compared.
 The run directory records fingerprints of each part of the study, and
 `sim_run()` compares them with the study it is given:
 
-* A different data-generating mechanism or scenario set is an error: use a
-  new directory.
+* A different data-generating mechanism is an error: use a new directory.
+* Added scenarios and methods are run. Removed scenarios and methods keep
+  their committed results on disk, but summaries leave them out.
 * A changed method requires `update = TRUE`. Only that method is refit;
   others keep their results.
 * A changed truth, estimand metadata, measure set or failure policy is
   applied at evaluation with no refitting.
+* A changed `timeout` or number of `retries` applies to new work only.
+  Committed fits keep the settings they ran with; `retry_failed = TRUE`
+  reruns fits that failed under the old settings.
+* Requesting fewer replications than the directory holds gives a warning;
+  all committed replications are kept and summarized.
 
 Fingerprints are built from the deparsed code of each function and the
 values of the free variables it uses (and from `depends`, for anything the
 code reaches indirectly), never from serialized bytecode.
 
-Every change is recorded in the manifest:
+Each of these changes is recorded as a revision in the manifest:
 
 ```{r}
 study2 <- sim_amend(study, measures = sim_measures("bias", "mse", "mae"),

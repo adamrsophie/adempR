@@ -69,6 +69,47 @@ test_that("changes invalidate exactly the affected work", {
                        path = p), "jitter_a")
 })
 
+test_that("every kind of study change is recorded as a revision", {
+  changes_of <- function(run) unlist(lapply(run$manifest$revisions, `[[`, "changes"))
+  m <- stochastic_methods()
+  st <- normal_study(n = c(10L, 20L), mu = 0, methods = m)
+  p <- run_path()
+  sim_run(st, replications = 3, seed = 4, path = p)
+  nb <- function() length(list.files(file.path(p, "batches"), pattern = "\\.md5$"))
+  n0 <- nb()
+  # estimand metadata: re-evaluate, no new fits
+  st_e <- st
+  st_e$estimands$mean$effect <- "conditional"
+  r <- sim_run(st_e, replications = 3, seed = 4, path = p)
+  expect_true(any(grepl("metadata of estimand mean changed", changes_of(r))))
+  expect_equal(nb(), n0)
+  # retries move from evaluation to execution
+  st_r <- sim_amend(st_e, failure = sim_failure_policy(retries = 2L), reason = "retries")
+  r <- sim_run(st_r, replications = 3, seed = 4, path = p)
+  last <- r$manifest$revisions[[length(r$manifest$revisions)]]$changes
+  expect_true(any(grepl("execution settings changed \\(retries\\)", last)))
+  expect_false(any(grepl("re-evaluate", last)))
+  # timeout is an execution setting
+  st_t <- st_r
+  st_t$methods$jitter_a <- sim_method(m$jitter_a, estimands = "mean", timeout = 30)
+  r <- sim_run(st_t, replications = 3, seed = 4, path = p)
+  expect_true(any(grepl("timeout of jitter_a", changes_of(r))))
+  expect_equal(nb(), n0)
+  # removed scenario and method are recorded and left out of summaries
+  st_s <- st_t
+  st_s$scenarios <- sim_scenarios(n = 10L, mu = 0, sigma = 1)
+  st_s$methods$boot_b <- NULL
+  r <- sim_run(st_s, replications = 3, seed = 4, path = p)
+  ch <- changes_of(r)
+  expect_true(any(grepl("removed 1 scenario", ch)))
+  expect_true(any(grepl("removed method boot_b", ch)))
+  s <- as.data.frame(sim_summarise(r))
+  expect_setequal(unique(s$method), "jitter_a")
+  # fewer replications: warning, nothing dropped
+  expect_warning(r <- sim_run(st_s, replications = 2, seed = 4, path = p), "holds 3 replications")
+  expect_equal(r$manifest$replications, 3L)
+})
+
 test_that("closure variables are part of method fingerprints", {
   mk <- function(k) function(data) sim_estimate("mean", mean(data$y) * k)
   expect_false(identical(adempR:::method_fingerprint(sim_method(mk(1))),

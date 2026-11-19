@@ -200,8 +200,17 @@ study_fingerprints <- function(study) {
     }),
     evaluation = fingerprint(lapply(study$measures, function(m) {
       if (is.character(m)) m else unclass(m)
-    }), unclass(study$failure), study$alpha, study$level)
+    }), unclass(study$failure)[setdiff(names(study$failure), "retries")],
+    study$alpha, study$level),
+    # Settings that change how fits are executed but not what a method is:
+    # recorded so that a change is visible, never used to select results.
+    execution = execution_settings(study)
   )
+}
+
+execution_settings <- function(study) {
+  list(retries = study$failure$retries,
+       timeout = lapply(study$methods, function(m) m$timeout))
 }
 
 #' @rdname sim_freeze
