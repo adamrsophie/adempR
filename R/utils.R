@@ -233,7 +233,20 @@ canonical_lookup <- function(vars, env, depth, seen) {
     e <- env
     found <- FALSE
     repeat {
-      if (identical(e, emptyenv()) || isNamespace(e) || identical(e, baseenv())) break
+      if (isNamespace(e)) {
+        # A function defined inside a package's environment (for example a
+        # test file) reaches the global environment through the namespace,
+        # its imports and base. Objects from those are package code; a name
+        # they do not supply is looked up in the global environment, as R
+        # does.
+        in_pkg <- exists(v, envir = e, inherits = FALSE) ||
+          exists(v, envir = parent.env(e), inherits = FALSE) ||
+          exists(v, envir = baseenv(), inherits = FALSE)
+        if (in_pkg) break
+        e <- globalenv()
+        next
+      }
+      if (identical(e, emptyenv()) || identical(e, baseenv())) break
       if (exists(v, envir = e, inherits = FALSE)) {
         found <- TRUE
         break

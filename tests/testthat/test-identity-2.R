@@ -133,3 +133,12 @@ test_that("a method's declared packages do not mask functions for other methods"
   expect_equal(e$estimate[e$method == "uses_stats"], c(6, 6))
   expect_false("package:dplyr" %in% search())
 })
+
+test_that("globals reached through a package namespace enter fingerprints", {
+  f <- local(function() adempr_test_ns + 1, envir = new.env(parent = asNamespace("adempR")))
+  on.exit(rm("adempr_test_ns", envir = globalenv()), add = TRUE)
+  assign("adempr_test_ns", 1, envir = globalenv())
+  a <- fingerprint(f)
+  assign("adempr_test_ns", 2, envir = globalenv())
+  expect_false(identical(a, fingerprint(f)))
+})

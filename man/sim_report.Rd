@@ -10,7 +10,7 @@ sim_report(
   overwrite = FALSE,
   plots = TRUE,
   blind_methods = FALSE,
-  blind_seed = 1L
+  blind_seed = NULL
 )
 }
 \arguments{
@@ -26,10 +26,16 @@ sim_report(
 (\code{method_A}, \code{method_B}, ...) in a random order, and leave out method
 code, descriptions and versions, so the results can be interpreted
 before the methods are known. The key is written next to the report
-(\verb{<file>.blinding-key.csv}); keep it apart until the interpretation is
-fixed.}
+(\verb{<file>.blinding-key.csv}, with the seed of the order); keep it apart
+until the interpretation is fixed. Summaries are computed before the
+names are replaced. Everything that could identify a method is left
+out: fingerprints, roles, known performance, settings, timeouts,
+couplings, error and warning messages, protocol amendments and run
+revisions (whose texts name methods).}
 
-\item{blind_seed}{Seed of the random order of the labels.}
+\item{blind_seed}{Seed of the random order of the labels. The default
+draws a fresh order for every report, so the order cannot be rebuilt
+from a known seed.}
 }
 \value{
 The file path, invisibly.

@@ -15,8 +15,8 @@ test_that("GPU methods see their assigned device and the variable is restored", 
   expect_equal(g$note[order(g$replication)], c("0 0", "1 1", "0 0", "1 1"))
   expect_true(all(e$note[e$method == "cpu"] == "TRUE keep"))
   expect_equal(Sys.getenv("CUDA_VISIBLE_DEVICES"), "keep")
-  # without devices the method runs normally and the flag leaves fingerprints alone
-  expect_identical(adempR:::method_fingerprint(sim_method(m$cpu)),
-                   adempR:::method_fingerprint(sim_method(m$cpu, gpu = TRUE)))
+  # the flag is part of what the method is, so it enters its fingerprint
+  expect_false(identical(adempR:::method_fingerprint(sim_method(m$cpu)),
+                   adempR:::method_fingerprint(sim_method(m$cpu, gpu = TRUE))))
   expect_error(sim_run(st, replications = 1, seed = 1, path = run_path(), gpus = character()), "device")
 })

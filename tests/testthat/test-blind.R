@@ -33,8 +33,44 @@ test_that("blinded export, external results and a blinded report work end to end
   f <- tempfile(fileext = ".html")
   sim_report(run2, f, plots = FALSE, blind_methods = TRUE)
   html <- paste(readLines(f), collapse = "\n")
-  expect_false(grepl("t_interval|>external<|returned by analysts|t.test", html))
+  # every occurrence of the name "external" (other than the protocol item
+  # "external registration") would identify the method
+  expect_false(grepl("t_interval|\\bexternal\\b(?! registration)|returned by analysts|t\\.test",
+                     html, perl = TRUE))
+  # no fingerprint of any method, at any length
+  for (fp in unlist(run2$manifest$fingerprints$methods)) {
+    expect_false(grepl(substr(fp, 1, 8), html, fixed = TRUE))
+  }
+  # a fresh order unless a seed is given; the key records it
+  bk0 <- utils::read.csv(paste0(f, ".blinding-key.csv"))
+  expect_true(is.numeric(bk0$seed))
   expect_true(grepl("method_A", html) && grepl("method_B", html))
   bk <- utils::read.csv(paste0(f, ".blinding-key.csv"))
   expect_setequal(bk$method, c("t_interval", "external"))
+})
+
+test_that("a blinded report hides warnings, revisions and keeps summaries unchanged", {
+  m <- list(secretalpha = function(data) {
+    warning("secretalpha bad warning")
+    sim_estimate("mean", mean(data$y))
+  })
+  by_name <- sim_measure("named", contribution = function(rows) {
+    as.numeric(rows$method == "secretalpha")
+  })
+  st <- normal_study(n = 5L, mu = 0, methods = m, measures = sim_measures("bias", by_name))
+  p <- run_path()
+  sim_run(st, replications = 3, seed = 1, path = p)
+  run <- sim_add_methods(sim_open(p), list(secretbeta = function(data) {
+    sim_estimate("mean", median(data$y))
+  }), reason = "new competitor")
+  f <- tempfile(fileext = ".html")
+  sim_report(run, f, plots = FALSE, blind_methods = TRUE, blind_seed = 7)
+  html <- paste(readLines(f), collapse = "\n")
+  expect_false(grepl("secretalpha|secretbeta", html))
+  s <- as.data.frame(sim_summarise(run))
+  expect_equal(s$value[s$measure == "named" & s$method == "secretalpha"], 1)
+  key <- utils::read.csv(paste0(f, ".blinding-key.csv"))
+  lab <- key$label[key$method == "secretalpha"]
+  expect_match(html, paste0(lab, "</td>"))
+  expect_equal(key$seed[1], 7)
 })

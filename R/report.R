@@ -86,9 +86,15 @@ REFERENCES <- data.frame(
 #'   (`method_A`, `method_B`, ...) in a random order, and leave out method
 #'   code, descriptions and versions, so the results can be interpreted
 #'   before the methods are known. The key is written next to the report
-#'   (`<file>.blinding-key.csv`); keep it apart until the interpretation is
-#'   fixed.
-#' @param blind_seed Seed of the random order of the labels.
+#'   (`<file>.blinding-key.csv`, with the seed of the order); keep it apart
+#'   until the interpretation is fixed. Summaries are computed before the
+#'   names are replaced. Everything that could identify a method is left
+#'   out: fingerprints, roles, known performance, settings, timeouts,
+#'   couplings, error and warning messages, protocol amendments and run
+#'   revisions (whose texts name methods).
+#' @param blind_seed Seed of the random order of the labels. The default
+#'   draws a fresh order for every report, so the order cannot be rebuilt
+#'   from a known seed.
 #' @return The file path, invisibly.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -102,20 +108,34 @@ REFERENCES <- data.frame(
 #' file.exists(f)
 #' @export
 sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods = FALSE,
-                       blind_seed = 1L) {
+                       blind_seed = NULL) {
   if (!is_scalar_character(file)) stopf("`file` must be a path.")
   if (file.exists(file) && !overwrite) {
     stopf("%s exists; use `overwrite = TRUE` to replace it.", file)
   }
   res <- sim_results(run)
+  # performance is computed on the real results: a custom measure may read
+  # the method column, and blinding must not change any value
+  summ <- sim_summarise(res)
+  diag <- sim_diagnose(res)
+  n_amend <- length(res$manifest$study$amendments)
+  n_rev <- length(res$manifest$revisions)
   if (isTRUE(blind_methods)) {
+    blind_seed <- blind_seed %||% fresh_seed()
     res <- blind_results(res, blind_seed)
-    utils::write.csv(res$blinding, paste0(file, ".blinding-key.csv"), row.names = FALSE)
+    map <- stats::setNames(res$blinding$label, res$blinding$method)
+    summ <- relabel_methods(summ, map)
+    for (a in c("failures", "runtime")) attr(summ, a) <- relabel_methods(attr(summ, a), map)
+    diag[] <- lapply(diag, function(x) if (is.data.frame(x)) relabel_methods(x, map) else x)
+    # free text can name methods (warnings, errors, revisions)
+    diag$messages <- NULL
+    if (!is.null(diag$callback_errors)) diag$callback_errors$message <- NULL
+    key <- res$blinding
+    key$seed <- blind_seed
+    utils::write.csv(key, paste0(file, ".blinding-key.csv"), row.names = FALSE)
   }
   man <- res$manifest
   study <- man$study
-  summ <- sim_summarise(res)
-  diag <- sim_diagnose(res)
   s <- as.data.frame(summ)
   h <- character()
   add <- function(...) h <<- c(h, paste0(...))
@@ -208,6 +228,11 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   add("<h2>4. Methods</h2>")
   md <- do.call(rbind, lapply(names(study$methods), function(mn) {
     m <- study$methods[[mn]]
+    if (isTRUE(blind_methods)) {
+      return(data.frame(method = mn, estimands = paste(m$estimands, collapse = ", "),
+                        visible_scenario_fields = paste(m$scenario_fields, collapse = ", "),
+                        oracle = m$oracle, stringsAsFactors = FALSE))
+    }
     data.frame(method = mn, estimands = paste(m$estimands, collapse = ", "),
                visible_scenario_fields = paste(m$scenario_fields, collapse = ", "),
                role = m$role %||% "method", oracle = m$oracle, version = m$version %||% "",
@@ -244,7 +269,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
                  direction = m$direction %||% "", description = m$description %||% "",
                  stringsAsFactors = FALSE)
     }))))
-    for (m in custom) {
+    # measure code can name methods: left out of a blinded report
+    for (m in if (isTRUE(blind_methods)) list() else custom) {
       add("<details><summary>Code of measure ", html_escape(m$id), "</summary><pre>",
           html_escape(fun_source(m$contribution)),
           if (is.function(m$aggregate)) paste0("\n\n# aggregate\n", html_escape(fun_source(m$aggregate))),
@@ -389,6 +415,10 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   }
   add("<h3>Outlying values (flagged, not removed)</h3>", html_table(diag$outliers))
   add("<h2>10. Amendments, revisions and deviations</h2>")
+  if (isTRUE(blind_methods)) {
+    add(sprintf("<p class=\"note\">The report is blinded: %d protocol amendment(s) and %d run revision(s) are not shown, because their texts name methods.</p>",
+                n_amend, n_rev))
+  } else {
   am <- if (length(study$amendments)) do.call(rbind, lapply(study$amendments, function(a) {
     data.frame(time = a$time, reason = a$reason, components = paste(a$components, collapse = ", "),
                after_freeze = a$after_freeze, stringsAsFactors = FALSE)
@@ -398,6 +428,7 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
     data.frame(time = r$time, changes = paste(r$changes, collapse = "; "), stringsAsFactors = FALSE)
   })) else NULL
   add("<h3>Run revisions</h3>", html_table(rv))
+  }
   add("<h2>11. Limitations</h2><ul>",
       "<li>Performance measures are estimated from a finite number of replications; Monte Carlo standard errors quantify this uncertainty only under independent replications.</li>",
       "<li>Measures are conditional on each method producing the required output; when failures are informative, conditional performance and pairwise comparisons describe the successful subset, not the full data-generating distribution.</li>",

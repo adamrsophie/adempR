@@ -130,7 +130,7 @@ adempR_data_md5 <- function(data) md5_bytes(serialize(data, NULL, version = 3))
 
 # Replace method names by neutral labels in every table of a results object
 # and drop what identifies a method (code, description, version, artifacts).
-blind_results <- function(res, seed = 1L) {
+blind_results <- function(res, seed) {
   study <- res$manifest$study
   mn <- names(study$methods)
   perm <- with_rng_state(rng_base_seed(seed, "blind-report"), sample(seq_along(mn)))
@@ -142,7 +142,12 @@ blind_results <- function(res, seed = 1L) {
   }
   res$estimates <- ren(res$estimates)
   res$attempts <- ren(res$attempts)
+  res$attempts_all <- ren(res$attempts_all)
   res$diagnostics <- ren(res$diagnostics)
+  # free text (messages, warnings) can name methods
+  for (tb in c("attempts", "attempts_all")) {
+    if (!is.null(res[[tb]])) res[[tb]]$message <- res[[tb]]$warnings <- NA_character_
+  }
   res$artifacts <- NULL
   ms <- lapply(study$methods, function(m) {
     m$description <- NULL
@@ -153,9 +158,11 @@ blind_results <- function(res, seed = 1L) {
   names(ms) <- map[names(ms)]
   study$methods <- ms[sort(names(ms))]
   man <- res$manifest
-  fps <- man$fingerprints$methods
-  names(fps) <- map[names(fps)]
-  man$fingerprints$methods <- fps
+  # fingerprints identify methods to anyone who has the study code
+  man$fingerprints$methods <- NULL
+  man$revisions <- NULL
+  study$amendments <- NULL
+  if (!is.null(man$sequential$looks)) man$sequential$looks <- ren(man$sequential$looks)
   man$study <- study
   res$manifest <- man
   res$blinding <- data.frame(label = unname(map), method = names(map), stringsAsFactors = FALSE)
@@ -174,4 +181,16 @@ blind_letters <- function(k) {
     out[i] <- s
   }
   out
+}
+
+# Rename the method column of a table by a blinding key.
+relabel_methods <- function(df, map) {
+  if (is.data.frame(df) && "method" %in% names(df)) df$method <- unname(map[df$method])
+  df
+}
+
+# A seed nobody chose: from the clock and the process, without touching
+# the caller's random number generator.
+fresh_seed <- function() {
+  strtoi(substr(md5_string(c(format(Sys.time(), "%OS6"), Sys.getpid(), new_uuid())), 1, 7), 16L)
 }
