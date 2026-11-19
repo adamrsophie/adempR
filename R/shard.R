@@ -15,6 +15,11 @@
 #' seed. A failed or unfinished job is rerun by calling `sim_run_shard()`
 #' again for that shard; it resumes.
 #'
+#' Save the study once with [saveRDS()] and read it in every job, so all
+#' jobs run the identical study: a study rebuilt from source in each job
+#' can differ in what its functions capture, and `sim_collect_shards()`
+#' refuses shards whose generator or methods differ.
+#'
 #' With a scheduler that \pkg{future} supports (for example through
 #' \pkg{future.batchtools}), `sim_run(backend = "future")` is an
 #' alternative in which one coordinating R session commits all results.

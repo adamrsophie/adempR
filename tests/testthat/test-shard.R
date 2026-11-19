@@ -4,14 +4,14 @@ test_that("sharded jobs collect into the same results as one run", {
   # each shard runs in its own R process, as an array job would
   skip_if_not_installed("callr")
   lib <- dirname(find.package("adempR"))
+  # every job reads the same saved study, as recommended for array jobs
+  sf <- tempfile(fileext = ".rds")
+  saveRDS(st, sf)
   for (k in 1:3) {
-    callr::r(function(k, parent, helper, pkg) {
+    callr::r(function(k, parent, sf, pkg) {
       if (file.exists(file.path(pkg, "R", "run.R"))) pkgload::load_all(pkg, quiet = TRUE) else library(adempR)
-      source(helper)
-      st <- normal_study(n = c(10L, 20L, 30L), mu = c(0, 1), methods = stochastic_methods())
-      invisible(sim_run_shard(st, k, 3, replications = 6, seed = 11, path = parent))
-    }, args = list(k = k, parent = parent, helper = test_path("helper-studies.R"),
-                   pkg = find.package("adempR")))
+      invisible(sim_run_shard(readRDS(sf), k, 3, replications = 6, seed = 11, path = parent))
+    }, args = list(k = k, parent = parent, sf = sf, pkg = find.package("adempR")))
   }
   expect_length(list.dirs(parent, recursive = FALSE), 3L)
   run <- sim_collect_shards(st, 3, replications = 6, seed = 11, path = parent, into = run_path())
@@ -31,14 +31,14 @@ test_that("shards run as batchtools array jobs and collect", {
   reg <- batchtools::makeRegistry(file.dir = NA, seed = 1)
   # each job runs in its own Rscript process, as on a scheduler node
   reg$cluster.functions <- batchtools::makeClusterFunctionsInteractive(external = TRUE)
-  job <- function(k, parent, helper, pkg) {
+  sf <- tempfile(fileext = ".rds")
+  saveRDS(st, sf)
+  job <- function(k, parent, sf, pkg) {
     if (file.exists(file.path(pkg, "R", "run.R"))) pkgload::load_all(pkg, quiet = TRUE) else library(adempR)
-    source(helper)
-    st <- normal_study(n = c(10L, 20L), mu = 0, methods = stochastic_methods())
-    sim_run_shard(st, k, 2, replications = 5, seed = 3, path = parent)
+    sim_run_shard(readRDS(sf), k, 2, replications = 5, seed = 3, path = parent)
     k
   }
-  batchtools::batchMap(job, k = 1:2, more.args = list(parent = parent, helper = test_path("helper-studies.R"),
+  batchtools::batchMap(job, k = 1:2, more.args = list(parent = parent, sf = sf,
                                                   pkg = find.package("adempR")), reg = reg)
   suppressMessages(batchtools::submitJobs(reg = reg))
   batchtools::waitForJobs(reg = reg)

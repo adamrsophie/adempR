@@ -49,6 +49,11 @@ seed. A failed or unfinished job is rerun by calling \code{sim_run_shard()}
 again for that shard; it resumes.
 }
 \details{
+Save the study once with \code{\link[=saveRDS]{saveRDS()}} and read it in every job, so all
+jobs run the identical study: a study rebuilt from source in each job
+can differ in what its functions capture, and \code{sim_collect_shards()}
+refuses shards whose generator or methods differ.
+
 With a scheduler that \pkg{future} supports (for example through
 \pkg{future.batchtools}), \code{sim_run(backend = "future")} is an
 alternative in which one coordinating R session commits all results.

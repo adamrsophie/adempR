@@ -50,10 +50,12 @@ reference:
   - sim_scenarios
   - sim_constraint
   - sim_protocol
+  - sim_protocol_export
   - sim_retention
 - title: Estimands and truth
   contents:
   - sim_estimand
+  - sim_estimand_grid
   - sim_truth_exact
   - sim_truth_value
 - title: Data generation and methods
@@ -63,6 +65,10 @@ reference:
   - sim_method
   - sim_estimate
   - sim_failure_policy
+  - sim_calibrate_method
+  - sim_method_sbc
+  - sim_external_method
+  - sim_export_blinded
 - title: Study specification
   contents:
   - sim_study
@@ -77,6 +83,9 @@ reference:
   - sim_unlock
   - sim_replay
   - sim_capabilities
+  - sim_verify
+  - sim_run_shard
+  - sim_add_methods
   - rng_registry
   - rng_task_seed
 - title: Results and performance
@@ -90,24 +99,40 @@ reference:
   - sim_acceptable
   - sim_compare
   - sim_pareto
+  - sim_rank
+  - sim_leaderboard
+  - sim_measures_categorical
+  - sim_measure_interval_score
+  - sim_bias_decomposition
+  - sim_check_identity
+  - sim_factor_influence
+  - sim_confidence_sequence
+  - sim_summarise_stream
+  - sim_summarise_antithetic
+  - sim_control_variate
   - sim_accumulator
 - title: Planning and stopping
   contents:
   - sim_plan_replications
   - sim_pilot
+  - sim_run_adaptive
   - sim_run_sequential
 - title: Diagnostics and reporting
   contents:
   - sim_diagnose
   - sim_check_dgp
+  - sim_check_reference
   - sim_plot
   - sim_report
   - sim_export
 - title: Generator helpers
   contents:
   - sim_rmvnorm
+  - sim_rcopula
+  - sim_plasmode
   - sim_check_matrix
   - sim_calibrate_intercept
+  - sim_calibrate_censoring
   - sim_rweibull_ph
   - sim_add_missing
   - sim_rclustered

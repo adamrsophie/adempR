@@ -143,16 +143,16 @@ sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
 
 | Step | Functions |
 |------|-----------|
-| Protocol and design | `sim_protocol()`, `sim_scenarios()`, `sim_constraint()`, `sim_scenarios_table()`, `sim_scenarios_sample()`, `sim_scenarios_bind()`, `sim_completeness()` |
-| Estimands and truth | `sim_estimand()`, `sim_truth_exact()`, `sim_truth_numeric()`, `sim_truth_mc()`, `sim_truth_dataset()`, `sim_truth_unknown()`, `sim_truth_value()` |
-| Data and methods | `sim_generator()`, `sim_data()`, `sim_method()`, `sim_estimate()`, `sim_failure_policy()`, `sim_retention()` |
+| Protocol and design | `sim_protocol()`, `sim_protocol_export()`, `sim_scenarios()`, `sim_constraint()`, `sim_scenarios_table()`, `sim_scenarios_sample()`, `sim_scenarios_bind()`, `sim_completeness()` |
+| Estimands and truth | `sim_estimand()`, `sim_estimand_grid()`, `sim_truth_exact()`, `sim_truth_numeric()`, `sim_truth_mc()`, `sim_truth_dataset()`, `sim_truth_unknown()`, `sim_truth_value()` |
+| Data and methods | `sim_generator()`, `sim_data()`, `sim_method()`, `sim_method_sbc()`, `sim_external_method()`, `sim_estimate()`, `sim_estimate_grid()`, `sim_failure_policy()`, `sim_retention()`, `sim_calibrate_method()` |
 | Study | `sim_study()`, `sim_validate()`, `sim_fingerprint()`, `sim_freeze()`, `sim_amend()` |
-| Planning | `sim_plan_replications()`, `sim_pilot()` |
-| Execution | `sim_run()`, `sim_resume()`, `sim_open()`, `sim_unlock()`, `sim_run_sequential()` |
-| Results | `sim_results()`, `sim_truth()`, `sim_summarise()`, `sim_flow()`, `sim_acceptable()`, `sim_compare()`, `sim_pareto()`, `sim_measures()`, `sim_measure()` |
-| Checking | `sim_check_dgp()`, `sim_diagnose()`, `sim_plot()`, `sim_replay()`, `sim_capabilities()` |
-| Reporting | `sim_report()`, `sim_export()`, `sim_import()` |
-| Generator helpers | `sim_rmvnorm()`, `sim_check_matrix()`, `sim_calibrate_intercept()`, `sim_rweibull_ph()`, `sim_add_missing()`, `sim_rclustered()`, `sim_contaminate()` |
+| Planning | `sim_plan_replications()`, `sim_pilot()`, `sim_run_adaptive()` |
+| Execution | `sim_run()`, `sim_resume()`, `sim_open()`, `sim_unlock()`, `sim_run_sequential()`, `sim_run_shard()`, `sim_collect_shards()`, `sim_add_methods()` |
+| Results | `sim_results()`, `sim_truth()`, `sim_summarise()`, `sim_summarise_stream()`, `sim_summarise_grid()`, `sim_summarise_antithetic()`, `sim_control_variate()`, `sim_flow()`, `sim_acceptable()`, `sim_compare()`, `sim_pareto()`, `sim_rank()`, `sim_leaderboard()`, `sim_bias_decomposition()`, `sim_factor_influence()`, `sim_confidence_sequence()`, `sim_measures()`, `sim_measure()` |
+| Checking | `sim_check_dgp()`, `sim_diagnose()`, `sim_check_reference()`, `sim_check_identity()`, `sim_verify()`, `sim_sbc()`, `sim_plot()`, `sim_replay()`, `sim_capabilities()` |
+| Reporting | `sim_report()`, `sim_export()`, `sim_import()`, `sim_export_blinded()` |
+| Generator helpers | `sim_rmvnorm()`, `sim_rcopula()`, `sim_plasmode()`, `sim_check_matrix()`, `sim_calibrate_intercept()`, `sim_calibrate_censoring()`, `sim_rweibull_ph()`, `sim_add_missing()`, `sim_rclustered()`, `sim_contaminate()` |
 | Low level | `rng_registry()`, `rng_task_seed()`, `sim_accumulator()`, `sim_accumulate()`, `sim_merge()`, `sim_accumulated()` |
 
 ## Performance measures
@@ -171,7 +171,10 @@ sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
 | `rejection` | valid test | binomial; labeled type I error or power |
 | `usable`, `usable_coverage` | all generated data sets | binomial |
 
-Custom measures are defined with `sim_measure()`; no MCSE is claimed for a
+Custom measures are defined with `sim_measure()`; measure factories add
+selection proportions for categorical estimands
+(`sim_measures_categorical()`) and the interval score
+(`sim_measure_interval_score()`). No MCSE is claimed for a
 nonlinear aggregate unless one is supplied. Comparisons add paired
 differences of bias, MAE, MSE, coverage, width, rejection and the usable
 proportion, and relative precision (paired bootstrap MCSE, with the
@@ -196,7 +199,8 @@ manual and these articles:
 - [Planning replications and sequential stopping](https://adamrsophie.github.io/adempR/articles/planning-and-sequential.html)
 - [Diagnostics and reporting](https://adamrsophie.github.io/adempR/articles/diagnostics-and-reporting.html)
 - [Worked examples](https://adamrsophie.github.io/adempR/articles/examples.html):
-  clustered data, survival at a horizon, missing data, meta-analysis
+  clustered data, survival at a horizon, missing data, meta-analysis,
+  noncompliance (ITT and CACE)
 - [adempR and other simulation packages](https://adamrsophie.github.io/adempR/articles/ecosystem.html)
 - [Capabilities, status and evidence](https://adamrsophie.github.io/adempR/articles/capabilities.html)
 
@@ -224,12 +228,10 @@ manual and these articles:
   the previous release and R 4.2), Windows and macOS.
 
 The [capability matrix](https://adamrsophie.github.io/adempR/articles/capabilities.html)
-lists every feature as verified, implemented, experimental or deferred, with
-the test that supports each claim. Deferred in 0.1.0: vector and functional
-estimands, out of core result storage, tested cluster scheduler integration,
-time-uniform confidence sequences, variance reduction designs, adaptive
-allocation, Bayesian calibration adapters, plasmode and copula generators,
-method rankings and benchmarks.
+lists every feature as verified, implemented or experimental, with the test
+that supports each claim. Sharded runs are tested with separate R processes
+and batchtools jobs on one machine, not on a real cluster; GPU support
+assigns devices to methods and is not tested on GPU hardware.
 
 ## Related packages
 

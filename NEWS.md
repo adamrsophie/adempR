@@ -45,3 +45,30 @@ First release.
 * A self contained HTML report (protocol, code, flow of replications,
   results, paired comparisons, diagnostics) and reproducible export
   bundles.
+* Estimands beyond scalars: categorical estimands with selection
+  proportions, and vector or function valued estimands as components on a
+  grid with grid averaged performance. Truths can be shared by scenarios
+  that agree on given factors.
+* Methods: fallback values counted only under the failure policy, per fit
+  diagnostics, methods with known performance checked against Monte Carlo
+  error, a substream for resampling inside a method, tuning of method
+  settings on separate calibration streams, and GPU device assignment.
+* Generators: per replication records of realized properties, plasmode
+  resampling of real covariates, a Gaussian copula with arbitrary margins,
+  and calibration of a censoring rate to a target proportion.
+* Analysis: method rankings with bootstrap probabilities, a leaderboard,
+  bias decomposition against a secondary reference value, identity checks
+  between estimands, a descriptive meta-model of factor influence, the
+  interval score, weighted summaries within factor levels, time-uniform
+  confidence sequences, simulation-based calibration of Bayesian methods,
+  and batch by batch summaries for runs larger than memory.
+* Variance reduction and allocation: common random numbers across
+  scenarios, antithetic pairs, control variates from recorded quantities,
+  and adaptive allocation of replications to the scenarios that need them.
+* Workflow: protocol export in the ADEMP-PreReg section order, blinded
+  evaluation (coded data export, external results imported as a method, a
+  report with blinded method names), reproduction and seed sensitivity
+  checks between runs, sharded runs for cluster array jobs, living
+  benchmarks that add methods to an existing run, longest first
+  scheduling, and protection of production runs from changes that alter
+  their results. Bland-Altman and interval by truth plots.

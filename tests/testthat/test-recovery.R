@@ -197,13 +197,14 @@ test_that("LPT scheduling leaves results unchanged and orders costly scenarios f
 test_that("changes that alter a production run need explicit confirmation", {
   st <- normal_study(n = 10L, mu = 0, methods = stochastic_methods(), measures = "bias")
   p <- run_path()
-  sim_run(st, replications = 3, seed = 1, path = p, label = "production")
+  suppressWarnings(sim_run(st, replications = 3, seed = 1, path = p, label = "production"))
   # an extension is allowed
-  expect_silent(sim_run(st, replications = 4, seed = 1, path = p))
+  # (a production run may warn about uncommitted changes in the git tree)
+  expect_no_error(suppressWarnings(sim_run(st, replications = 4, seed = 1, path = p)))
   m2 <- stochastic_methods()
   m2$jitter_a <- function(data) sim_estimate("mean", mean(data$y) + rnorm(1, 0, 0.02))
   st2 <- normal_study(n = 10L, mu = 0, methods = m2, measures = "bias")
-  expect_error(sim_run(st2, replications = 4, seed = 1, path = p, update = TRUE), "production run")
-  expect_s3_class(sim_run(st2, replications = 4, seed = 1, path = p, update = "production"), "adempr_run")
+  expect_error(suppressWarnings(sim_run(st2, replications = 4, seed = 1, path = p, update = TRUE)), "production run")
+  expect_s3_class(suppressWarnings(sim_run(st2, replications = 4, seed = 1, path = p, update = "production")), "adempr_run")
   expect_error(sim_run(st2, replications = 4, seed = 1, path = p, update = "yes"), "must be TRUE")
 })
