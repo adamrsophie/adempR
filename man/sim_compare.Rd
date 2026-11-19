@@ -52,9 +52,9 @@ both methods together; \code{relative_precision} also reports the analytic
 standard error of Morris et al. (2019).
 }
 \details{
-The comparison population is explicit. With \code{population = "common_valid"} (the only option for conditional measures) only
-replications where both methods meet the measure's eligibility rule are
-used, and the counts of excluded replications are reported. Conditioning
+The comparison population is explicit: only replications where both
+methods meet the measure's eligibility rule are used (the common valid
+population), and the counts of excluded replications are reported. Conditioning
 on joint success is not the original data-generating distribution when
 failures are informative; read it together with the \code{usable}
 comparison, which uses all generated data sets.

@@ -1,0 +1,137 @@
+---
+title: "Capabilities, status and evidence"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Capabilities, status and evidence}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+This page lists what adempR 0.1.0 does, how sure we are that it works, and
+what it does not do. The statuses mean:
+
+* **verified**: implemented and checked by an automated test against an
+  independent calculation (hand calculation, closed form, another
+  package, or a bit for bit comparison). Test files are in
+  `tests/testthat/`.
+* **implemented**: available and exercised in examples, but without a
+  test that checks its numerical result independently.
+* **experimental**: available, but its interface or behavior may change,
+  or it has only been checked in limited settings.
+* **deferred**: not available in this version. The architecture leaves
+  room for it.
+
+Tests run on GitHub Actions on Linux, macOS and Windows with the current
+and previous R releases. Tests that kill R processes are skipped on
+Windows. Nothing has been run on a real cluster scheduler or a GPU.
+
+## Study specification
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Factorial scenarios with content keys, independent of order | verified | test-design.R, test-rng.R |
+| Exclusion and invalid configuration constraints | verified | test-design.R |
+| Nested (bound) and sampled designs, scenario weights | verified | test-design.R |
+| Estimand metadata and method declarations, with validation of mismatches | verified | test-estimands.R |
+| Exact truth | verified | test-normal-mean.R |
+| Monte Carlo truth with standard error, cached, carried into MCSE | verified | test-estimands.R |
+| Data set specific truth hidden from non-oracle methods | verified | test-estimands.R |
+| Unknown truth (truth based measures unavailable) | verified | test-estimands.R |
+| Numerical (quadrature) truth with stated error | implemented | used in examples only |
+| Public scenario views and oracle methods | verified | test-isolation.R |
+| Validation and smoke test | verified | test-design.R |
+| Protocol completeness checklist, freezing, amendments | verified | test-design.R |
+| Vector and functional estimands | deferred | only scalar estimands; use several scalars |
+
+## Failures and validity
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Separate estimate, SE, interval and test validity | verified | test-failures.R |
+| Errors, warnings, nonconvergence, boundary, infinite, extraction errors | verified | test-failures.R |
+| Timeouts | verified for R code | test-failures.R; compiled code that does not check for interrupts cannot be stopped |
+| Generation failures recorded, never redrawn | verified | test-failures.R |
+| Failure policy applied at evaluation without refitting | verified | test-failures.R |
+| Composite measures over all generated data sets | verified | test-failures.R |
+| Retries with the same seed | implemented | |
+
+## Reproducibility and execution
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Stream registry keyed by stage, scenario and component; append only | verified | test-rng.R |
+| Invariance to scenario order, method order and chunk size | verified | test-rng.R |
+| Extending replications and adding methods leave existing results unchanged | verified | test-rng.R |
+| Caller's RNG kind and state restored | verified | test-rng.R |
+| `future` backend identical to sequential | verified locally with multisession, two workers | test-rng.R |
+| Data isolation between methods, including `data.table` | verified | test-isolation.R |
+| Atomic commits; crash at each commit stage and resume | verified on Linux and macOS | test-recovery.R (SIGKILL in a child process) |
+| Stale lock recovery on the same host | verified | test-recovery.R |
+| Corrupt file detection, quarantine and rerun | verified | test-recovery.R |
+| Duplicate deduplication and conflict detection | verified | test-recovery.R |
+| Selective invalidation (method refit, truth and measure re-evaluation, DGP refusal) | verified | test-replay-invalidation.R |
+| Replay of one replication with data check | verified | test-replay-invalidation.R |
+| Retention policies and capability report | verified | test-replay-invalidation.R |
+| Cluster schedulers (batchtools, targets) | experimental | possible through `future` plans; not tested |
+| Out of core result storage | deferred | results are read into memory; mergeable accumulators are available |
+
+## Performance measures and analysis
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Bias, MAE, MSE, RMSE, empirical SE, mean SE, RMVAR and their MCSEs | verified | test-measures.R (hand calculations) |
+| Relative error in model SE (Morris et al. Table 6 MCSE) | verified | test-measures.R, agreement with rsimsum in test-normal-mean.R |
+| Coverage, noncoverage, rejection, usable proportion with exact intervals | verified | test-measures.R, test-normal-mean.R |
+| Bias-eliminated coverage, width, relative bias | implemented | |
+| Type I error and power labels from the declared null | verified | test-normal-mean.R |
+| Custom measures; no MCSE claimed for nonlinear aggregates | verified | test-measures.R |
+| Paired comparisons with MCSE | verified | test-compare.R |
+| Relative precision with analytic MCSE and paired bootstrap | verified | test-compare.R |
+| Equivalence margins | implemented | |
+| Pareto view | verified | test-compare.R |
+| Weighted summaries over scenarios | implemented | |
+| Mergeable accumulators | verified | test-measures.R |
+
+## Planning, stopping and reporting
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Replication planning formulas | verified | test-measures.R |
+| Pilot studies with cost and precision projections | verified | test-design.R |
+| Sequential stopping with error spending over looks and cells | verified | test-nested-sequential.R (simultaneous coverage by simulation) |
+| Time-uniform confidence sequences | deferred | |
+| DGP checks | verified | test-generators.R |
+| Diagnostics and plots | implemented | |
+| HTML report with escaping | verified | test-bundle.R |
+| Export bundle, checksums, import in a clean process | verified | test-bundle.R |
+| Generator helpers (multivariate normal, calibration, Weibull PH, missingness, clustering) | verified | test-generators.R |
+
+## Deferred research extensions
+
+| Capability | Status |
+|---|---|
+| Variance reduction designs (common random numbers beyond pairing, antithetic, control variates) | deferred |
+| Adaptive allocation of replications across scenarios | deferred |
+| Bayesian calibration adapters (simulation-based calibration) | deferred |
+| Living benchmark workflows | deferred |
+| GPU execution | deferred |
+
+## Performance claims
+
+adempR makes no claim about speed in this version. The overhead per task
+(stream lookup, isolation copy, attempt capture) is small compared with
+fitting a model, but it has not been benchmarked on an idle machine;
+benchmark scripts are planned for a later release.
+
+## Known limitations
+
+* Methods that set their own seeds or use a random number generator other
+  than R's break the stream guarantees; replay then reports
+  `matches = FALSE`.
+* Function fingerprints use deparsed code and the values of referenced
+  free variables. Objects reached through other routes (for example a
+  global option, or a file read at run time) must be declared in `depends`.
+* A lock held by a process on another host cannot be checked and must be
+  released with `sim_unlock()`.
+* Export bundles contain R code; their checksums detect corruption, not
+  tampering.

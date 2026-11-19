@@ -49,11 +49,11 @@ REFERENCES <- data.frame(
   text = c(
     "Morris TP, White IR, Crowther MJ (2019). Using simulation studies to evaluate statistical methods. Statistics in Medicine 38(11):2074-2102.",
     "White IR, Pham TM, Quartagno M, Morris TP (2024). How to check a simulation study. International Journal of Epidemiology 53(1):dyad134.",
-    "Williams DR, et al. (2024). Transparent reporting items for simulation studies evaluating statistical methods: foundations for reproducibility and reliability. Methods in Ecology and Evolution 15(11):1926-1939.",
+    "Williams C, Yang Y, Lagisz M, Morrison K, Ricolfi L, Warton DI, Nakagawa S (2024). Transparent reporting items for simulation studies evaluating statistical methods: foundations for reproducibility and reliability. Methods in Ecology and Evolution 15(11):1926-1939.",
     "Siepe BS, Bartos F, Morris TP, Boulesteix AL, Heck DW, Pawel S (2024). Simulation studies for methodological research in psychology: a standardized template for planning, preregistration, and reporting. Psychological Methods.",
     "Pawel S, Kook L, Reeve K (2024). Pitfalls and potentials in simulation studies: questionable research practices in comparative simulation studies allow for spurious claims of superiority of any method. Biometrical Journal 66(1):2200091.",
-    "Pawel S, Bartos F, Siepe BS, Lohmann A (2025). Handling missingness, failures, and non-convergence in simulation studies: a review of current practices and recommendations. The American Statistician.",
-    "Naimi AI, Benkeser D, Rudolph JE (2025). Computing true parameter values in simulation studies using Monte Carlo integration. Epidemiology.",
+    "Pawel S, Bartos F, Siepe BS, Lohmann A (2026). Handling missingness, failures, and non-convergence in simulation studies: a review of current practices and recommendations. The American Statistician 80(1):31-48.",
+    "Naimi AI, Benkeser D, Rudolph JE (2025). Computing true parameter values in simulation studies using Monte Carlo integration. Epidemiology 36(5):690-693.",
     "Howard SR, Ramdas A, McAuliffe J, Sekhon J (2021). Time-uniform, nonparametric, nonasymptotic confidence sequences. The Annals of Statistics 49(2):1055-1080."
   ),
   doi = c("10.1002/sim.8086", "10.1093/ije/dyad134", "10.1111/2041-210X.14415",

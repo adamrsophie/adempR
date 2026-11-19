@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 480 554" role="img" aria-label="adempR">
+<polygon points="240,6 474,141 474,413 240,548 6,413 6,141" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="22" stroke-linejoin="round"/>
+<line x1="240" y1="110" x2="240" y2="444" stroke="#0F3B3A" stroke-width="10" stroke-dasharray="4 14" stroke-linecap="round"/>
+<line x1="110" y1="170" x2="226" y2="170" stroke="#C2622D" stroke-width="22" stroke-linecap="round"/>
+<line x1="150" y1="244" x2="300" y2="244" stroke="#0F3B3A" stroke-width="22" stroke-linecap="round"/>
+<line x1="186" y1="318" x2="336" y2="318" stroke="#0F3B3A" stroke-width="22" stroke-linecap="round"/>
+<line x1="256" y1="392" x2="372" y2="392" stroke="#C2622D" stroke-width="22" stroke-linecap="round"/>
+</svg>

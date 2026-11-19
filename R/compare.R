@@ -15,10 +15,9 @@ COMPARE_NONLINEAR <- c("relative_precision", "empse_ratio", "rmse_ratio")
 #' both methods together; `relative_precision` also reports the analytic
 #' standard error of Morris et al. (2019).
 #'
-#' The comparison population is explicit. With `population =
-#' "common_valid"` (the only option for conditional measures) only
-#' replications where both methods meet the measure's eligibility rule are
-#' used, and the counts of excluded replications are reported. Conditioning
+#' The comparison population is explicit: only replications where both
+#' methods meet the measure's eligibility rule are used (the common valid
+#' population), and the counts of excluded replications are reported. Conditioning
 #' on joint success is not the original data-generating distribution when
 #' failures are informative; read it together with the `usable`
 #' comparison, which uses all generated data sets.
@@ -200,8 +199,11 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
 
 #' @export
 print.adempr_comparison <- function(x, digits = 4, ...) {
-  cat("<adempR paired comparison>\n")
   df <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
+  need <- c("scenario_id", "method", "reference", "measure", "value", "mcse", "lower",
+            "upper", "n_common", "status")
+  if (!all(need %in% names(df))) return(print(df, ...))
+  cat("<adempR paired comparison>\n")
   show <- data.frame(scenario = df$scenario_id, method = df$method,
                      reference = df$reference, measure = df$measure,
                      value = fmt_num(df$value, digits), mcse = fmt_num(df$mcse, 2),

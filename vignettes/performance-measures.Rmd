@@ -1,0 +1,142 @@
+---
+title: "Performance measures and Monte Carlo error"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Performance measures and Monte Carlo error}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+A simulation estimates each performance measure from a finite number of
+replications, so each reported value has Monte Carlo error. adempR reports
+a Monte Carlo standard error (MCSE) for every built in measure, using the
+formulas below. Write $\hat\theta_i$ for the estimate in replication $i$,
+$\theta$ for the truth, $\widehat{SE}_i$ for the model based standard
+error, and $n$ for the number of eligible replications.
+
+```{r}
+sim_measure_info()[c("measure", "eligibility", "direction")]
+```
+
+## Measures based on means
+
+| Measure | Value | MCSE |
+|---|---|---|
+| bias | $\bar{\hat\theta} - \theta$ | $s_{\hat\theta} / \sqrt n$ |
+| relbias | $(\bar{\hat\theta} - \theta) / \theta$ | $s_{\hat\theta} / (\lvert\theta\rvert \sqrt n)$ |
+| mae | $\overline{\lvert\hat\theta - \theta\rvert}$ | $s_{\lvert\hat\theta-\theta\rvert}/\sqrt n$ |
+| mse | $\overline{(\hat\theta - \theta)^2}$ | $s_{(\hat\theta-\theta)^2}/\sqrt n$ |
+| mean_se | $\overline{\widehat{SE}}$ | $s_{\widehat{SE}}/\sqrt n$ |
+| width | $\overline{U_i - L_i}$ | $s_{U-L}/\sqrt n$ |
+
+Relative bias is a ratio, not a percentage. It is undefined (status
+`"undefined"`) when the truth is 0. When the truth varies between data sets
+it is the ratio of sums $\sum(\hat\theta_i - \theta_i) / \sum\theta_i$
+with a delta method MCSE.
+
+## Nonlinear measures
+
+**RMSE** is $\sqrt{\text{MSE}}$ with delta method MCSE
+$\text{MCSE(MSE)} / (2\,\text{RMSE})$.
+
+**Empirical SE** is $s_{\hat\theta}$. Its MCSE uses the variance of the
+sample variance without assuming normality,
+
+$$\widehat{\operatorname{Var}}(s^2) = \frac{1}{n}\left(m_4 - s^4 \frac{n-3}{n-1}\right),\qquad \text{MCSE}(s) = \frac{\sqrt{\widehat{\operatorname{Var}}(s^2)}}{2 s},$$
+
+where $m_4$ is the fourth central sample moment. For normal estimates this
+reduces to the familiar $s / \sqrt{2(n-1)}$. If the estimate of
+$\operatorname{Var}(s^2)$ is not positive, the normal theory value is
+used.
+
+**RMVAR**, the root mean of the model variances
+$\sqrt{\overline{\widehat{SE}^2}}$, is the right comparator for the
+empirical SE, because averaging variances, not standard errors, is what
+makes the two comparable. Its MCSE is the delta method
+$s_{\widehat{SE}^2}/(2\sqrt n\,\text{RMVAR})$.
+
+**Relative error in model SE** is
+$100\,(\text{RMVAR} / \text{EmpSE} - 1)$ with the MCSE of Morris, White
+and Crowther (2019, Table 6),
+
+$$100\,\frac{\text{RMVAR}}{\text{EmpSE}}\sqrt{\frac{\widehat{\operatorname{Var}}(\widehat{SE}^2)}{4 n\,\text{RMVAR}^4} + \frac{1}{2(n-1)}}.$$
+
+The test suite checks that this agrees with `rsimsum`.
+
+## Proportions
+
+Coverage, the two one-sided noncoverages, bias-eliminated coverage,
+rejection and the usable proportion are proportions $\hat p = k / n$. Their
+MCSE is $\sqrt{\hat p (1 - \hat p) / n}$, and the reported interval is the
+exact Clopper-Pearson interval. When $\hat p$ is 0 or 1 the plug in MCSE is
+0, which would claim certainty; the summary therefore marks such cells
+with status `"boundary"` and the exact interval keeps a nonzero width.
+
+Bias-eliminated coverage checks whether
+$\bar{\hat\theta}$ lies in each interval. It separates poor coverage due
+to bias from poor coverage due to wrong width.
+
+## Eligibility and status
+
+Each measure has its own denominator: bias needs a usable estimate and a
+truth; mean SE needs a valid SE; coverage needs a valid interval; rejection
+needs a valid test; the usable proportion and `usable_coverage` use all
+generated data sets. The summary reports `n_eligible` for each cell, and a
+`status`:
+
+* `ok`
+* `no_eligible`: no replication qualified
+* `insufficient`: one replication, so no MCSE
+* `degenerate`: all values equal, so a ratio or SE is undefined
+* `infinite`: an infinite estimate entered the mean
+* `boundary`: a proportion of 0 or 1
+* `undefined`: for example relative bias with zero truth
+* `unavailable`: the truth is unknown
+* `mcse_unavailable`: a custom measure with no known MCSE
+
+## Monte Carlo truth
+
+When the truth is itself estimated, its error does not shrink with more
+replications. The summary adds `truth_se`, `mcse_total` (for bias,
+$\sqrt{\text{MCSE}^2 + SE_\text{truth}^2}$), and a sensitivity range for
+measures that compare each estimate with the truth, obtained by shifting
+the truth by $\pm 2\,SE_\text{truth}$.
+
+## Custom measures
+
+`sim_measure()` defines a measure by a per replication contribution and,
+optionally, an aggregate. If no aggregate is given, the value is the mean
+of the contributions and the MCSE is their standard deviation over
+$\sqrt n$. If an aggregate is given (for example a median), no MCSE is
+claimed unless the aggregate returns one.
+
+```{r}
+median_abs_error <- sim_measure("medae",
+  contribution = function(rows) abs(rows$estimate - rows$truth),
+  aggregate = function(x) list(value = median(x)),
+  requires = "truth", direction = "lower")
+sim_measures("bias", "coverage", median_abs_error)
+```
+
+## Streaming summaries
+
+For very large runs, `sim_accumulator()` keeps means, variances and a
+covariance that can be merged exactly across batches (the pairwise update
+of Chan, Golub and LeVeque), so summaries can be built without holding all
+replications in memory.
+
+```{r}
+x <- rnorm(1000)
+acc <- sim_merge(sim_accumulate(sim_accumulator(), x[1:300]),
+                 sim_accumulate(sim_accumulator(), x[301:1000]))
+unlist(sim_accumulated(acc))
+c(mean(x), var(x))
+```

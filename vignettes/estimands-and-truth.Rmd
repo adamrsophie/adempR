@@ -1,0 +1,140 @@
+---
+title: "Estimands and true values"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Estimands and true values}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+Bias, coverage and MSE are only meaningful when the estimate and the truth
+refer to the same quantity. A common error is to compare a method's
+estimate with a parameter of the data-generating model that the method
+does not target. adempR makes the target explicit: every estimand declares
+its population, conditioning set, effect type and scale, and methods
+declare which estimands they target.
+
+## Conditional and marginal odds ratios
+
+In a logistic model with a prognostic covariate,
+
+$$\operatorname{logit} P(Y = 1 \mid A, X) = \beta_0 + \beta_A A + \beta_X X,$$
+
+$\beta_A$ is the conditional log odds ratio given $X$. Because the odds
+ratio is not collapsible, the marginal log odds ratio for randomized $A$,
+
+$$\operatorname{logit} E\{P(Y = 1 \mid A = 1, X)\} - \operatorname{logit} E\{P(Y = 1 \mid A = 0, X)\},$$
+
+is smaller in absolute value than $\beta_A$, even without confounding. An
+unadjusted logistic regression estimates the marginal quantity; an
+adjusted one estimates $\beta_A$. Judging the unadjusted estimate against
+$\beta_A$ would report a bias that does not exist.
+
+The marginal truth has no closed form. Following Naimi, Benkeser and
+Rudolph (2025), we compute it by Monte Carlo integration over a large
+sample of $X$ and report its own standard error.
+
+```{r}
+scen <- sim_scenarios(n = 500L, b0 = -1, bA = 1, bX = 2)
+
+marginal_truth <- sim_truth_mc(function(scenario, n) {
+  x <- rnorm(n)
+  p1 <- plogis(scenario$b0 + scenario$bA + scenario$bX * x)
+  p0 <- plogis(scenario$b0 + scenario$bX * x)
+  m1 <- mean(p1); m0 <- mean(p0)
+  # delta method SE of logit(m1) - logit(m0)
+  g <- p1 / (m1 * (1 - m1)) - p0 / (m0 * (1 - m0))
+  sim_truth_value(qlogis(m1) - qlogis(m0), se = sd(g) / sqrt(n),
+                  method = "Monte Carlo integration with delta method SE")
+}, n = 2e5)
+
+estimands <- list(
+  sim_estimand("marginal_lor", truth = marginal_truth, effect = "marginal",
+               scale = "log_odds_ratio", population = "trial population",
+               conditioning = "none"),
+  sim_estimand("conditional_lor", effect = "conditional", scale = "log_odds_ratio",
+               population = "trial population", conditioning = "X",
+               truth = sim_truth_exact(function(scenario) scenario$bA)))
+```
+
+Each method lists the estimands it targets and, where useful, declares its
+effect type. `sim_validate()` rejects a method whose declaration does not
+match the estimand it is evaluated against.
+
+```{r}
+methods <- list(
+  unadjusted = sim_method(function(data) {
+    f <- glm(y ~ a, binomial, data = data)
+    sim_estimate("marginal_lor", unname(coef(f)["a"]), se = sqrt(vcov(f)["a", "a"]))
+  }, estimands = "marginal_lor", declares = list(marginal_lor = list(effect = "marginal"))),
+  adjusted = sim_method(function(data) {
+    f <- glm(y ~ a + x, binomial, data = data)
+    sim_estimate("conditional_lor", unname(coef(f)["a"]), se = sqrt(vcov(f)["a", "a"]))
+  }, estimands = "conditional_lor",
+  declares = list(conditional_lor = list(effect = "conditional"))))
+
+study <- sim_study("noncollapsibility",
+  aims = "Show that marginal and conditional log odds ratios differ",
+  scenarios = scen,
+  generate = function(scenario, context) {
+    x <- rnorm(scenario$n); a <- rbinom(scenario$n, 1, 0.5)
+    y <- rbinom(scenario$n, 1, plogis(scenario$b0 + scenario$bA * a + scenario$bX * x))
+    data.frame(y, a, x)
+  },
+  estimands = estimands, methods = methods, measures = c("bias", "empse", "mse"))
+run <- sim_run(study, replications = 200, seed = 11,
+               path = file.path(tempdir(), "noncollapse"))
+sim_truth(run)[c("estimand", "truth", "truth_se", "truth_method")]
+```
+
+The marginal log odds ratio is well below 1. Both methods are close to
+unbiased for their own estimand:
+
+```{r}
+s <- as.data.frame(sim_summarise(run))
+s[s$measure == "bias", c("method", "estimand", "value", "mcse", "mcse_total")]
+```
+
+`mcse_total` adds the Monte Carlo error of the truth to that of the
+estimates. More outer replications reduce `mcse` but not `truth_se`; only a
+larger truth sample (`n` in `sim_truth_mc()`) does. For measures that
+compare each estimate with the truth (for example coverage), the summary
+also reports a sensitivity range obtained by shifting the truth by two of
+its standard errors.
+
+Had we evaluated the unadjusted estimates against $\beta_A = 1$ the bias
+would be
+
+```{r}
+e <- sim_results(run)$estimates
+mean(e$estimate[e$method == "unadjusted"]) - 1
+```
+
+which is entirely an error of the evaluator, not of the method.
+
+## Other kinds of truth
+
+* `sim_truth_exact(fun)`: closed form.
+* `sim_truth_numeric(fun, error)`: deterministic numerical integration,
+  with a stated numerical error.
+* `sim_truth_mc(fun, n)`: Monte Carlo, with a standard error; computed once
+  per scenario from its own random stream and cached in the run directory.
+* `sim_truth_dataset()`: the truth differs between data sets (for example
+  a sample average treatment effect). The generator returns it with
+  `sim_data(data, truth = list(...))`; methods never see it unless they are
+  declared oracles.
+* `sim_truth_unknown()`: no truth. Measures that need one (bias, MSE,
+  coverage) are reported as unavailable; others (empirical SE, mean SE,
+  width, rejection) are still computed.
+
+Only scalar estimands are supported in this version. Vector and functional
+estimands (for example survival curves) can be studied as several scalar
+estimands at chosen time points.

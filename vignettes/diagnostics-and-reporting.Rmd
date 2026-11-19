@@ -1,0 +1,125 @@
+---
+title: "Diagnostics and reporting"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Diagnostics and reporting}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+```{r}
+library(adempR)
+```
+
+White, Pham, Quartagno and Morris (2024) describe how to check a
+simulation study: check the data-generating mechanism, look at the
+estimates before summarizing them, look for outliers and failures, and
+check that the standard errors track the variability. adempR has a tool
+for each step.
+
+```{r}
+study <- sim_study("diagnostics",
+  scenarios = sim_scenarios(n = c(15L, 60L), p = c(0.1, 0.4)),
+  generate = function(scenario, context) rbinom(scenario$n, 1, scenario$p),
+  estimands = list(sim_estimand("prevalence",
+                                sim_truth_exact(function(scenario) scenario$p))),
+  methods = list(
+    wald = function(data) {
+      p <- mean(data); se <- sqrt(p * (1 - p) / length(data))
+      sim_estimate("prevalence", p, se = se, lower = p - 1.96 * se,
+                   upper = p + 1.96 * se, level = 0.95)
+    },
+    logit = function(data) {
+      if (all(data == 0) || all(data == 1)) stop("all outcomes equal")
+      f <- glm(data ~ 1, family = binomial)
+      ci <- plogis(coef(f) + c(-1.96, 1.96) * sqrt(vcov(f)[1, 1]))
+      sim_estimate("prevalence", mean(data), lower = ci[1], upper = ci[2], level = 0.95)
+    }),
+  measures = c("bias", "coverage", "width"))
+```
+
+## Checking the data-generating mechanism
+
+`sim_check_dgp()` generates data sets from each scenario and compares
+summaries with their targets using a Bonferroni corrected z test. A flag
+means the mechanism does not do what the protocol says; no flag means only
+that no discrepancy was detected at this sample size.
+
+```{r}
+sim_check_dgp(study, summaries = function(d) c(prevalence = mean(d)),
+              targets = function(scenario) c(prevalence = scenario$p), n = 300)
+```
+
+## Looking at the run
+
+```{r}
+run <- sim_run(study, replications = 300, seed = 2, path = file.path(tempdir(), "diag"))
+dx <- sim_diagnose(run)
+dx
+```
+
+The diagnosis reports failures by method and scenario with their most
+common messages, generation failures, outlying estimates by a robust z
+score, the association between estimates and their standard errors, any
+storage problems, and every revision and amendment.
+
+## Plots
+
+```{r, fig.alt = "Distribution of estimates by method"}
+sim_plot(run, "estimates", scenario = 1)
+```
+
+The zip plot (Morris et al. 2019) orders intervals by their z statistic
+and shows which miss the truth, and on which side.
+
+```{r, fig.alt = "Zip plot of confidence intervals"}
+sim_plot(run, "zip", scenario = 1)
+```
+
+```{r, fig.alt = "Coverage with Monte Carlo intervals"}
+sim_plot(run, "precision", measure = "coverage")
+```
+
+```{r, fig.alt = "Failures by scenario and method"}
+sim_plot(run, "failures")
+```
+
+Other types are `"est_se"` (estimates against standard errors) and
+`"runtime"`.
+
+## The report
+
+`sim_report()` writes one self-contained HTML file: aims, protocol,
+scenarios (including exclusions), estimands and their truth, methods and
+their code, failure policy, execution details, failures, performance with
+MCSE, comparisons, diagnostics, the revision and amendment history, and
+references. All text from the study is escaped.
+
+```{r}
+f <- file.path(tempdir(), "diag-report.html")
+sim_report(run, f, overwrite = TRUE)
+```
+
+The report describes; it does not interpret. Conclusions are the
+author's.
+
+## Export bundles
+
+`sim_export()` writes a directory that someone else can check and reuse
+with only adempR installed:
+
+```{r}
+dir <- file.path(tempdir(), "diag-bundle")
+unlink(dir, recursive = TRUE)
+sim_export(run, dir)
+list.files(dir, recursive = TRUE)
+```
+
+`sim_import()` verifies the checksums and returns results that work with
+`sim_summarise()`, `sim_compare()` and `sim_report()`. The bundle contains
+the study's R code. The checksums detect corruption, not tampering: import
+bundles only from sources you trust, as you would source a script.

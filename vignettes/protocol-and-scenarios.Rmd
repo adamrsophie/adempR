@@ -1,0 +1,121 @@
+---
+title: "Protocols and scenario designs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Protocols and scenario designs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+Simulation studies are easy to tune after the fact: a scenario that makes a
+favored method look poor can be dropped, a measure can be swapped, a
+failure rule can be changed. Pawel, Kook and Reeve (2024) show that these
+choices can make any method appear superior. adempR therefore records the
+design as data, fingerprints it, and records every later change.
+
+## The protocol
+
+`sim_protocol()` holds the reasoning behind each ADEMP choice. Fields that
+are not given are reported as missing by `sim_completeness()`, which is a
+checklist modeled on the reporting items of Williams et al. (2024) and the
+preregistration template of Siepe et al. (2024).
+
+```{r}
+protocol <- sim_protocol(
+  purpose = "method_comparison",
+  scope = "Mean and median as estimators of a center; symmetric distributions, n from 20 to 200",
+  dgm_rationale = "t distributions span normal to very heavy tails",
+  estimand_rationale = "The center of symmetry is the target for all methods",
+  method_rationale = "Mean and median are the usual default choices",
+  measure_rationale = "Bias, empirical SE and coverage of nominal 95% intervals",
+  replication_rationale = "Coverage MCSE at most 0.005",
+  precision_targets = c(coverage = 0.005))
+```
+
+## Factorial designs
+
+`sim_scenarios()` crosses its arguments. Values can be numbers, strings,
+logicals or lists (for matrices or other objects).
+
+```{r}
+grid <- sim_scenarios(n = c(20L, 200L), df = c(3, 30))
+as.data.frame(grid)
+```
+
+### Constraints
+
+Not every combination is meaningful. A constraint of type `"exclude"`
+removes scenarios deliberately and records why. A constraint of type
+`"invalid"` marks combinations that must never occur, and stops with an
+error if they do.
+
+```{r}
+grid2 <- sim_scenarios(n = c(10L, 100L), p = c(2L, 20L),
+  .constraints = list(sim_constraint(function(s) s$n < 5 * s$p,
+                                     "fewer than 5 observations per predictor")))
+grid2$excluded
+```
+
+### Nested and sampled designs
+
+When one factor only makes sense at some levels of another, bind separate
+grids:
+
+```{r}
+nested <- sim_scenarios_bind(
+  sim_scenarios(design = "parallel", clusters = 20L),
+  sim_scenarios(design = "stepped_wedge", clusters = c(12L, 24L), steps = c(3L, 6L)))
+as.data.frame(nested)
+```
+
+When the design space is too large to cross, sample from it and record the
+sampling distribution:
+
+```{r}
+sampled <- sim_scenarios_sample(
+  function() list(n = sample(20:500, 1), effect = round(runif(1, 0, 1), 2)),
+  n = 6, seed = 1, distribution = "n uniform on 20:500; effect U(0, 1)")
+as.data.frame(sampled)
+```
+
+Weights let summaries average over scenarios, for example to reflect how
+often each setting occurs in practice (`sim_summarise(run, weighted = TRUE)`).
+
+## Validation, freezing and amendments
+
+`sim_validate()` checks that every method targets a declared estimand, that
+methods only ask for scenario fields that exist, that the generator's own
+checks pass in every scenario, and that every truth can be computed.
+
+```{r}
+study <- sim_study("center", protocol = protocol,
+  scenarios = grid,
+  generate = function(scenario, context) rt(scenario$n, scenario$df),
+  estimands = list(sim_estimand("center", sim_truth_exact(function(scenario) 0))),
+  methods = list(mean = function(data) sim_estimate("center", mean(data)),
+                 median = function(data) sim_estimate("center", median(data))),
+  measures = c("bias", "empse"))
+sim_completeness(study)[1:6, ]
+```
+
+Once the protocol is agreed, freeze it. The fingerprint covers the
+generator, scenarios, estimands, truth, methods and evaluation choices.
+Later changes need `sim_amend()` with a reason, and are recorded with the
+fingerprints before and after.
+
+```{r}
+frozen <- sim_freeze(study)
+amended <- sim_amend(frozen, alpha = 0.01, reason = "stricter test level agreed with reviewers")
+amended$amendments[[1]][c("reason", "after_freeze")]
+```
+
+The report produced by `sim_report()` lists every amendment, so readers can
+see which choices were made before and after results were seen.

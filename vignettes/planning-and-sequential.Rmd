@@ -1,0 +1,104 @@
+---
+title: "Planning replications and sequential stopping"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Planning replications and sequential stopping}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+The number of replications should follow from the precision needed for
+the key performance measures, not from habit. adempR supports three
+steps: a calculation before any data are simulated, a pilot study that
+estimates the unknown variances and costs, and, where the protocol allows
+it, sequential stopping with valid intervals.
+
+## Before simulating
+
+For a proportion $p$ with target MCSE $\varepsilon$, $n \ge p(1-p)/\varepsilon^2$.
+
+```{r}
+sim_plan_replications("proportion", p = 0.95, mcse = 0.005)   # coverage near 95%
+sim_plan_replications("proportion", mcse = 0.005)             # worst case p = 0.5
+sim_plan_replications("proportion", p = 0.95, half_width = 0.01)
+```
+
+A target MCSE and a target interval half width are different requests:
+the half width multiplies the MCSE by $z_{1-\alpha/2}$, so the same number
+gives about four times as many replications.
+
+For bias, $n \ge \sigma^2 / \varepsilon^2$ where $\sigma$ is the empirical
+SE of the estimates, which is rarely known in advance.
+
+```{r}
+sim_plan_replications("mean", sd = 0.3, mcse = 0.01)
+```
+
+## Pilot studies
+
+`sim_pilot()` runs a small number of replications in a separate run
+labeled `"pilot"`, then estimates the variance of each measure, the run
+time per task with its standard error, and the storage needed.
+
+```{r}
+study <- sim_study("planning",
+  scenarios = sim_scenarios(n = c(15L, 60L)),
+  generate = function(scenario, context) rexp(scenario$n),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 1))),
+  methods = list(t = function(data) {
+    tt <- t.test(data)
+    sim_estimate("mean", mean(data), se = sd(data) / sqrt(length(data)),
+                 lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95)
+  }),
+  protocol = sim_protocol(precision_targets = c(coverage = 0.005, bias = 0.005)))
+pilot <- sim_pilot(study, replications = 60, seed = 101)
+pilot
+```
+
+For proportions the requirement uses the largest $p(1-p)$ inside the
+pilot's exact interval, so a pilot that happens to see 100% coverage does
+not conclude that a handful of replications is enough. The pilot uses its
+own seed and directory; its results are not part of the production run,
+which keeps the production sample independent of what the pilot showed.
+
+## Sequential stopping
+
+Running until a measure looks precise enough and then reporting an
+ordinary confidence interval gives intervals that cover less often than
+stated, because the stopping rule selects favorable fluctuations.
+`sim_run_sequential()` avoids this for Bernoulli measures:
+
+* the looks (numbers of replications) are fixed in advance;
+* each look uses the committed prefix of replications $1, \ldots, n_k$,
+  never whichever jobs finished first;
+* each of the $C$ monitored cells (scenario by method by measure) gets an
+  exact Clopper-Pearson interval at level $1 - \alpha/(KC)$ at each of the
+  $K$ looks.
+
+By the union bound, with probability at least $1-\alpha$ every interval at
+every look contains its true proportion, whatever the stopping rule. The
+guarantee is conservative. Time-uniform confidence sequences (Howard et
+al. 2021) would be tighter and are planned.
+
+```{r}
+seq_run <- sim_run_sequential(study, looks = c(100, 200, 400, 800), half_width = 0.05,
+                              seed = 7, path = file.path(tempdir(), "seq"))
+seq_run
+```
+
+The test suite checks the simultaneous coverage of this construction by
+simulation, and checks that naive repeated 95% intervals miss more often
+than 5%.
+
+Sequential stopping is refused for continuous measures (bias, MSE),
+because their intervals rely on a normal approximation that does not
+survive optional stopping, and for studies whose truth is estimated by
+Monte Carlo when the monitored measure depends on the truth.

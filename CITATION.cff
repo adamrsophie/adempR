@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use adempR, please cite it as below."
+title: "adempR: Reproducible Statistical Simulation Studies"
+type: software
+authors:
+  - family-names: Sophie
+    given-names: Adam R
+    email: adamrsophie@gmail.com
+version: 0.1.0
+date-released: 2026-11-19
+license: GPL-3.0-only
+repository-code: "https://github.com/adamrsophie/adempR"
+url: "https://adamrsophie.github.io/adempR/"

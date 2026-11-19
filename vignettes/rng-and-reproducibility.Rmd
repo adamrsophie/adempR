@@ -1,0 +1,106 @@
+---
+title: "Random numbers and reproducibility"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Random numbers and reproducibility}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+A simulation result is reproducible when the same study, seed and
+replication number give the same numbers regardless of how the work was
+scheduled. Many simulation scripts fall short of this: they draw from one
+global stream, so adding a scenario, reordering methods, running in
+parallel or resuming after a crash changes every later result.
+
+## The stream registry
+
+adempR uses R's L'Ecuyer-CMRG generator, which provides many independent
+streams, each split into substreams. Every random component of a study has
+its own stream, identified by
+
+* the **stage** (`dgp`, `method` or `truth`),
+* the **scenario key** (computed from the scenario's values), and
+* the **component** (`data`, `method:<name>`, `coupling:<group>` or the
+  estimand id for Monte Carlo truth).
+
+Replication `r` uses substream `r` of its stream. The registry assigning
+stream numbers is stored in the run directory and is append only: new
+components get new streams and existing ones never move.
+
+```{r}
+keys <- data.frame(stage = c("dgp", "method", "method"),
+                   scenario_key = "a1",
+                   component = c("data", "method:mean", "method:median"))
+reg <- rng_registry(keys)
+reg
+reg2 <- rng_registry(rbind(keys, data.frame(stage = "method", scenario_key = "a1",
+                                            component = "method:trimmed")), reg)
+reg2
+```
+
+`rng_task_seed()` returns the seed for one task, which is how replays
+restore exactly the state that a method saw.
+
+## What this guarantees
+
+The test suite checks each of these by comparing estimates bit for bit:
+
+* Results do not depend on the order of scenarios, factors or methods.
+* Results do not depend on the chunk size or on the backend (sequential or
+  `future` with any number of workers).
+* Extending a run from 100 to 200 replications leaves the first 100
+  unchanged, and gives the same values as a single run of 200.
+* Adding a method leaves the other methods' results unchanged, because each
+  method draws from its own stream.
+* A crash and resume gives the same results as an uninterrupted run.
+* The caller's random number generator kind and state are restored after
+  every adempR call, including the case where no seed existed before.
+
+```{r}
+study <- sim_study("streams",
+  scenarios = sim_scenarios(n = c(10L, 20L)),
+  generate = function(scenario, context) rnorm(scenario$n),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(
+    jitter = function(data) sim_estimate("mean", mean(data) + rnorm(1, 0, 0.01)),
+    boot = function(data) sim_estimate("mean", mean(sample(data, replace = TRUE)))))
+a <- sim_run(study, replications = 5, seed = 1, path = file.path(tempdir(), "s1"),
+             chunk_size = 1)
+b <- sim_run(study, replications = 5, seed = 1, path = file.path(tempdir(), "s2"),
+             chunk_size = 5)
+ea <- sim_results(a)$estimates; eb <- sim_results(b)$estimates
+identical(ea$estimate, eb$estimate)
+```
+
+## Methods that share random numbers
+
+Sometimes two methods should see the same random numbers, for example two
+variants of a bootstrap that should use the same resamples. Put them in
+the same `coupling` group:
+
+```{r, eval = FALSE}
+sim_method(boot_percentile, coupling = "bootstrap")
+sim_method(boot_bca, coupling = "bootstrap")
+```
+
+## Rules for generators and methods
+
+* Draw random numbers only through R's generator. Code that seeds itself
+  (`set.seed()` inside a method) or uses another generator (for example a
+  C++ library with its own state) breaks the guarantees above.
+* Do not depend on global state that changes between replications.
+* Parallel code inside a method should use the substreams provided, not
+  new seeds.
+
+Some packages call `set.seed()` internally or keep their own generator.
+Their results are still recorded, but replays and extensions may not be
+identical; `sim_replay()` reports this with `matches = FALSE`.

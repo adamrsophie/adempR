@@ -1,0 +1,103 @@
+---
+title: "adempR and other simulation packages"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{adempR and other simulation packages}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+R has many packages for simulation studies. They make different choices
+about what a study is, how it is run and what it reports. This page
+describes where adempR sits; it is based on reading the source of each
+package (versions current in November 2026), not on benchmarks.
+
+## Frameworks for running studies
+
+**SimDesign** (Chalmers and Adkins) organizes a study into `generate`,
+`analyse` and `summarise` functions over a design data frame. It is
+mature and widely used. It handles errors and warnings per replication,
+can redraw data after failures, saves seeds of failed replications for
+debugging, runs in parallel, and includes `SimSolve()` for finding design
+values that achieve a target (for example a sample size for 80% power).
+Its summaries are user written from helper functions such as `bias()` and
+`ECR()`.
+
+**simChef** (Duncan, Tang, Yu and coauthors) follows the PCS framework and
+the MERITS principles of Elliott et al. (2026). Studies are built from
+data-generating processes, methods, evaluators and visualizers, with
+caching of completed work, parallel execution through `future`, and
+generated documentation websites.
+
+**SimEngine** provides a structured `new_sim()` object with levels, a
+script, `update_sim()` for adding replications or levels, and cluster
+batching.
+
+**simpr** expresses simulations as tidyverse pipelines (`specify()`,
+`define()`, `generate()`, `fit()`, `tidy_fits()`).
+
+**simsalapar** organizes a grid of variables and runs it with error and
+warning capture and several parallel backends.
+
+**batchtools** and **targets** are general tools for running many jobs
+reproducibly on clusters and for caching pipelines; they are often used
+underneath simulation studies.
+
+## Analyzing results
+
+**rsimsum** (Gasparini) computes performance measures and their MCSEs from
+a data frame of estimates, following Morris, White and Crowther (2019),
+with many plots. **simhelpers** (Joshi and Pustejovsky) computes
+performance measures with jackknife MCSEs and offers a template for
+studies. **simMetric** offers a similar set of measures.
+
+## Data generation
+
+**simstudy** defines data through declarative definition tables, with
+support for clustered, longitudinal and survival data. **simsurv**
+generates survival times from user hazards.
+
+## Where adempR differs
+
+adempR aims to treat a simulation study as a scientific experiment whose
+record must survive interruption, change and scrutiny. The differences
+that follow from that aim are:
+
+* **Estimands are first class.** Each estimand declares its population,
+  conditioning, effect type and scale, and methods declare what they
+  target; mismatches are validation errors. Truth can be exact,
+  numerical, Monte Carlo (with its standard error carried into the
+  summary) or data set specific.
+* **Each measure has its own denominator.** Estimate, SE, interval and
+  test validity are classified separately, failures are reported by
+  default, and composite measures over all generated data sets are
+  available.
+* **Random numbers are tied to content, not position.** Streams are keyed
+  by stage, scenario content and component, so results do not change when
+  scenarios or methods are reordered, chunks are resized, the backend
+  changes, or replications and methods are added.
+* **Runs are recoverable and auditable.** Atomic commits, checksums,
+  quarantine, duplicate and conflict detection, selective invalidation
+  with fingerprints, revision records, protocol freezing and amendments,
+  and replay of single replications are built in.
+* **Precision is planned and stopping is valid.** Pilots project
+  replications and cost; sequential stopping uses error spending over
+  looks and cells.
+
+Where other packages are stronger: SimDesign's `SimSolve()` and its long
+track record; simChef's documentation generation and visualizers;
+rsimsum's range of plots and its separation of analysis from execution;
+simstudy's declarative data definitions; targets and batchtools for large
+cluster workflows. Two adempR measures were added after reading these
+packages: bias-eliminated coverage (as in rsimsum) and the analytic MCSE of
+relative precision (Morris et al. 2019, as in rsimsum).
+
+## Using adempR with other packages
+
+* Results are plain data frames (`sim_results(run)$estimates`), so they can
+  be passed to `rsimsum::simsum()` or `simhelpers` functions.
+* Data generators from `simstudy` or `simsurv` can be called inside an
+  adempR generator; they use R's random number generator and therefore
+  adempR's streams.
+* adempR's `future` backend works with any `future` plan, including
+  `future.batchtools` for clusters.

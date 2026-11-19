@@ -1,0 +1,194 @@
+---
+title: "Worked examples"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Worked examples}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+has_survival <- requireNamespace("survival", quietly = TRUE)
+has_metafor <- requireNamespace("metafor", quietly = TRUE)
+```
+
+```{r}
+library(adempR)
+```
+
+These examples show common study types. They use few replications so the
+vignette builds quickly; a real study would plan the number with
+`sim_plan_replications()` or `sim_pilot()`.
+
+## Clustered data: ignoring the clustering
+
+Patients are grouped in centers, and the treatment is assigned by center.
+Ordinary least squares gives an unbiased treatment effect but standard
+errors that are too small. A cluster-robust (sandwich) standard error, or
+analysis of the cluster means, fixes this.
+
+```{r}
+clustered <- sim_study("clustered",
+  scenarios = sim_scenarios(clusters = c(10L, 40L), icc = c(0.05, 0.2), m = 20L),
+  generate = function(scenario, context) {
+    d <- sim_rclustered(scenario$clusters, scenario$m, icc = scenario$icc)
+    d$a <- as.integer(d$cluster %% 2 == 0)
+    d$y <- d$y + 0.3 * d$a
+    d
+  },
+  estimands = list(sim_estimand("effect", effect = "marginal",
+                                truth = sim_truth_exact(function(scenario) 0.3))),
+  methods = list(
+    ols = function(data) {
+      f <- lm(y ~ a, data)
+      b <- unname(coef(f)["a"]); se <- sqrt(vcov(f)["a", "a"])
+      sim_estimate("effect", b, se = se, lower = b - 1.96 * se, upper = b + 1.96 * se,
+                   level = 0.95)
+    },
+    cluster_means = function(data) {
+      cm <- aggregate(y ~ cluster + a, data, mean)
+      f <- lm(y ~ a, cm)
+      b <- unname(coef(f)["a"]); se <- sqrt(vcov(f)["a", "a"])
+      q <- qt(0.975, df.residual(f))
+      sim_estimate("effect", b, se = se, lower = b - q * se, upper = b + q * se,
+                   level = 0.95)
+    }),
+  measures = c("bias", "empse", "rmvar", "se_ratio", "coverage"))
+run <- sim_run(clustered, replications = 150, seed = 1,
+               path = file.path(tempdir(), "clustered"))
+s <- as.data.frame(sim_summarise(run))
+s[s$measure %in% c("se_ratio", "coverage"),
+  c("scenario_id", "method", "measure", "value", "mcse")]
+```
+
+`sim_rclustered()` returns a cluster identifier, an outcome `y` with total
+variance 1 and intraclass correlation `icc`, and the cluster effect `u`.
+
+## Survival: a risk at a fixed horizon
+
+The estimand is the risk of an event by year 2 in the treated arm, a
+scalar summary of the survival curve. Data come from a proportional
+hazards Weibull model with exponential censoring; the truth follows from the
+model in closed form.
+
+```{r, eval = has_survival}
+surv_study <- sim_study("survival_horizon",
+  scenarios = sim_scenarios(n = c(100L, 400L), censoring = c(0.1, 0.3)),
+  generate = function(scenario, context) {
+    a <- rbinom(scenario$n, 1, 0.5)
+    d <- sim_rweibull_ph(lp = -0.5 * a, lambda = 0.2, shape = 1.3,
+                         censoring_rate = scenario$censoring, horizon = 5)
+    d$a <- a
+    d
+  },
+  estimands = list(sim_estimand("risk2", effect = "marginal", scale = "risk",
+    horizon = 2, population = "treated arm",
+    truth = sim_truth_exact(function(scenario) 1 - exp(-0.2 * 2^1.3 * exp(-0.5))))),
+  methods = list(
+    km = sim_method(function(data) {
+      f <- survival::survfit(survival::Surv(time, status) ~ 1, data = data[data$a == 1, ])
+      s <- summary(f, times = 2, extend = TRUE)
+      sim_estimate("risk2", 1 - s$surv, se = s$std.err,
+                   lower = 1 - s$upper, upper = 1 - s$lower, level = 0.95)
+    }, packages = "survival"),
+    naive = function(data) {
+      # treats censored before 2 as event free: biased downwards
+      d <- data[data$a == 1, ]
+      p <- mean(d$status == 1 & d$time <= 2)
+      se <- sqrt(p * (1 - p) / nrow(d))
+      sim_estimate("risk2", p, se = se, lower = p - 1.96 * se, upper = p + 1.96 * se,
+                   level = 0.95)
+    }),
+  measures = c("bias", "coverage"))
+srun <- sim_run(surv_study, replications = 150, seed = 3,
+                path = file.path(tempdir(), "survival"))
+ss <- as.data.frame(sim_summarise(srun))
+ss[ss$measure %in% c("bias", "coverage"),
+   c("scenario_id", "method", "measure", "value", "mcse")]
+```
+
+The naive proportion ignores censoring and its bias grows with the
+censoring rate; the Kaplan-Meier estimate is close to unbiased.
+
+## Missing data and information boundaries
+
+Outcomes are missing at random given a covariate. Complete case analysis
+of the outcome mean is biased; inverse probability weighting with the
+true missingness model is not. The study's generator knows the
+missingness probabilities; the method must not. Methods only see the
+scenario fields they declare, and data set level information from
+`sim_data(meta = ...)` reaches only methods declared as oracles.
+
+```{r}
+missing_study <- sim_study("missing",
+  scenarios = sim_scenarios(n = 300L, strength = c(0.5, 1.5)),
+  generate = function(scenario, context) {
+    x <- rnorm(scenario$n)
+    y <- 1 + x + rnorm(scenario$n)
+    d <- sim_add_missing(data.frame(x, y), "y", prop = 0.3, mechanism = "MAR",
+                         predictors = "x", weights = scenario$strength)
+    sim_data(d, meta = list(full_mean = mean(y)))
+  },
+  estimands = list(sim_estimand("mean_y", population = "all units",
+                                truth = sim_truth_exact(function(scenario) 1))),
+  methods = list(
+    complete_case = function(data) {
+      d <- data$y[!is.na(data$y)]
+      sim_estimate("mean_y", mean(d), se = sd(d) / sqrt(length(d)))
+    },
+    ipw = function(data) {
+      r <- !is.na(data$y)
+      ps <- fitted(glm(r ~ x, binomial, data = data))
+      sim_estimate("mean_y", sum(data$y[r] / ps[r]) / sum(1 / ps[r]))
+    },
+    regression = function(data) {
+      f <- lm(y ~ x, data)
+      sim_estimate("mean_y", mean(predict(f, newdata = data)))
+    }),
+  measures = c("bias", "empse", "rmse"))
+mrun <- sim_run(missing_study, replications = 150, seed = 4,
+                path = file.path(tempdir(), "missing"))
+ms <- as.data.frame(sim_summarise(mrun))
+ms[ms$measure == "bias", c("scenario_id", "method", "value", "mcse")]
+```
+
+## Meta-analysis: heterogeneity estimators
+
+The `metafor` package fits random effects meta-analyses with several
+estimators of the between-study variance. With few studies, the
+DerSimonian-Laird interval is known to undercover; the Hartung-Knapp
+adjustment is designed to fix that. With only 150 replications, coverage
+differences of a few percentage points are within Monte Carlo error, as
+the MCSE column shows; a real comparison would need several thousand.
+
+```{r, eval = has_metafor}
+meta_study <- sim_study("meta",
+  scenarios = sim_scenarios(k = c(5L, 20L), tau = c(0.1, 0.4)),
+  generate = function(scenario, context) {
+    vi <- runif(scenario$k, 0.02, 0.2)
+    yi <- rnorm(scenario$k, 0.2 + rnorm(scenario$k, 0, scenario$tau), sqrt(vi))
+    data.frame(yi, vi)
+  },
+  estimands = list(sim_estimand("mu", effect = "marginal",
+                                truth = sim_truth_exact(function(scenario) 0.2))),
+  methods = list(
+    dl = sim_method(function(data) {
+      f <- metafor::rma(yi, vi, data = data, method = "DL")
+      sim_estimate("mu", f$b[1], se = f$se, lower = f$ci.lb, upper = f$ci.ub, level = 0.95)
+    }, packages = "metafor"),
+    reml_hk = sim_method(function(data) {
+      f <- metafor::rma(yi, vi, data = data, method = "REML", test = "knha")
+      sim_estimate("mu", f$b[1], se = f$se, lower = f$ci.lb, upper = f$ci.ub,
+                   level = 0.95)
+    }, packages = "metafor")),
+  measures = c("bias", "coverage", "width"))
+mrun2 <- sim_run(meta_study, replications = 150, seed = 5,
+                 path = file.path(tempdir(), "meta"))
+m2 <- as.data.frame(sim_summarise(mrun2))
+m2[m2$measure == "coverage", c("scenario_id", "method", "value", "mcse")]
+```
+
+REML can fail to converge with few studies; such failures are recorded
+with their messages and appear in the failure table rather than
+disappearing from the results.

@@ -18,7 +18,7 @@ Description: A framework for designing, validating, executing, analyzing,
     information. Every replication keeps structured records of generation,
     method execution, extraction and output validity, so failures and
     metric-specific denominators are reported rather than hidden, following
-    Pawel, Bartos, Siepe and Lohmann (2025)
+    Pawel, Bartos, Siepe and Lohmann (2026)
     <doi:10.1080/00031305.2025.2540002>. Random number streams use a frozen,
     append-only registry of L'Ecuyer-CMRG streams keyed by scientific
     identity, so results do not depend on worker counts, chunking or task

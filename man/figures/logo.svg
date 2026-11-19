@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="554" viewBox="0 0 480 554" role="img" aria-label="adempR">
+<polygon points="240,6 474,141 474,413 240,548 6,413 6,141" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="10" stroke-linejoin="round"/>
+<line x1="240" y1="122" x2="240" y2="352" stroke="#0F3B3A" stroke-width="4" stroke-dasharray="2 7" stroke-linecap="round"/>
+<line x1="156" y1="148" x2="236" y2="148" stroke="#C2622D" stroke-width="6" stroke-linecap="round"/>
+<circle cx="196" cy="148" r="7.5" fill="#F6F3EA" stroke="#C2622D" stroke-width="4.5"/>
+<line x1="166" y1="172" x2="258" y2="172" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="212" cy="172" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="182" y1="196" x2="266" y2="196" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="224" cy="196" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="185" y1="220" x2="281" y2="220" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="233" cy="220" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="197" y1="244" x2="285" y2="244" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="241" cy="244" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="204" y1="268" x2="296" y2="268" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="250" cy="268" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="216" y1="292" x2="300" y2="292" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="258" cy="292" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="226" y1="316" x2="314" y2="316" stroke="#0F3B3A" stroke-width="6" stroke-linecap="round"/>
+<circle cx="270" cy="316" r="7.5" fill="#F6F3EA" stroke="#0F3B3A" stroke-width="4.5"/>
+<line x1="248" y1="340" x2="328" y2="340" stroke="#C2622D" stroke-width="6" stroke-linecap="round"/>
+<circle cx="288" cy="340" r="7.5" fill="#F6F3EA" stroke="#C2622D" stroke-width="4.5"/>
+<text x="240" y="446" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="74" font-weight="700" fill="#0F3B3A" letter-spacing="0.5">ademp<tspan fill="#C2622D">R</tspan></text>
+</svg>

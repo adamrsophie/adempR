@@ -1,0 +1,112 @@
+---
+title: "Comparing methods"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Comparing methods}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 4.5)
+```
+
+```{r}
+library(adempR)
+```
+
+Every method is applied to the same simulated data sets. This pairing is
+the main source of precision when methods are compared: two methods that
+both have a coverage MCSE of 0.007 can have a coverage difference with an
+MCSE of 0.002, because their errors are correlated. Comparing two
+separately estimated values with their separate MCSEs throws that
+information away.
+
+## Mean versus median under heavy tails
+
+```{r}
+study <- sim_study("center",
+  scenarios = sim_scenarios(n = c(20L, 80L), df = c(3, 30)),
+  generate = function(scenario, context) rt(scenario$n, scenario$df),
+  estimands = list(sim_estimand("center", sim_truth_exact(function(scenario) 0))),
+  methods = list(
+    mean = function(data) {
+      tt <- t.test(data)
+      sim_estimate("center", mean(data), se = sd(data) / sqrt(length(data)),
+                   lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95)
+    },
+    median = function(data) {
+      w <- suppressWarnings(wilcox.test(data, conf.int = TRUE))
+      sim_estimate("center", median(data), lower = w$conf.int[1],
+                   upper = w$conf.int[2], level = 0.95)
+    }),
+  measures = c("bias", "empse", "rmse", "coverage", "width"))
+run <- sim_run(study, replications = 300, seed = 8, path = file.path(tempdir(), "center"))
+```
+
+## Paired differences
+
+For a measure that is a mean of per replication contributions (bias, MAE,
+MSE, coverage, width, rejection, usable), the difference between methods
+is the mean of the per replication differences, and its MCSE is their
+standard deviation over $\sqrt n$.
+
+```{r}
+cmp <- sim_compare(run, c("mean", "median"),
+                   measures = c("mse", "coverage", "width", "relative_precision"),
+                   bootstrap = 300)
+cmp[c("scenario_id", "measure", "value", "mcse", "lower", "upper", "correlation", "n_common")]
+```
+
+Differences are the second method minus the first (the reference). The
+`correlation` column shows how strongly the methods' contributions are
+paired.
+
+## Relative precision
+
+Relative precision compares empirical variances:
+$100\,(\operatorname{Var}(\hat\theta_A) / \operatorname{Var}(\hat\theta_B) - 1)$,
+with the MCSE of Morris, White and Crowther (2019),
+$200\,\frac{\operatorname{Var}_A}{\operatorname{Var}_B}\sqrt{\frac{1-\rho^2}{n-1}}$,
+where $A$ is the reference method, $B$ the compared method, and $\rho$ the
+correlation between their estimates. Positive values mean the compared
+method is more precise than the reference. The
+interval comes from a paired bootstrap over replications, which resamples
+both methods together. `empse_ratio` and `rmse_ratio` use the same
+bootstrap.
+
+With $t_3$ data the median is more precise than the mean; with $t_{30}$
+data the mean wins.
+
+## Equivalence margins
+
+A difference can be statistically clear and scientifically irrelevant.
+Give a margin to flag comparisons whose whole interval lies inside it:
+
+```{r}
+eq <- sim_compare(run, c("mean", "median"), measures = "coverage", margin = 0.02)
+eq[c("scenario_id", "value", "lower", "upper", "within_margin")]
+```
+
+## The comparison population
+
+When methods fail on different data sets, a conditional measure such as
+coverage is computed on different subsets for each method. `sim_compare()`
+always uses the replications where both methods are eligible, and reports
+`n_common`. Read conditional comparisons together with the `usable`
+comparison, which uses all generated data sets. See
+`vignette("failures-and-denominators")`.
+
+## No single winner
+
+Methods trade bias against variance, coverage against width, and accuracy
+against failures and run time. `sim_pareto()` marks, in each scenario, the
+methods that are not dominated on the chosen criteria. It does not rank or
+aggregate across scenarios, because there is rarely a defensible way to
+weight them.
+
+```{r}
+pv <- sim_pareto(sim_summarise(run, c("rmse", "width", "usable")),
+                 c(rmse = "min", width = "min", usable = "max"))
+pv
+```

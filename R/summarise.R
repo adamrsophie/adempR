@@ -314,8 +314,12 @@ runtime_table <- function(res) {
 
 #' @export
 print.adempr_summary <- function(x, digits = 4, ...) {
-  cat(sprintf("<adempR performance summary of `%s`>\n", attr(x, "study")))
   df <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
+  need <- c("scenario_id", "method", "estimand", "label", "value", "mcse", "n_eligible",
+            "n_generated", "status")
+  # a column subset is no longer a full summary: print it as a data frame
+  if (!all(need %in% names(df))) return(print(df, ...))
+  cat(sprintf("<adempR performance summary of `%s`>\n", attr(x, "study")))
   show <- data.frame(scenario = df$scenario_id, method = df$method, estimand = df$estimand,
                      measure = df$label, value = fmt_num(df$value, digits),
                      mcse = fmt_num(df$mcse, 2), n = df$n_eligible,

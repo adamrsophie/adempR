@@ -1,0 +1,112 @@
+url: https://adamrsophie.github.io/adempR/
+
+template:
+  bootstrap: 5
+  light-switch: true
+  math-rendering: katex
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, lightswitch, github]
+
+home:
+  sidebar:
+    structure: [links, license, citation, authors, dev]
+
+articles:
+- title: Getting started
+  navbar: Getting started
+  contents:
+  - adempR
+  - protocol-and-scenarios
+  - estimands-and-truth
+- title: Running studies
+  navbar: Running studies
+  contents:
+  - failures-and-denominators
+  - rng-and-reproducibility
+  - execution-and-recovery
+- title: Analysis
+  navbar: Analysis
+  contents:
+  - performance-measures
+  - comparisons
+  - planning-and-sequential
+  - diagnostics-and-reporting
+- title: Examples and context
+  navbar: Examples and context
+  contents:
+  - examples
+  - ecosystem
+  - capabilities
+
+reference:
+- title: Package
+  contents:
+  - adempR-package
+- title: Design and scenarios
+  contents:
+  - sim_scenarios
+  - sim_constraint
+  - sim_protocol
+  - sim_retention
+- title: Estimands and truth
+  contents:
+  - sim_estimand
+  - sim_truth_exact
+  - sim_truth_value
+- title: Data generation and methods
+  contents:
+  - sim_generator
+  - sim_data
+  - sim_method
+  - sim_estimate
+  - sim_failure_policy
+- title: Study specification
+  contents:
+  - sim_study
+  - sim_validate
+  - sim_completeness
+  - sim_freeze
+  - sim_fingerprint
+- title: Execution and recovery
+  contents:
+  - sim_run
+  - sim_open
+  - sim_unlock
+  - sim_replay
+  - sim_capabilities
+  - rng_registry
+  - rng_task_seed
+- title: Results and performance
+  contents:
+  - sim_results
+  - sim_truth
+  - sim_measures
+  - sim_measure
+  - sim_summarise
+  - sim_compare
+  - sim_pareto
+  - sim_accumulator
+- title: Planning and stopping
+  contents:
+  - sim_plan_replications
+  - sim_pilot
+  - sim_run_sequential
+- title: Diagnostics and reporting
+  contents:
+  - sim_diagnose
+  - sim_check_dgp
+  - sim_plot
+  - sim_report
+  - sim_export
+- title: Generator helpers
+  contents:
+  - sim_rmvnorm
+  - sim_check_matrix
+  - sim_calibrate_intercept
+  - sim_rweibull_ph
+  - sim_add_missing
+  - sim_rclustered
+  - sim_contaminate

@@ -1,0 +1,145 @@
+---
+title: "Failures and denominators"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Failures and denominators}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+Methods fail. A model does not converge, an optimizer stops on a boundary,
+a variance is negative, an interval cannot be computed. Pawel, Bartoš,
+Siepe and Lohmann (2026) review how simulation studies handle these cases
+and find that most say nothing, and that the most common choice (dropping
+failed replications silently) can change conclusions. adempR keeps every
+attempt, classifies it, and makes each performance measure state its own
+denominator.
+
+## What is stored
+
+For every replication and method adempR stores the attempt (status, stage
+of failure, message, warnings, time) and the raw estimate row. Validity is
+decided at evaluation, under the study's failure policy:
+
+* the **estimate** is usable or not (valid, infinite, missing,
+  nonconverged, boundary, error, timeout, extraction error, incompatible);
+* the **standard error** is valid or not;
+* the **interval** is valid or not (finite or one-sided, lower at most
+  upper);
+* the **test** is valid or not.
+
+Because classification happens at evaluation, changing the failure policy
+does not require refitting.
+
+## Logistic regression with separation
+
+With a rare outcome and a small sample, a binary covariate can perfectly
+predict the outcome. Maximum likelihood then diverges. Firth's penalized
+likelihood gives finite estimates.
+
+```{r}
+generate <- function(scenario, context) {
+  x <- rbinom(scenario$n, 1, 0.5)
+  y <- rbinom(scenario$n, 1, plogis(-2.5 + scenario$beta * x))
+  data.frame(x, y)
+}
+ml <- function(data) {
+  f <- suppressWarnings(glm(y ~ x, binomial, data = data))
+  b <- unname(coef(f)["x"])
+  se <- sqrt(vcov(f)["x", "x"])
+  # separation shows as a huge coefficient and SE
+  sim_estimate("log_or", b, se = se, lower = b - 1.96 * se, upper = b + 1.96 * se,
+               level = 0.95, converged = f$converged && abs(b) < 15)
+}
+firth <- function(data) {
+  # Firth by data augmentation: add half an observation to each cell
+  aug <- rbind(data, data.frame(x = c(0, 0, 1, 1), y = c(0, 1, 0, 1)))
+  w <- c(rep(1, nrow(data)), rep(0.5, 4))
+  f <- suppressWarnings(glm(y ~ x, binomial, data = aug, weights = w))
+  b <- unname(coef(f)["x"])
+  se <- sqrt(vcov(f)["x", "x"])
+  sim_estimate("log_or", b, se = se, lower = b - 1.96 * se, upper = b + 1.96 * se,
+               level = 0.95)
+}
+study <- sim_study("separation",
+  scenarios = sim_scenarios(n = c(30L, 100L), beta = 1),
+  generate = generate,
+  estimands = list(sim_estimand("log_or", effect = "conditional",
+                                truth = sim_truth_exact(function(scenario) scenario$beta))),
+  methods = list(ml = ml, firth = firth),
+  measures = c("bias", "coverage", "usable_coverage"))
+run <- sim_run(study, replications = 300, seed = 3, path = file.path(tempdir(), "separation"))
+```
+
+(The weighted augmentation above is a simple approximation used to keep
+the example dependency free; the `logistf` package implements Firth's
+method exactly.)
+
+```{r}
+s <- as.data.frame(sim_summarise(run))
+s[s$measure %in% c("usable", "bias", "coverage", "usable_coverage"),
+  c("scenario_id", "method", "measure", "value", "mcse", "n_eligible", "n_generated")]
+```
+
+Read the table measure by measure:
+
+* `usable` is the proportion of generated data sets that gave a usable
+  estimate. Its denominator is `n_generated`.
+* `bias` and `coverage` are **conditional** on a usable result. Their
+  denominator is `n_eligible`. For maximum likelihood with `n = 30` this
+  excludes exactly the data sets where the method broke, which are not a
+  random subset.
+* `usable_coverage` counts a data set as a success only if the method gave
+  a usable interval that contains the truth. Its denominator is all
+  generated data sets, so failures count against the method.
+
+The failure table is printed with every summary and is also available
+directly:
+
+```{r}
+attr(sim_summarise(run), "failures")[c("scenario_id", "method", "generated", "usable", "statuses")]
+```
+
+## Comparing on a common population
+
+Comparing a conditional measure between methods that fail on different
+data sets compares different populations. `sim_compare()` restricts to
+replications where both methods are usable and reports how many there
+were.
+
+```{r}
+cmp <- sim_compare(run, c("ml", "firth"), measures = c("bias", "coverage", "usable"))
+cmp[c("scenario_id", "measure", "value", "mcse", "n_common")]
+```
+
+## Changing the policy
+
+The default policy treats nonconverged estimates as unusable, and keeps
+(but records) estimates that came with warnings, on a boundary, or
+infinite. A stricter or looser policy
+can be applied without refitting:
+
+```{r}
+lenient <- sim_amend(study, failure = sim_failure_policy(nonconverged = "valid"),
+                     reason = "sensitivity analysis: keep nonconverged fits")
+run2 <- sim_run(lenient, replications = 300, seed = 3, path = run$path)
+s2 <- as.data.frame(sim_summarise(run2))
+s2[s2$measure == "bias" & s2$method == "ml", c("scenario_id", "value", "n_eligible")]
+```
+
+The amendment is recorded in the run's revision history and in the report.
+
+## Generation failures
+
+If the generator itself fails, the data set is recorded as a generation
+failure and never redrawn: redrawing until success would change the
+data-generating mechanism. Generation failures are reported in
+`n_generation_failed`.

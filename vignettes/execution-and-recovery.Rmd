@@ -1,0 +1,129 @@
+---
+title: "Execution, recovery and replay"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Execution, recovery and replay}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+Long simulations are interrupted: laptops sleep, cluster jobs hit their
+time limit, a method hangs. adempR records progress so that no work is
+lost and none is counted twice.
+
+## The run directory
+
+```{r}
+study <- sim_study("recovery",
+  scenarios = sim_scenarios(n = c(20L, 50L)),
+  generate = function(scenario, context) rexp(scenario$n),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 1))),
+  methods = list(mean = function(data) sim_estimate("mean", mean(data)),
+                 median_scaled = function(data) sim_estimate("mean", median(data) / log(2))),
+  retention = sim_retention(data = TRUE))
+path <- file.path(tempdir(), "recovery-run")
+run <- sim_run(study, replications = 40, seed = 5, path = path, chunk_size = 10)
+list.files(path)
+```
+
+* `manifest.rds` and `manifest.json` record the study fingerprints, the
+  seed, the stream registry, the environment (R and package versions; no
+  host or user names) and the revision history.
+* `batches/` holds committed chunks. Each is written to a temporary file,
+  a checksum sidecar is written, and both are renamed into place; the
+  rename of the sidecar is the commit point.
+* `artifacts/` holds retained data sets and fits.
+* `quarantine/` receives corrupt or orphaned files.
+* `LOCK/` exists while a coordinator is running.
+
+## Interrupting and resuming
+
+Call `sim_run()` again with the same study and seed. Committed tasks are
+skipped; only missing ones run. `sim_resume(path)` does the same from the
+manifest alone.
+
+```{r}
+run <- sim_run(study, replications = 60, seed = 5, path = path, chunk_size = 10)
+run
+```
+
+The tests kill R with `SIGKILL` at each stage of a commit (after the data
+file is written, before the sidecar, after the commit) and check that the
+resumed run equals an uninterrupted one. If a run died holding the lock,
+the next run on the same host detects that the process is gone and takes
+over the lock. A lock held on another host must be released with
+`sim_unlock()` after checking that no process is running.
+
+## Corruption and duplicates
+
+A batch whose checksum does not match is reported as corrupt and ignored
+when reading. The next `sim_run()` moves it to `quarantine/` and reruns its
+tasks. If the same task is committed twice (for example by two workers
+after a network partition), identical copies are deduplicated; copies
+whose scientific columns differ stop with a conflict error, because one of
+them must be wrong. Timing columns are not compared.
+
+## Changing the study
+
+The run directory records fingerprints of each part of the study, and
+`sim_run()` compares them with the study it is given:
+
+* A different data-generating mechanism or scenario set is an error: use a
+  new directory.
+* A changed method requires `update = TRUE`. Only that method is refit;
+  others keep their results.
+* A changed truth, estimand metadata, measure set or failure policy is
+  applied at evaluation with no refitting.
+
+Fingerprints are built from the deparsed code of each function and the
+values of the free variables it uses (and from `depends`, for anything the
+code reaches indirectly), never from serialized bytecode.
+
+Every change is recorded in the manifest:
+
+```{r}
+study2 <- sim_amend(study, measures = sim_measures("bias", "mse", "mae"),
+                    reason = "add MAE")
+run <- sim_run(study2, replications = 60, seed = 5, path = path)
+vapply(run$manifest$revisions, function(r) paste(r$changes, collapse = "; "), "")
+```
+
+## Replay
+
+`sim_replay()` recomputes one replication from the recorded streams and
+compares the result with the stored one. With retained data it also
+checks that the regenerated data set is identical.
+
+```{r}
+rp <- sim_replay(run, scenario = 2, replication = 33)
+rp$matches
+rp$data_matches
+head(rp$data)
+```
+
+This is the fastest way to debug a failure: find the replication in
+`sim_results(run)$attempts`, replay it, and step through the method with
+the exact data it saw.
+
+## Parallel execution
+
+With `backend = "future"` chunks are evaluated by `future.apply` workers
+and committed by the coordinator. Results are identical to the sequential
+backend.
+
+```{r, eval = FALSE}
+future::plan(future::multisession, workers = 4)
+run <- sim_run(study, replications = 1000, seed = 5, path = path, backend = "future")
+```
+
+or pass `workers = 4` to use a temporary multisession plan. Workers load
+the installed adempR and the packages listed in the study's `packages`
+fields.
