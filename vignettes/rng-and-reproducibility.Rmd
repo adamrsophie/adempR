@@ -117,10 +117,13 @@ sim_method(boot_bca, coupling = "bootstrap")
   (`set.seed()` inside a method) or uses another generator (for example a
   C++ library with its own state) breaks the guarantees above.
 * Do not depend on global state that changes between replications.
-* A method runs inside one stream. Parallel code inside a method gets no
-  substreams of its own: derive worker states from the current state (for
-  example with `parallel::nextRNGStream(.Random.seed)`) instead of new
-  seeds, or run it sequentially.
+* A method runs inside one stream. Parallel or resampling code inside a
+  method takes its worker states from `context$inner_seeds(k)` (for example
+  `future.apply::future_lapply(..., future.seed = context$inner_seeds(k))`).
+  Every call returns the same states, so name each stage of inner work:
+  `context$inner_seeds(k, stage = "bootstrap")`. Do not jump streams with
+  `parallel::nextRNGStream(.Random.seed)`: from a task state that lands on
+  the next registered stream, which another scenario or method uses.
 
 Some packages call `set.seed()` internally or keep their own generator.
 Their results are still recorded, but replays and extensions may not be

@@ -128,11 +128,16 @@ explicit policy for sharing, for example, bootstrap samples or folds.
 Parallel or resampling work inside a method should not set seeds. Call
 \code{context$inner_seeds(k)} for \code{k} independent L'Ecuyer-CMRG states (for
 example \code{future.apply::future_lapply(..., future.seed = context$inner_seeds(k))},
-or assign one to \code{.Random.seed} per worker). They are derived from the
-method's task state, never coincide with the study's registered streams,
-and are the same at every replay, so any inner resample can be
-reproduced; storing the resample indices or frequency weights in the fit
-(with \code{sim_retention(fits = TRUE)}) keeps them inspectable.
+or assign one to \code{.Random.seed} per worker). The states are a fixed
+sequence: every call with the same \code{stage} returns the same states, and
+\code{inner_seeds(k)} is the first \code{k} of \code{inner_seeds(k + 1)}. A method with
+several stages of inner work names them, \code{context$inner_seeds(k, stage = "bootstrap")} and \code{context$inner_seeds(k, stage = "cv")}, so the
+stages draw from different streams. The states are derived from the
+method's task state through a hash into another region of the
+L'Ecuyer-CMRG cycle, so overlap with the study's registered streams is
+improbable but not excluded by construction; they are the same at every
+replay, so any inner resample can be reproduced. Storing the resample
+indices or frequency weights in the fit (with \code{sim_retention(fits = TRUE)}) keeps them inspectable.
 }
 \examples{
 sim_method(function(data) {

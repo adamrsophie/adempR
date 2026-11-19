@@ -239,3 +239,20 @@ test_that("a traced namespace of a declared package triggers a warning", {
   on.exit(suppressMessages(untrace("file_ext", where = asNamespace("tools"))), add = TRUE)
   expect_warning(sim_run(st, replications = 2, seed = 1, path = run_path()), "traced functions")
 })
+
+test_that("inner seeds form a fixed sequence per named stage, and registry indices are finite", {
+  f <- adempR:::inner_seed_fun(adempR:::rng_base_seed(1))
+  expect_identical(f(2), f(3)[1:2])
+  expect_identical(f(2), f(2, stage = "default"))
+  boot <- f(2, stage = "bootstrap")
+  cv <- f(2, stage = "cv")
+  expect_false(identical(boot[[1]], cv[[1]]))
+  expect_false(identical(boot[[1]], f(2)[[1]]))
+  expect_identical(boot, f(2, stage = "bootstrap"))
+  expect_error(f(2, stage = ""), "name")
+  reg <- rng_registry(data.frame(stage = "dgp", scenario_key = "a", component = "data"))
+  reg$index <- Inf
+  expect_error(adempR:::check_registry(reg), "no larger than")
+  reg$index <- 2^40
+  expect_error(adempR:::check_registry(reg), "no larger than")
+})

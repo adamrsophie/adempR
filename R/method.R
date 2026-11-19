@@ -198,11 +198,18 @@ isolate_data <- function(x) {
 #' Parallel or resampling work inside a method should not set seeds. Call
 #' `context$inner_seeds(k)` for `k` independent L'Ecuyer-CMRG states (for
 #' example `future.apply::future_lapply(..., future.seed = context$inner_seeds(k))`,
-#' or assign one to `.Random.seed` per worker). They are derived from the
-#' method's task state, never coincide with the study's registered streams,
-#' and are the same at every replay, so any inner resample can be
-#' reproduced; storing the resample indices or frequency weights in the fit
-#' (with `sim_retention(fits = TRUE)`) keeps them inspectable.
+#' or assign one to `.Random.seed` per worker). The states are a fixed
+#' sequence: every call with the same `stage` returns the same states, and
+#' `inner_seeds(k)` is the first `k` of `inner_seeds(k + 1)`. A method with
+#' several stages of inner work names them, `context$inner_seeds(k,
+#' stage = "bootstrap")` and `context$inner_seeds(k, stage = "cv")`, so the
+#' stages draw from different streams. The states are derived from the
+#' method's task state through a hash into another region of the
+#' L'Ecuyer-CMRG cycle, so overlap with the study's registered streams is
+#' improbable but not excluded by construction; they are the same at every
+#' replay, so any inner resample can be reproduced. Storing the resample
+#' indices or frequency weights in the fit (with `sim_retention(fits =
+#' TRUE)`) keeps them inspectable.
 #'
 #' @param fun Function analyzing one data set.
 #' @param estimands Character vector of estimand identifiers the method

@@ -161,8 +161,10 @@ check_registry <- function(registry) {
     stopf("An RNG registry must be a data frame with columns %s.", paste(need, collapse = ", "))
   }
   idx <- registry$index
-  if (!is.numeric(idx) || anyNA(idx) || any(idx < 1 | idx != round(idx))) {
-    stopf("RNG registry indices must be positive whole numbers.")
+  if (!is.numeric(idx) || anyNA(idx) || any(!is.finite(idx)) ||
+      any(idx < 1 | idx > .Machine$integer.max | idx != round(idx))) {
+    stopf("RNG registry indices must be positive whole numbers no larger than %d.",
+          .Machine$integer.max)
   }
   if (anyDuplicated(idx)) stopf("The RNG registry assigns one index to several identities.")
   ids <- registry[c("stage", "scenario_key", "component")]
@@ -253,15 +255,19 @@ rng_task_seed <- function(seed, registry, stage, scenario_key, component,
 }
 
 # Streams for parallel or resampling work inside one method fit. They are
-# derived from the method's own task state through a hash into a separate
-# region of the L'Ecuyer-CMRG cycle, so they never coincide with a
-# registered stream, and they are the same at every replay of the task.
+# derived from the method's own task state and the named inner stage
+# through a hash into another region of the L'Ecuyer-CMRG cycle (overlap
+# with a registered stream is improbable, not excluded by construction),
+# and they are the same at every replay of the task. Each call returns the
+# same prefix of the stage's sequence.
 inner_seed_fun <- function(task_seed) {
   force(task_seed)
-  function(k) {
+  function(k, stage = "default") {
     if (!is_count(k, 1)) stopf("`k` must be a positive whole number.")
+    if (!is_scalar_character(stage) || !nzchar(stage)) stopf("`stage` must be a name.")
     base <- task_seed
-    base[2:7] <- domain_state(paste(task_seed, collapse = ","), "inner")
+    base[2:7] <- domain_state(paste(task_seed, collapse = ","),
+                              if (identical(stage, "default")) "inner" else paste0("inner\r", stage))
     out <- vector("list", k)
     cur <- base
     for (i in seq_len(k)) {
