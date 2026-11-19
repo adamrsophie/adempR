@@ -273,13 +273,29 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   invisible(file)
 }
 
+major_version <- function(v) sub("\\..*$", "", v)
+
 csv_safe <- function(df) {
   if (is.null(df)) return(data.frame())
   df <- as.data.frame(df, stringsAsFactors = FALSE)
-  df[] <- lapply(df, function(col) if (is.list(col)) vapply(col, function(v) {
-    paste(deparse(v), collapse = " ")
-  }, character(1)) else col)
+  df[] <- lapply(df, function(col) {
+    if (is.list(col)) {
+      col <- vapply(col, function(v) paste(deparse(v), collapse = " "), character(1))
+    }
+    if (is.character(col) || is.factor(col)) col <- csv_neutralize(as.character(col))
+    col
+  })
   df
+}
+
+# A spreadsheet treats a cell starting with =, +, -, @, tab or carriage
+# return as a formula. Such text cells (labels, error messages) get a
+# leading single quote; numbers written as text are left alone.
+csv_neutralize <- function(x) {
+  risky <- !is.na(x) & grepl("^[=+@\t\r-]", x) &
+    is.na(suppressWarnings(as.numeric(x)))
+  x[risky] <- paste0("'", x[risky])
+  x
 }
 
 #' Export and import a reproducibility bundle
@@ -289,9 +305,21 @@ csv_safe <- function(df) {
 #' R object, truth values, the random number registry, the environment,
 #' the manifest with revisions, an HTML report, a README explaining
 #' regeneration and reanalysis, a reanalysis script, and md5 checksums of
-#' every file. Paths inside the bundle are relative. No host names, user
-#' names or absolute paths are written. Generated data are copied only with
-#' `include_data = TRUE`, because they may be large or private.
+#' every file. Paths inside the bundle are relative, numerical library
+#' names are recorded without their directories, and source references
+#' (which hold the paths of sourced files) are removed from stored
+#' functions. The git remote URL, when recorded, names the repository and
+#' its owner. A function defined inside another function carries the
+#' objects of its enclosing environment; `sim_export()` lists them in a
+#' message so private objects are not shared unknowingly. Text cells that
+#' a spreadsheet would read as formulas are written with a leading single
+#' quote. Generated data are copied only with `include_data = TRUE`,
+#' because they may be large or private.
+#'
+#' `overwrite = TRUE` replaces an earlier bundle entirely and refuses any
+#' other non-empty directory. `sim_import()` verifies the checksums and
+#' refuses a bundle whose schema major version differs from this version
+#' of adempR.
 #'
 #' A bundle contains R code (the study's functions). The checksums detect
 #' corruption, not tampering: import bundles only from trusted sources, as
@@ -320,8 +348,14 @@ csv_safe <- function(df) {
 #' @export
 sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data = FALSE) {
   if (!is_scalar_character(dir)) stopf("`dir` must be a path.")
-  if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE)) && !overwrite) {
-    stopf("%s exists and is not empty; use `overwrite = TRUE`.", dir)
+  if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE))) {
+    if (!overwrite) stopf("%s exists and is not empty; use `overwrite = TRUE`.", dir)
+    # Only an earlier bundle is replaced, and it is replaced entirely, so no
+    # stale file from the earlier export survives into the new checksums.
+    if (!file.exists(file.path(dir, "CHECKSUMS.md5"))) {
+      stopf("%s is not empty and is not an adempR bundle; refusing to overwrite it.", dir)
+    }
+    unlink(dir, recursive = TRUE)
   }
   res <- sim_results(run)
   man <- res$manifest
@@ -349,8 +383,14 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     tf <- study$estimands[[en]]$truth$fun
     if (!is.null(tf)) writeLines(fun_source(tf), file.path(dir, "code", paste0("truth-", en, ".R")))
   }
+  carried <- closure_contents(study)
+  if (length(carried)) {
+    message(sprintf("Functions in this study are closures whose enclosing environments are exported with them, including: %s. Check that none of these objects is private.",
+                    paste(utils::head(carried, 20), collapse = ", ")))
+  }
   exported <- res
   exported$path <- NULL
+  exported$manifest$study <- strip_sources(exported$manifest$study)
   if (!is.null(exported$replications)) exported$replications$artifact <- NA_character_
   if (include_data && !is.null(res$path)) {
     src <- file.path(res$path, "artifacts")
@@ -416,6 +456,13 @@ sim_import <- function(dir) {
   bad <- files[is.na(actual) | actual != sums]
   if (length(bad)) stopf("Checksum mismatch or missing file(s) in the bundle: %s.",
                          paste(bad, collapse = ", "))
+  mj <- file.path(dir, "manifest.json")
+  version <- if (file.exists(mj)) jsonlite::read_json(mj)$schema_version else NULL
+  if (!is_scalar_character(version)) stopf("The bundle has no schema version in manifest.json.")
+  if (!identical(major_version(version), major_version(SCHEMA_VERSION))) {
+    stopf("The bundle has schema version %s; this version of adempR reads schema %s.x.",
+          version, major_version(SCHEMA_VERSION))
+  }
   res <- readRDS(file.path(dir, "results.rds"))
   if (!inherits(res, "adempr_results")) stopf("results.rds does not hold adempR results.")
   res

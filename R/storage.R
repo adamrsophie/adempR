@@ -183,8 +183,9 @@ environment_info <- function(packages = character()) {
     machine = si[["machine"]],
     rng_kind = RNG_KIND,
     packages = as.list(vers),
-    blas = tryCatch(extSoftVersion()[["BLAS"]], error = function(e) NA_character_),
-    lapack = tryCatch(La_library(), error = function(e) NA_character_),
+    # File names only: a library path can contain the user name.
+    blas = tryCatch(basename(extSoftVersion()[["BLAS"]]), error = function(e) NA_character_),
+    lapack = tryCatch(basename(La_library()), error = function(e) NA_character_),
     threads = as.list(Sys.getenv(c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                                    "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"),
                                  unset = NA)),
@@ -216,6 +217,33 @@ git_info <- function(dir = getOption("adempR.git_dir", getwd())) {
 
 # Never store a token or password embedded in a remote URL.
 strip_credentials <- function(url) sub("^([a-z+]+://)[^@/]*@", "\\1", url)
+
+# Source references of stored functions hold the absolute path of the file
+# they were sourced from and the working directory. They are removed before
+# a study is written to a manifest or bundle; fingerprints do not use them.
+strip_sources <- function(x) {
+  if (is.function(x)) {
+    return(if (is.primitive(x)) x else utils::removeSource(x))
+  }
+  if (is.list(x) && !is.data.frame(x) && length(x)) x[] <- lapply(x, strip_sources)
+  x
+}
+
+# Variables carried by the enclosing environments of the functions in a
+# study, other than the global environment and package namespaces. A
+# serialized closure includes them, so an export lists them.
+closure_contents <- function(x, out = character()) {
+  if (is.function(x) && !is.primitive(x)) {
+    e <- environment(x)
+    if (!is.null(e) && !identical(e, globalenv()) && !isNamespace(e) &&
+        !identical(e, baseenv()) && !identical(e, emptyenv())) {
+      out <- c(out, ls(e, all.names = TRUE))
+    }
+    return(unique(out))
+  }
+  if (is.list(x) && !is.data.frame(x)) for (el in x) out <- closure_contents(el, out)
+  unique(out)
+}
 
 # Environment fields compared across sessions (not the time).
 environment_signature <- function(env) {

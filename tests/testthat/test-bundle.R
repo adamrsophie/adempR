@@ -45,3 +45,52 @@ test_that("the report is self-contained and escapes text", {
   expect_match(h, "doi.org/10.1002/sim.8086", fixed = TRUE)
   expect_error(sim_report(run, f), "exists")
 })
+
+test_that("bundles carry no source paths, stale files, formula cells or foreign schemas", {
+  # a study built inside a function, from sourced code with source references
+  make <- function() {
+    secret <- "do-not-share"
+    src <- tempfile(fileext = ".R")
+    writeLines(c("m <- function(data) {", "  # comment", "  sim_estimate('mean', mean(data$y))", "}"), src)
+    e <- new.env()
+    sys.source(src, envir = e, keep.source = TRUE)
+    m <- e$m
+    environment(m) <- environment()
+    list(study = normal_study(n = 10L, mu = 0, methods = list(m = m)), src = src)
+  }
+  mk <- make()
+  expect_false(is.null(attr(mk$study$methods$m$fun, "srcref")))
+  run <- sim_run(mk$study, replications = 3, seed = 1, path = run_path())
+  expect_null(attr(run$manifest$study$methods$m$fun, "srcref"))
+  dir <- tempfile("bundle-")
+  expect_message(sim_export(run, dir, report = FALSE), "secret")
+  res <- sim_import(dir)
+  expect_null(attr(res$manifest$study$methods$m$fun, "srcref"))
+  expect_false(grepl(dirname(mk$src), paste(readLines(file.path(dir, "manifest.json")), collapse = "")))
+  expect_false(grepl("/", res$manifest$environment$blas %||% "", fixed = TRUE))
+  # overwrite replaces the earlier bundle entirely
+  writeLines("old", file.path(dir, "code", "method-old.R"))
+  suppressMessages(sim_export(run, dir, report = FALSE, overwrite = TRUE))
+  expect_false(file.exists(file.path(dir, "code", "method-old.R")))
+  expect_false(any(grepl("method-old", readLines(file.path(dir, "CHECKSUMS.md5")))))
+  other <- tempfile("notbundle-")
+  dir.create(other)
+  writeLines("x", file.path(other, "keep.txt"))
+  expect_error(suppressMessages(sim_export(run, other, overwrite = TRUE)), "not an adempR bundle")
+  expect_true(file.exists(file.path(other, "keep.txt")))
+  # a foreign schema is refused
+  mj <- file.path(dir, "manifest.json")
+  j <- jsonlite::read_json(mj)
+  j$schema_version <- "9.9.9"
+  jsonlite::write_json(j, mj, auto_unbox = TRUE)
+  ck <- file.path(dir, "CHECKSUMS.md5")
+  lines <- readLines(ck)
+  lines[grepl("  manifest\\.json$", lines)] <- paste0(unname(tools::md5sum(mj)), "  manifest.json")
+  writeLines(lines, ck)
+  expect_error(sim_import(dir), "schema version 9.9.9")
+})
+
+test_that("text cells that spreadsheets read as formulas are neutralized", {
+  x <- adempR:::csv_neutralize(c("=HYPERLINK(1)", "+a", "-1.5", "@x", "ok", NA, "-text"))
+  expect_identical(x, c("'=HYPERLINK(1)", "'+a", "-1.5", "'@x", "ok", NA, "'-text"))
+})

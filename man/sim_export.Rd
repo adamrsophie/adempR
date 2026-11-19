@@ -30,11 +30,23 @@ specification (including code), all result tables as CSV files and as an
 R object, truth values, the random number registry, the environment,
 the manifest with revisions, an HTML report, a README explaining
 regeneration and reanalysis, a reanalysis script, and md5 checksums of
-every file. Paths inside the bundle are relative. No host names, user
-names or absolute paths are written. Generated data are copied only with
-\code{include_data = TRUE}, because they may be large or private.
+every file. Paths inside the bundle are relative, numerical library
+names are recorded without their directories, and source references
+(which hold the paths of sourced files) are removed from stored
+functions. The git remote URL, when recorded, names the repository and
+its owner. A function defined inside another function carries the
+objects of its enclosing environment; \code{sim_export()} lists them in a
+message so private objects are not shared unknowingly. Text cells that
+a spreadsheet would read as formulas are written with a leading single
+quote. Generated data are copied only with \code{include_data = TRUE},
+because they may be large or private.
 }
 \details{
+\code{overwrite = TRUE} replaces an earlier bundle entirely and refuses any
+other non-empty directory. \code{sim_import()} verifies the checksums and
+refuses a bundle whose schema major version differs from this version
+of adempR.
+
 A bundle contains R code (the study's functions). The checksums detect
 corruption, not tampering: import bundles only from trusted sources, as
 you would source an R script.

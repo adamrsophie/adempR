@@ -1,7 +1,7 @@
 # Running, extending and resuming studies ----------------------------------
 
 new_manifest <- function(study, seed, replications, label) {
-  list(schema_version = SCHEMA_VERSION, study = study, seed = seed,
+  list(schema_version = SCHEMA_VERSION, study = strip_sources(study), seed = seed,
        replications = as.integer(replications), label = label,
        created = now_utc(), fingerprints = study_fingerprints(study),
        study_fingerprint = sim_fingerprint(study),
@@ -118,7 +118,7 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   }
   man$rng_registry <- rng_registry(rng_keys(study), man$rng_registry)
   attr(study, "adempr_stored") <- NULL
-  man$study <- study
+  man$study <- strip_sources(study)
   man$fingerprints <- new
   man$study_fingerprint <- study_fp
   man$replications <- max(man$replications, as.integer(replications))
