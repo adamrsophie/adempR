@@ -63,7 +63,15 @@ The test suite checks each of these by comparing estimates bit for bit:
   method draws from its own stream.
 * A crash and resume gives the same results as an uninterrupted run.
 * The caller's random number generator kind and state are restored after
-  every adempR call, including the case where no seed existed before.
+  every adempR call, including the case where no seed existed before. One
+  exception comes from R itself: with `normal.kind = "Box-Muller"`, R keeps
+  the second normal deviate of each pair outside `.Random.seed`, so a
+  pending deviate is lost and the caller's next `rnorm()` differs. The
+  default kind (`"Inversion"`) has no such cache.
+* `rng_task_seed()` returns the state of one task. It checks that the
+  registry gives each complete identity its own positive index and that
+  the replication is a single positive whole number; pass
+  `domain = run$manifest$rng_domain` for a pilot run.
 
 ```{r}
 study <- sim_study("streams",
@@ -98,8 +106,10 @@ sim_method(boot_bca, coupling = "bootstrap")
   (`set.seed()` inside a method) or uses another generator (for example a
   C++ library with its own state) breaks the guarantees above.
 * Do not depend on global state that changes between replications.
-* Parallel code inside a method should use the substreams provided, not
-  new seeds.
+* A method runs inside one stream. Parallel code inside a method gets no
+  substreams of its own: derive worker states from the current state (for
+  example with `parallel::nextRNGStream(.Random.seed)`) instead of new
+  seeds, or run it sequentially.
 
 Some packages call `set.seed()` internally or keep their own generator.
 Their results are still recorded, but replays and extensions may not be

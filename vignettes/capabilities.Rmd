@@ -21,9 +21,10 @@ what it does not do. The statuses mean:
 * **deferred**: not available in this version. The architecture leaves
   room for it.
 
-Tests run on GitHub Actions on Linux, macOS and Windows with the current
-and previous R releases. Tests that kill R processes are skipped on
-Windows. Nothing has been run on a real cluster scheduler or a GPU.
+Tests run on GitHub Actions: Ubuntu with R release, devel, the previous
+release and R 4.2 (the oldest version the package declares), Windows and
+macOS with R release. Tests that kill R processes are skipped on Windows.
+Nothing has been run on a real cluster scheduler or a GPU.
 
 ## Study specification
 
@@ -37,9 +38,10 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Monte Carlo truth with standard error, cached, carried into MCSE | verified | test-estimands.R |
 | Data set specific truth hidden from non-oracle methods | verified | test-estimands.R |
 | Unknown truth (truth based measures unavailable) | verified | test-estimands.R |
-| Numerical (quadrature) truth with stated error | implemented | used in examples only |
+| Numerical (quadrature) truth with stated error | implemented | estimands vignette (agrees with the Monte Carlo truth); deterministic call enforced in test-rng.R |
 | Public scenario views and oracle methods | verified | test-isolation.R |
 | Validation and smoke test | verified | test-design.R |
+| Large sample sanity run (`sim_validate(large_n = )`) | verified | test-flow.R |
 | Protocol completeness checklist, freezing, amendments | verified | test-design.R |
 | Vector and functional estimands | deferred | only scalar estimands; use several scalars |
 
@@ -53,7 +55,9 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Generation failures recorded, never redrawn | verified | test-failures.R |
 | Failure policy applied at evaluation without refitting | verified | test-failures.R |
 | Composite measures over all generated data sets | verified | test-failures.R |
-| Retries with the same seed | implemented | |
+| Retries with the same seed; retry of failures after a fix (`retry_failed`) | verified | test-failures.R |
+| Timeout overruns flagged; execution settings changes recorded as revisions | verified | test-failures.R, test-replay-invalidation.R |
+| Flow of replications (planned to usable) in the report | verified | test-flow.R |
 
 ## Reproducibility and execution
 
@@ -62,16 +66,21 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Stream registry keyed by stage, scenario and component; append only | verified | test-rng.R |
 | Invariance to scenario order, method order and chunk size | verified | test-rng.R |
 | Extending replications and adding methods leave existing results unchanged | verified | test-rng.R |
-| Caller's RNG kind and state restored | verified | test-rng.R |
-| `future` backend identical to sequential, including top-level helper functions and declared packages | verified locally with multisession, two workers | test-rng.R |
+| Caller's RNG kind and state restored, including stochastic `extract` code (Box-Muller cache excepted, see the reproducibility vignette) | verified | test-rng.R |
+| Pilots, DGP checks and validation use their own stream families | verified | test-design.R |
+| `future` backend identical to sequential for top-level helper functions and declared packages; nested closures that reach global objects are refused | verified locally with multisession, two workers | test-rng.R |
 | Data isolation between methods, including `data.table` | verified | test-isolation.R |
-| Atomic commits; crash at each commit stage and resume | verified on Linux and macOS | test-recovery.R (SIGKILL in a child process) |
-| Stale lock recovery on the same host | verified | test-recovery.R |
+| Atomic commits; crash at each commit stage, inside a method and inside data generation, then resume | verified on Linux and macOS | test-recovery.R (SIGKILL in a child process; installed package only) |
+| Manifest checksum with backup; restart after an interrupted first call | verified | test-recovery.R |
+| Lost batch (with its sidecar) detected through the batch inventory and rerun | verified | test-recovery.R |
+| Stale lock recovery on the same host, with token ownership | verified | test-recovery.R |
+| Git and session provenance (commit, dirty state, environment drift) | verified | test-provenance.R |
 | Corrupt file detection, quarantine and rerun | verified | test-recovery.R |
 | Duplicate deduplication and conflict detection | verified | test-recovery.R |
-| Selective invalidation (method refit, truth and measure re-evaluation, DGP refusal) | verified | test-replay-invalidation.R |
-| Replay of one replication with data check | verified | test-replay-invalidation.R |
-| Retention policies and capability report | verified | test-replay-invalidation.R |
+| Selective invalidation from stored fingerprints (method refit, truth and measure re-evaluation, DGP refusal, recorded revisions) | verified | test-replay-invalidation.R |
+| Replay of one replication: one generation, recorded generation failures, warning flags, checksum verified artifacts | verified | test-replay-invalidation.R |
+| Retention: artifacts indexed by method version; capability report from what was actually retained | verified | test-replay-invalidation.R |
+| Regeneration from an export bundle with the recorded stream registry | verified | test-bundle.R |
 | Cluster schedulers (batchtools, targets) | experimental | possible through `future` plans; not tested |
 | Out of core result storage | deferred | results are read into memory; mergeable accumulators are available |
 
@@ -82,14 +91,16 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Bias, MAE, MSE, RMSE, empirical SE, mean SE, RMVAR and their MCSEs | verified | test-measures.R (hand calculations) |
 | Relative error in model SE (Morris et al. Table 6 MCSE) | verified | test-measures.R, agreement with rsimsum in test-normal-mean.R |
 | Coverage, noncoverage, rejection, usable proportion with exact intervals | verified | test-measures.R, test-normal-mean.R |
-| Bias-eliminated coverage, width, relative bias | implemented | |
+| Bias-eliminated coverage (jackknife MCSE) | verified for the value; MCSE implemented | test-measures.R |
+| Width, relative bias (with unstable status near a zero truth) | implemented; edge cases tested | test-measures.R |
 | Type I error and power labels from the declared null | verified | test-normal-mean.R |
 | Custom measures; no MCSE claimed for nonlinear aggregates | verified | test-measures.R |
 | Paired comparisons with MCSE | verified | test-compare.R |
 | Relative precision with analytic MCSE and paired bootstrap | verified | test-compare.R |
-| Equivalence margins | implemented | |
+| Equivalence margins, ratio margins around 1 | implemented; validation and boundary cases tested | test-compare.R |
 | Pareto view | verified | test-compare.R |
-| Weighted summaries over scenarios | implemented | |
+| Weighted summaries over scenarios (Bonferroni exact bounds at the boundary) | verified | test-measures.R |
+| Acceptability against a range, with the Monte Carlo interval (`sim_acceptable()`) | verified | test-flow.R |
 | Mergeable accumulators | verified | test-measures.R |
 
 ## Planning, stopping and reporting
@@ -97,12 +108,13 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Capability | Status | Evidence |
 |---|---|---|
 | Replication planning formulas | verified | test-measures.R |
-| Pilot studies with cost and precision projections | verified | test-design.R |
-| Sequential stopping with error spending over looks and cells | verified | test-nested-sequential.R (simultaneous coverage by simulation) |
+| Pilot studies with cost and precision projections | implemented; targets and requirement bounds tested | test-design.R |
+| Sequential stopping with error spending over looks and cells | verified | test-nested-sequential.R (simultaneous coverage by simulation; runner intervals recomputed with `binom.test()` for four cells and two looks; stored design and prefix) |
 | Time-uniform confidence sequences | deferred | |
 | DGP checks | verified | test-generators.R |
-| Diagnostics and plots | implemented | |
-| HTML report with escaping | verified | test-bundle.R |
+| Diagnostics: outliers, repeated data sets, test and interval disagreement, degenerate estimates | verified | test-measures.R |
+| Plots (zip plot with Monte Carlo band and power version) | implemented; caller state and eligibility tested | test-report-plots.R |
+| HTML report: self contained, escaped, all protocol fields, code, comparisons | verified | test-bundle.R |
 | Export bundle, checksums, import in a clean process | verified | test-bundle.R |
 | Generator helpers (multivariate normal, calibration, Weibull PH, missingness, clustering) | verified | test-generators.R |
 
@@ -110,6 +122,13 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 
 | Capability | Status |
 |---|---|
+| Per replication generator records (realized n, censoring fraction) beyond the data checksum | deferred |
+| Fallback values for failed fits | deferred |
+| Plasmode simulation helper, copula generator, censoring calibration | deferred |
+| Ranking of methods with bootstrap probabilities; seed sensitivity reruns | deferred |
+| Blinded evaluation workflow; protocol export in ADEMP-PreReg order | deferred |
+| Reference method with known performance as a Monte Carlo noise check | deferred |
+| A substream of its own for resampling inside a method | deferred |
 | Variance reduction designs (common random numbers beyond pairing, antithetic, control variates) | deferred |
 | Adaptive allocation of replications across scenarios | deferred |
 | Bayesian calibration adapters (simulation-based calibration) | deferred |
@@ -119,9 +138,9 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 ## Performance claims
 
 adempR makes no claim about speed in this version. The overhead per task
-(stream lookup, isolation copy, attempt capture) is small compared with
-fitting a model, but it has not been benchmarked on an idle machine;
-benchmark scripts are planned for a later release.
+(stream lookup, isolation copy, attempt capture, data checksum) has not
+been measured against plain R or other frameworks; benchmark scripts are
+planned for a later release.
 
 ## Known limitations
 

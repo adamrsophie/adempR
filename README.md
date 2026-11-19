@@ -149,7 +149,7 @@ sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
 | Study | `sim_study()`, `sim_validate()`, `sim_fingerprint()`, `sim_freeze()`, `sim_amend()` |
 | Planning | `sim_plan_replications()`, `sim_pilot()` |
 | Execution | `sim_run()`, `sim_resume()`, `sim_open()`, `sim_unlock()`, `sim_run_sequential()` |
-| Results | `sim_results()`, `sim_truth()`, `sim_summarise()`, `sim_compare()`, `sim_pareto()`, `sim_measures()`, `sim_measure()` |
+| Results | `sim_results()`, `sim_truth()`, `sim_summarise()`, `sim_flow()`, `sim_acceptable()`, `sim_compare()`, `sim_pareto()`, `sim_measures()`, `sim_measure()` |
 | Checking | `sim_check_dgp()`, `sim_diagnose()`, `sim_plot()`, `sim_replay()`, `sim_capabilities()` |
 | Reporting | `sim_report()`, `sim_export()`, `sim_import()` |
 | Generator helpers | `sim_rmvnorm()`, `sim_check_matrix()`, `sim_calibrate_intercept()`, `sim_rweibull_ph()`, `sim_add_missing()`, `sim_rclustered()`, `sim_contaminate()` |
@@ -173,8 +173,10 @@ sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
 
 Custom measures are defined with `sim_measure()`; no MCSE is claimed for a
 nonlinear aggregate unless one is supplied. Comparisons add paired
-differences of any linear measure and relative precision (analytic MCSE
-plus a paired bootstrap).
+differences of bias, MAE, MSE, coverage, width, rejection and the usable
+proportion, and relative precision (paired bootstrap MCSE, with the
+normal theory value in the note). Printed summaries show each value to
+the precision its MCSE supports.
 
 ## Documentation
 
@@ -210,19 +212,24 @@ manual and these articles:
   comparisons, nested resampling, and the simultaneous coverage of the
   sequential stopping rule.
 - Operational tests compare results bit for bit across scenario order,
-  method order, chunk size, the `future` backend, extension and method
-  addition; kill R with `SIGKILL` at each stage of a commit and check that
-  the resumed run equals an uninterrupted one; and check corruption
-  quarantine, duplicate and conflict detection, stale locks, replay,
-  selective invalidation, retention and bundle import in a clean process.
-- Continuous integration runs `R CMD check` on Linux, macOS and Windows.
+  method order, chunk size, the `future` backend (for top-level and
+  self-contained functions; nested closures that reach global objects are
+  refused), extension and method addition; kill R with `SIGKILL` at each
+  stage of a commit, inside a method and inside data generation, and check
+  that the resumed run equals an uninterrupted one; and check corruption
+  quarantine, lost batches, manifest damage, duplicate and conflict
+  detection, stale locks, replay, selective invalidation, retention,
+  regeneration from a bundle and bundle import in a clean process.
+- Continuous integration runs `R CMD check` on Ubuntu (R release, devel,
+  the previous release and R 4.2), Windows and macOS.
 
 The [capability matrix](https://adamrsophie.github.io/adempR/articles/capabilities.html)
 lists every feature as verified, implemented, experimental or deferred, with
 the test that supports each claim. Deferred in 0.1.0: vector and functional
 estimands, out of core result storage, tested cluster scheduler integration,
 time-uniform confidence sequences, variance reduction designs, adaptive
-allocation, Bayesian calibration adapters and benchmarks.
+allocation, Bayesian calibration adapters, plasmode and copula generators,
+method rankings and benchmarks.
 
 ## Related packages
 

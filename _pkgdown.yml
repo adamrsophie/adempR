@@ -86,6 +86,8 @@ reference:
   - sim_measures
   - sim_measure
   - sim_summarise
+  - sim_flow
+  - sim_acceptable
   - sim_compare
   - sim_pareto
   - sim_accumulator

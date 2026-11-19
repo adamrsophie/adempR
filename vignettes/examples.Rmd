@@ -35,7 +35,8 @@ clustered <- sim_study("clustered",
     d <- sim_rclustered(scenario$clusters, scenario$m, icc = scenario$icc)
     d$a <- as.integer(d$cluster %% 2 == 0)
     d$y <- d$y + 0.3 * d$a
-    d
+    # the latent cluster effect is kept away from the methods
+    sim_data(d[c("cluster", "a", "y")], meta = list(u = d$u))
   },
   estimands = list(sim_estimand("effect", effect = "marginal",
                                 truth = sim_truth_exact(function(scenario) 0.3))),
@@ -64,6 +65,7 @@ s[s$measure %in% c("se_ratio", "coverage"),
 
 `sim_rclustered()` returns a cluster identifier, an outcome `y` with total
 variance 1 and intraclass correlation `icc`, and the cluster effect `u`.
+The generator passes `u` as protected metadata, so no method can use it.
 
 ## Survival: a risk at a fixed horizon
 
@@ -80,7 +82,8 @@ surv_study <- sim_study("survival_horizon",
     d <- sim_rweibull_ph(lp = -0.5 * a, lambda = 0.2, shape = 1.3,
                          censoring_rate = scenario$censoring, horizon = 5)
     d$a <- a
-    d
+    # the uncensored event time is protected information
+    sim_data(d[setdiff(names(d), "event_time")], meta = list(event_time = d$event_time))
   },
   estimands = list(sim_estimand("risk2", effect = "marginal", scale = "risk",
     horizon = 2, population = "treated arm",

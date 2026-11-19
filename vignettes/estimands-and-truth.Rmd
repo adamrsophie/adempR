@@ -121,6 +121,57 @@ mean(e$estimate[e$method == "unadjusted"]) - 1
 
 which is entirely an error of the evaluator, not of the method.
 
+## A ladder of ways to learn the truth
+
+Morris (2026) orders the ways to compute a true value that has no closed
+form, from the most to the least Monte Carlo error:
+
+1. Simulate outcomes from a huge data set and apply an unbiased
+   estimator. The truth then carries both sampling error and the error of
+   the estimator.
+2. Simulate potential outcomes (or the outcome probabilities) directly, as
+   in the Monte Carlo integration above; only the covariate sample adds
+   error.
+3. Monte Carlo integration of a known function over the covariate
+   distribution (Naimi, Benkeser and Rudolph 2025): `sim_truth_mc()`.
+4. Deterministic numerical integration, for example Gaussian quadrature
+   (Ocampo, Giudice, McCaw and Morris 2026, preprint): no Monte Carlo error
+   at all, only a bounded numerical error. `sim_truth_numeric()` records
+   that bound.
+
+With one normal covariate the marginal log odds ratio above is a one
+dimensional integral, so the last rung applies:
+
+```{r}
+quadrature_truth <- sim_truth_numeric(function(scenario) {
+  m <- function(a) {
+    f <- function(x) plogis(scenario$b0 + scenario$bA * a + scenario$bX * x) * dnorm(x)
+    integrate(f, -Inf, Inf, rel.tol = 1e-10)
+  }
+  m1 <- m(1); m0 <- m(0)
+  list(value = qlogis(m1$value) - qlogis(m0$value),
+       # a conservative bound on the error of the difference of logits
+       error = (m1$abs.error / (m1$value * (1 - m1$value)) +
+                  m0$abs.error / (m0$value * (1 - m0$value))))
+})
+quadrature_truth$fun(scen$values[[1]])
+```
+
+The value agrees with the Monte Carlo truth within its standard error, and
+it needs no truth stage, no cache and no extra random numbers. Use the
+highest rung the problem allows.
+
+## Random estimands
+
+Some estimands change from one data set to the next: the average effect in
+the sample that was drawn, or in a subpopulation selected from the data
+(for example the overlap population). The truth is then a property of each
+data set. The generator returns it with `sim_data(data, truth = list(...))`
+and `sim_truth_dataset()` declares it. Bias and coverage are then
+conditional on each data set's own target, which is a different question
+from performance for a fixed population quantity; say which one the study
+answers.
+
 ## Other kinds of truth
 
 * `sim_truth_exact(fun)`: closed form.

@@ -64,8 +64,19 @@ dx
 
 The diagnosis reports failures by method and scenario with their most
 common messages, generation failures, outlying estimates by a robust z
-score, the association between estimates and their standard errors, any
-storage problems, and every revision and amendment.
+score, the association between estimates and their standard errors, data
+sets that repeat across replications (a generator that fixes the complete
+data), tests and intervals of one method that disagree about the null,
+degenerate estimates, any storage problems, and every revision and
+amendment.
+
+`sim_flow()` follows every planned replication: generation failed, not
+yet analyzed, fit failed, excluded by the validity rules, or usable. The
+counts add up to the number planned.
+
+```{r}
+sim_flow(run)
+```
 
 ## Plots
 
@@ -74,7 +85,10 @@ sim_plot(run, "estimates", scenario = 1)
 ```
 
 The zip plot (Morris et al. 2019) orders intervals by their z statistic
-and shows which miss the truth, and on which side.
+and shows which miss the truth, and on which side. The dotted lines give
+the Monte Carlo confidence interval of coverage. With
+`reference = "null"` the same plot shows the intervals that exclude the
+null value, a picture of power.
 
 ```{r, fig.alt = "Zip plot of confidence intervals"}
 sim_plot(run, "zip", scenario = 1)
@@ -95,9 +109,10 @@ Other types are `"est_se"` (estimates against standard errors) and
 
 `sim_report()` writes one self-contained HTML file: aims, protocol,
 scenarios (including exclusions), estimands and their truth, methods and
-their code, failure policy, execution details, failures, performance with
-MCSE, comparisons, diagnostics, the revision and amendment history, and
-references. All text from the study is escaped.
+their code, failure policy, execution details with the justification of
+the number of replications, the flow of replications, failures,
+performance with MCSE, paired comparisons of each method with the first,
+diagnostics, the revision and amendment history, and references. All text from the study is escaped.
 
 ```{r}
 f <- file.path(tempdir(), "diag-report.html")
