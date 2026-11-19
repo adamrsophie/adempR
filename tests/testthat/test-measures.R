@@ -143,3 +143,18 @@ test_that("truth sensitivity ranges include interior extrema", {
   st <- list(level = 0.95)
   expect_equal(adempR:::truth_sensitivity("mse", rows, st, NULL, 1), c(0, 4))
 })
+
+test_that("bias eliminated coverage handles varying truth, infinity and dependence", {
+  rows <- data.frame(estimate = c(0, 10, 0, 10), lower = c(-0.1, 9.9, -0.1, 9.9),
+                     upper = c(0.1, 10.1, 0.1, 10.1))
+  r <- adempR:::k_be_coverage(rows, rep(TRUE, 4), rep(TRUE, 4), c(0, 10, 0, 10))
+  expect_equal(r$value, 1)
+  rows$estimate <- c(Inf, -Inf, 0, 0)
+  r <- adempR:::k_be_coverage(rows, rep(TRUE, 4), rep(TRUE, 4), c(0, 10, 0, 10))
+  expect_identical(r$status, "infinite")
+  set.seed(2)
+  x <- rnorm(200)
+  rows <- data.frame(estimate = x, lower = x - 1.5, upper = x + 1.5)
+  r <- adempR:::k_be_coverage(rows, rep(TRUE, 200), rep(TRUE, 200), rep(0, 200))
+  expect_true(r$mcse > 0 && r$lower < r$value && r$value < r$upper)
+})

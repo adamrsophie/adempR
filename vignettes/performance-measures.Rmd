@@ -73,16 +73,20 @@ The test suite checks that this agrees with `rsimsum`.
 
 ## Proportions
 
-Coverage, the two one-sided noncoverages, bias-eliminated coverage,
+Coverage, the two one-sided noncoverages,
 rejection and the usable proportion are proportions $\hat p = k / n$. Their
 MCSE is $\sqrt{\hat p (1 - \hat p) / n}$, and the reported interval is the
 exact Clopper-Pearson interval. When $\hat p$ is 0 or 1 the plug in MCSE is
 0, which would claim certainty; the summary therefore marks such cells
 with status `"boundary"` and the exact interval keeps a nonzero width.
 
-Bias-eliminated coverage checks whether
-$\bar{\hat\theta}$ lies in each interval. It separates poor coverage due
-to bias from poor coverage due to wrong width.
+Bias-eliminated coverage checks whether each interval contains its truth
+shifted by the mean error, $\theta_r + \overline{(\hat\theta - \theta)}$;
+for a constant truth that is $\bar{\hat\theta}$. It separates poor
+coverage due to bias from poor coverage due to wrong width. The same
+replications estimate the shift, so the indicators are dependent and the
+binomial interval does not apply: its MCSE comes from a delete-a-group
+jackknife that re-estimates the shift, with a normal interval.
 
 ## Eligibility and status
 

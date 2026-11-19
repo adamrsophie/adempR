@@ -98,15 +98,8 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
       sel <- int_ok & has_truth
       k_prop(truth[sel] > rows$upper[sel], level)
     },
-    be_coverage = {
-      sel <- int_ok & usable
-      if (!any(sel)) return(k_prop(logical(), level))
-      mbar <- mean(rows$estimate[usable])
-      r <- k_prop(rows$lower[sel] <= mbar & mbar <= rows$upper[sel], level)
-      r$note <- paste(c("relative to the mean estimate; MCSE ignores its uncertainty",
-                        if (!is.na(r$note)) r$note), collapse = "; ")
-      r
-    },
+    be_coverage = k_be_coverage(rows, int_ok & usable & has_truth, usable & has_truth,
+                                truth, level),
     width = k_mean((rows$upper - rows$lower)[int_ok], level),
     rejection = k_prop(reject_indicator(rows[test_ok, , drop = FALSE], study$alpha), level),
     usable = k_prop(usable, level),

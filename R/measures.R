@@ -74,8 +74,10 @@ MEASURE_INFO <- data.frame(
 #' error in the model based SE, in percent), `coverage`,
 #' `noncoverage_lower` (proportion of intervals entirely above the truth),
 #' `noncoverage_upper` (entirely below), `be_coverage` (bias eliminated
-#' coverage: intervals containing the mean of the estimates, which separates
-#' miscalibrated width from bias), `width`, `rejection` (labeled type
+#' coverage: intervals containing the replication's truth plus the mean
+#' error, which for a constant truth is the mean estimate; it separates
+#' miscalibrated width from bias; its MCSE comes from a jackknife that
+#' re-estimates the mean error), `width`, `rejection` (labeled type
 #' I error or power from the declared null and truth), `usable` and the
 #' opt in composite `usable_coverage` (a usable interval that contains the
 #' truth, over all generated data sets; this is not conditional coverage).
@@ -296,6 +298,41 @@ k_prop <- function(x, level = 0.95) {
   }
   kernel_result(value = p, mcse = sqrt(p * (1 - p) / n), lower = lo, upper = hi,
                 n = n, status = status, note = note)
+}
+
+# Bias eliminated coverage: the proportion of intervals that contain the
+# replication's truth shifted by the mean error (for a constant truth, the
+# mean estimate). The same replications estimate that shift, so the
+# indicators are dependent and the binomial interval does not apply. The
+# MCSE and a normal interval come from a delete-a-group jackknife (at most
+# 50 groups of consecutive rows) that re-estimates the shift each time.
+k_be_coverage <- function(rows, sel, center_rows, truth, level = 0.95) {
+  if (!any(sel)) return(kernel_result(status = "no_eligible", note = "no eligible replications"))
+  err <- rows$estimate - truth
+  if (!all(is.finite(err[center_rows]))) {
+    return(kernel_result(n = sum(sel), status = "infinite",
+                         note = "the mean error is not finite, so the bias cannot be removed"))
+  }
+  idx <- which(sel)
+  cen <- which(center_rows)
+  prop <- function(drop = integer()) {
+    shift <- mean(err[setdiff(cen, drop)])
+    i <- setdiff(idx, drop)
+    mean(rows$lower[i] <= truth[i] + shift & truth[i] + shift <= rows$upper[i])
+  }
+  p <- prop()
+  n <- length(idx)
+  G <- min(n, 50L)
+  mcse <- NA_real_
+  if (G >= 2L) {
+    grp <- split(idx, cut(seq_along(idx), G, labels = FALSE))
+    th <- vapply(grp, prop, numeric(1))
+    mcse <- sqrt((G - 1) / G * sum((th - mean(th))^2))
+  }
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  kernel_result(value = p, mcse = mcse, lower = max(0, p - z * mcse), upper = min(1, p + z * mcse),
+                n = n, status = if (p %in% c(0, 1)) "boundary" else "ok",
+                note = "intervals containing truth plus the mean error; jackknife MCSE re-estimates the mean error")
 }
 
 # Generic sd/sqrt(n) is attached only to the mean aggregate.

@@ -30,8 +30,10 @@ variance, the model based SE of Morris et al. 2019), \code{se_ratio} (relative
 error in the model based SE, in percent), \code{coverage},
 \code{noncoverage_lower} (proportion of intervals entirely above the truth),
 \code{noncoverage_upper} (entirely below), \code{be_coverage} (bias eliminated
-coverage: intervals containing the mean of the estimates, which separates
-miscalibrated width from bias), \code{width}, \code{rejection} (labeled type
+coverage: intervals containing the replication's truth plus the mean
+error, which for a constant truth is the mean estimate; it separates
+miscalibrated width from bias; its MCSE comes from a jackknife that
+re-estimates the mean error), \code{width}, \code{rejection} (labeled type
 I error or power from the declared null and truth), \code{usable} and the
 opt in composite \code{usable_coverage} (a usable interval that contains the
 truth, over all generated data sets; this is not conditional coverage).
