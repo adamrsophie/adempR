@@ -93,19 +93,23 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   # checksum of the analysis data: identifies the data set across batches
   # and reveals a generator that returns the same data every time
   repl$data_md5 <- md5_bytes(serialize(data, NULL, version = 3))
+  # A replication that already has committed fits is regenerated only to
+  # run further methods on it (a retry, an added or changed method). Its
+  # data must be the committed data set, or the methods would be compared
+  # on different data under one replication number.
+  if (length(task$expect_md5) && !is.na(task$expect_md5) &&
+      !identical(task$expect_md5, repl$data_md5)) {
+    stopf("Replication %d of scenario %s generated different data than the committed data set (checksum %s, now %s). The generator depends on something that changed since (a file, a global variable, a package version). Restore it, or use a new run directory.",
+          rep, short_hash(key), short_hash(task$expect_md5), short_hash(repl$data_md5))
+  }
   records <- NULL
   if (!is.null(study$generator$record)) {
     rc <- with_rng_state(task$seeds$data, run_captured(function() {
       call_flexible(study$generator$record, list(data = isolate_data(data), meta = meta))
     }))
-    v <- if (is.null(rc$error)) unlist(rc$value) else NULL
-    records <- if (length(v) && !is.null(names(v))) {
-      data.frame(scenario_key = key, replication = rep, name = names(v),
-                 value = suppressWarnings(as.numeric(v)), stringsAsFactors = FALSE)
-    } else {
-      data.frame(scenario_key = key, replication = rep, name = ".record_error",
-                 value = NA_real_, stringsAsFactors = FALSE)
-    }
+    records <- callback_rows(rc, ".record_error",
+                             data.frame(scenario_key = key, replication = rep,
+                                        stringsAsFactors = FALSE))
   }
   dataset_truth <- if (length(dtruth)) {
     data.frame(scenario_key = key, replication = rep, estimand = names(dtruth),
@@ -187,7 +191,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         timeout = m$timeout %||% NA_real_,
         # the limit is cooperative: compiled code can run past it unnoticed
         overrun = !is.null(m$timeout) && status != "timeout" && fit$elapsed > m$timeout,
-        final = FALSE, stringsAsFactors = FALSE)
+        final = FALSE, fallback = FALSE, stringsAsFactors = FALSE)
       if (status == "ok" || attempt > retries || status == "timeout") break
     }
     attempts[[length(attempts)]]$final <- TRUE
@@ -198,20 +202,34 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
                                               context = mctx))
         outputs_to_rows(out, m$estimands)
       }, m$timeout))
+      # the fallback is recorded as an attempt of its own: its outcome,
+      # warnings and cost
+      fb_status <- if (is.null(fb$error)) "ok" else if (fb$timed_out) "timeout" else
+        if (is_memory_error(conditionMessage(fb$error))) "memory" else "error"
+      attempts[[length(attempts) + 1L]] <- data.frame(
+        scenario_key = key, replication = rep, method = mn,
+        attempt = as.integer(attempt) + 1L, status = fb_status,
+        failed_stage = if (fb_status == "ok") NA_character_ else "fallback",
+        message = if (is.null(fb$error)) NA_character_ else conditionMessage(fb$error),
+        n_warnings = length(fb$warnings), warnings = collapse_warnings(fb$warnings),
+        elapsed = fb$elapsed, cpu = fb$cpu, timeout = m$timeout %||% NA_real_,
+        overrun = !is.null(m$timeout) && fb_status != "timeout" && fb$elapsed > m$timeout,
+        final = FALSE, fallback = TRUE, stringsAsFactors = FALSE)
       if (is.null(fb$error)) {
         rows <- fb$value
         used_fallback <- TRUE
+        # the warnings policy applies to the output that is used
+        warns <- fb$warnings
       }
     }
     if (status == "ok" && !is.null(m$diagnostics)) {
       dg <- with_rng_state(seed, run_captured(function() {
         call_flexible(m$diagnostics, list(fit = fit$value, data = mdata))
       }))
-      v <- if (is.null(dg$error)) unlist(dg$value) else NULL
-      if (length(v) && !is.null(names(v))) {
-        diagnostics[[length(diagnostics) + 1L]] <- data.frame(
-          scenario_key = key, replication = rep, method = mn, name = names(v),
-          value = suppressWarnings(as.numeric(v)), stringsAsFactors = FALSE)
+      if (!is.null(dg$error) || length(unlist(dg$value))) {
+        diagnostics[[length(diagnostics) + 1L]] <- callback_rows(dg, ".diagnostics_error",
+          data.frame(scenario_key = key, replication = rep, method = mn,
+                     stringsAsFactors = FALSE))
       }
     }
     restore_cuda()
@@ -260,6 +278,24 @@ task_seeds <- function(ctx, key, reps, study, methods) {
     for (cp in comps) s[[cp]] <- comp_seeds[[cp]][[j]]
     s
   })
+}
+
+# Rows of a `record` or `diagnostics` callback: one per named number. An
+# error, unnamed or duplicated names, or a value that is not a number gives
+# a single error row (name `err_name`) with the reason, never silent `NA`s.
+callback_rows <- function(cb, err_name, id) {
+  v <- if (is.null(cb$error)) unlist(cb$value) else NULL
+  reason <- if (!is.null(cb$error)) conditionMessage(cb$error) else
+    if (!length(v)) "returned nothing" else
+    if (is.null(names(v)) || any(!nzchar(names(v))) || anyDuplicated(names(v))) "values need unique names" else
+    if (!(is.numeric(v) || is.logical(v))) "values must be numbers" else NULL
+  if (!is.null(reason)) {
+    return(cbind(id, data.frame(name = err_name, value = NA_real_, message = reason,
+                                stringsAsFactors = FALSE)))
+  }
+  cbind(id[rep(1L, length(v)), , drop = FALSE],
+        data.frame(name = names(v), value = as.numeric(v), message = NA_character_,
+                   stringsAsFactors = FALSE), row.names = NULL)
 }
 
 # Memory exhaustion is a failure class of its own: it says more about the

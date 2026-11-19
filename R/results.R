@@ -78,9 +78,10 @@ read_raw_results <- function(path, repair = FALSE) {
                                    "generation"),
                        c("scenario_key", "replication", "generator_fp"))
   task_keys <- c("scenario_key", "replication", "method", "method_fp")
-  att <- latest_round(dedup_table(get("attempts"), c(task_keys, "attempt", "round"),
-                                  c("status", "failed_stage", "message", "n_warnings", "warnings"),
-                                  "method attempt"), task_keys)
+  att_all <- dedup_table(get("attempts"), c(task_keys, "attempt", "round"),
+                         c("status", "failed_stage", "message", "n_warnings", "warnings"),
+                         "method attempt")
+  att <- latest_round(att_all, task_keys)
   est <- latest_round(dedup_table(get("estimates"), c(task_keys, "estimand", "round"),
                                   c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning",
                                     "fallback"),
@@ -94,8 +95,23 @@ read_raw_results <- function(path, repair = FALSE) {
   rcd <- latest_round(dedup_table(get("records"), c("scenario_key", "replication", "name", "round"),
                                   "value", "data set record"),
                       c("scenario_key", "replication", "name"))
+  # Rows that belong to a data set (truths, records) or to a fit
+  # (diagnostics) are kept only from the round of the selected generation or
+  # fit, so a retry that produced none does not leave the earlier ones in
+  # place next to the new result.
+  same_round <- function(df, ref, keys) {
+    if (is.null(df) || !nrow(df) || is.null(ref) || !nrow(ref)) return(df)
+    id_d <- do.call(paste, c(lapply(df[keys], col_text), sep = "\r"))
+    id_r <- do.call(paste, c(lapply(ref[keys], col_text), sep = "\r"))
+    rr <- tapply(ref$round, id_r, max)
+    df[!is.na(rr[id_d]) & df$round == rr[id_d], , drop = FALSE]
+  }
+  dtr <- same_round(dtr, reps, c("scenario_key", "replication"))
+  rcd <- same_round(rcd, reps, c("scenario_key", "replication"))
+  dgn <- same_round(dgn, est, task_keys)
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,
-       diagnostics = dgn, records = rcd, artifacts = arts, problems = rc$problems)
+       diagnostics = dgn, records = rcd, artifacts = arts, problems = rc$problems,
+       attempts_all = att_all)
 }
 
 # Read a retained artifact after checking it against its checksum sidecar;
@@ -139,13 +155,18 @@ sim_truth <- function(run) {
   cache <- new.env(parent = emptyenv())
   for (en in names(study$estimands)) {
     tr <- study$estimands[[en]]$truth
-    tfp <- truth_fingerprint(tr)
+    # the fingerprint stored with the run identifies the truth definition
+    # that was in force; a live closure whose globals changed since then
+    # must not change the truth of a completed run
+    tfp <- man$fingerprints$truth[[en]] %||% truth_fingerprint(tr)
     for (i in seq_along(study$scenarios$values)) {
       key <- study$scenarios$keys[i]
       sc <- study$scenarios$values[[i]]
       row <- NULL
-      if (tr$kind == "mc") {
-        tk <- truth_key(tr, sc, key)
+      if (tr$kind %in% c("mc", "exact", "numerical")) {
+        # every computed truth is cached under its stored fingerprint, so
+        # rereading a run reports the value computed when it was evaluated
+        tk <- if (tr$kind == "mc") truth_key(tr, sc, key) else key
         nm <- paste0("t-", md5_string(c(tfp, tk, en, man$seed)))
         f <- file.path(p$truth, paste0(nm, ".rds"))
         sidecar <- file.path(p$truth, paste0(nm, ".md5"))
@@ -153,12 +174,15 @@ sim_truth <- function(run) {
             identical(file_md5(f), readLines(sidecar, warn = FALSE)[1])) {
           row <- readRDS(f)
         } else {
-          if (is.null(base)) base <- rng_base_seed(man$seed, man$rng_domain)
-          k <- rng_lookup(man$rng_registry, "truth", tk, en)
-          seed <- rng_substreams(rng_stream_seeds(base, k, cache)[[1]], 1L)[[1]]
+          seed <- NULL
+          if (tr$kind == "mc") {
+            if (is.null(base)) base <- rng_base_seed(man$seed, man$rng_domain)
+            k <- rng_lookup(man$rng_registry, "truth", tk, en)
+            seed <- rng_substreams(rng_stream_seeds(base, k, cache)[[1]], 1L)[[1]]
+          }
           t0 <- proc.time()[["elapsed"]]
-          row <- compute_truth_one(tr, sc, seed)
-          row$truth_elapsed <- proc.time()[["elapsed"]] - t0
+          row <- if (is.null(seed)) compute_truth_one(tr, sc) else compute_truth_one(tr, sc, seed)
+          row$truth_elapsed <- if (tr$kind == "mc") proc.time()[["elapsed"]] - t0 else NA_real_
           # another reader may have published the value meanwhile: the first
           # committed value wins, so every reader reports the same row
           if (file.exists(f) && file.exists(sidecar) &&
@@ -264,6 +288,8 @@ sim_results <- function(run) {
   structure(list(scenarios = sc, replications = reps, attempts = att, estimates = est,
                  truth = truth, manifest = man, path = run$path,
                  diagnostics = dgn, records = keep_rep(raw$records),
+                 # every attempt of every retry round, for cumulative costs
+                 attempts_all = keep_meth(raw$attempts_all),
                  artifacts = raw$artifacts, problems = raw$problems),
             class = "adempr_results")
 }

@@ -72,7 +72,7 @@ md5_string <- function(x) {
 # contents. Functions are represented by their deparsed formals and body
 # (never by serialize(), whose bytecode and source references are unstable)
 # plus the values of the free variables they capture.
-CANONICAL_VERSION <- "2"
+CANONICAL_VERSION <- "3"
 
 canonical <- function(x, depth = 0L, seen = NULL) {
   if (depth > 30L) stopf("A value is nested too deeply to fingerprint (more than 30 levels).")
@@ -139,14 +139,25 @@ canonical_attributes <- function(x, depth, seen) {
   a <- attributes(x)
   if (is.null(a)) return("")
   drop <- c("srcref", "srcfile", "wholeSrcref")
-  if (inherits(x, "formula")) drop <- c(drop, ".Environment")
+  env_txt <- ""
+  if (inherits(x, "formula")) {
+    # A formula is identified by its text plus the values of the variables
+    # it names that its environment supplies (data columns are not found
+    # there and do not enter), so y ~ I(x * k) differs between k = 1 and 2.
+    drop <- c(drop, ".Environment")
+    fe <- environment(x)
+    if (is.environment(fe)) {
+      env_txt <- canonical_lookup(all.names(x), fe, depth, seen)
+      if (nzchar(env_txt)) env_txt <- paste0("|env:", env_txt)
+    }
+  }
   a <- a[setdiff(names(a), drop)]
-  if (!length(a)) return("")
+  if (!length(a)) return(env_txt)
   a <- a[order(names(a), method = "radix")]
   parts <- vapply(names(a), function(n) {
     paste0(enc_str(n), canonical(a[[n]], depth + 1L, seen))
   }, character(1))
-  paste0("A", length(a), "{", paste(parts, collapse = ""), "}")
+  paste0("A", length(a), "{", paste(parts, collapse = ""), "}", env_txt)
 }
 
 # Environments: the global environment and package namespaces are named;
@@ -166,8 +177,10 @@ canonical_env <- function(e, depth, seen) {
   parts <- vapply(vars, function(v) {
     paste0(enc_str(v), canonical(get(v, envir = e, inherits = FALSE), depth + 1L, seen))
   }, character(1))
+  # the enclosing environment is part of what the environment provides
   paste0("E", length(vars), "{", paste(parts, collapse = ""), "}",
-         canonical_attributes(e, depth, seen))
+         canonical_attributes(e, depth, seen), "^",
+         canonical_env(parent.env(e), depth + 1L, seen))
 }
 
 package_version_string <- function(pkg) {
@@ -189,7 +202,10 @@ canonical_function <- function(f, depth = 0L, seen = NULL) {
     return(paste0("<pkg:", nm, "@", package_version_string(nm), ":",
                   md5_string(c(fo_txt, body_txt)), ">"))
   }
-  env_txt <- if (depth < 6L) canonical_free_variables(f, depth, seen) else "<depth>"
+  # functions that refer to each other are encoded once (a cycle marker
+  # for the repeat); there is no depth cutoff that could hide a dependency
+  for (s in seen) if (identical(s, f)) return("<cycle>")
+  env_txt <- canonical_free_variables(f, depth, c(seen, list(f)))
   paste0("function(", fo_txt, ")", enc_str(body_txt), "|free:", env_txt)
 }
 
@@ -205,6 +221,10 @@ canonical_free_variables <- function(f, depth, seen) {
   env <- environment(f)
   if (is.null(env)) return("")
   vars <- tryCatch(codetools::findGlobals(f), error = function(e) character())
+  canonical_lookup(vars, env, depth, seen)
+}
+
+canonical_lookup <- function(vars, env, depth, seen) {
   vars <- sort(unique(vars), method = "radix")
   out <- character()
   for (v in vars) {

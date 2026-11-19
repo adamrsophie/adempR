@@ -256,7 +256,14 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
       "; outputs with warnings are ", if (f$warnings == "record") "kept (warnings recorded)" else "invalid",
       "; boundary estimates are ", if (f$boundary == "record") "kept (flag recorded)" else "invalid",
       "; infinite estimates are ", if (f$infinite == "include") "kept as extended real values" else "invalid",
-      "; infrastructure retries: ", f$retries, ". Data sets are never redrawn after a method fails.",
+      "; infrastructure retries: ", f$retries,
+      "; when a method has a fallback, a failed fit is ",
+      if (identical(f$fallback, "use")) "replaced by the fallback output" else "recorded as failed (the fallback output is not used)",
+      local({
+        n_fb <- sum(res$estimates$fallback %in% TRUE)
+        if (n_fb) sprintf(" (%d result(s) in this run came from a fallback)", n_fb) else ""
+      }),
+      ". Data sets are never redrawn after a method fails.",
       " Performance is reported conditional on each measure's eligibility rule, next to the probability of a usable result.</p>")
   add("<h2>6. Execution</h2><p>Replications planned per scenario: ", html_escape(man$replications),
       ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",

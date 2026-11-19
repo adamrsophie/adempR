@@ -224,7 +224,8 @@ check_frozen <- function(study) {
 #'   policy or design, or a removed method or scenario) is refused unless
 #'   `update = "production"`; extensions are always allowed.
 #' @param retry_failed Rerun replications whose data generation failed and
-#'   method fits that ended in an error or a timeout, with their original
+#'   method fits that ended in an error, a timeout or a memory failure,
+#'   with their original
 #'   random number streams. Use it after fixing a failure caused by the
 #'   computing environment (a missing file, package or license, memory).
 #'   The retry is recorded as a revision and its results supersede the
@@ -324,6 +325,20 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   plan_R <- planned_replications(man, study$scenarios$keys)
   if (!is.null(man$sequential$analyzed)) plan_R[] <- man$replications
   n_todo <- count_tasks(study, plan_R, done)
+  if (n_todo > 0 && isTRUE(attr(study, "adempr_stored"))) {
+    # A stored study is reused without recomputing its fingerprints, which
+    # is right for reading. New work runs its live closures, so they must
+    # still be the code that produced the committed results.
+    live <- tryCatch(study_fingerprints(study), error = function(e) NULL)
+    stale <- c(if (!identical(live$generator, man$fingerprints$generator)) "the generator",
+               names(Filter(isTRUE, Map(function(a, b) !identical(a, b),
+                                        live$methods, man$fingerprints$methods[names(live$methods)]))))
+    if (is.null(live) || length(stale)) {
+      stopf("The stored study cannot run new work in this session: %s now depend%s on objects (global variables or packages) that differ from those of the committed results, so new fits would mix two implementations under one fingerprint. Restore those objects, or call sim_run() with the study object (and `update = TRUE` for changed methods).",
+            if (is.null(live)) "its code" else paste(stale, collapse = ", "),
+            if (length(stale) == 1L) "s" else "")
+    }
+  }
   if (n_todo > max_tasks) {
     stopf("This call would run %s method fits (%d scenarios x up to %d replications x %d methods), more than `max_tasks` = %s. Check the design or raise `max_tasks` deliberately.",
           format(n_todo, big.mark = ","), length(study$scenarios), max(plan_R),
@@ -349,7 +364,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
               cache = new.env(parent = emptyenv()),
               dgp_stage = "dgp", method_stage = "method")
   if (nrow(todo)) {
-    tasks <- build_tasks(study, ctx, todo)
+    tasks <- build_tasks(study, ctx, todo, attr(done, "data_md5"))
     if (!is.null(cost)) tasks <- lpt_order(study, tasks, cost)
     chunks <- split(tasks, ceiling(seq_along(tasks) / chunk_size))
     if (!is.null(gpus)) {
@@ -368,7 +383,11 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   man$status <- "complete"
   man$completed <- now_utc()
   write_manifest(p, man)
-  structure(list(path = normalizePath(path), manifest = man), class = "adempr_run")
+  run <- structure(list(path = normalizePath(path), manifest = man), class = "adempr_run")
+  # evaluate and cache the truths now, under the run lock and with the
+  # definitions that produced these results
+  sim_truth(run)
+  run
 }
 
 #' @rdname sim_run
@@ -418,6 +437,10 @@ print.adempr_run <- function(x, ...) {
   invisible(x)
 }
 
+# Fit outcomes that `retry_failed = TRUE` reruns: failures that can come
+# from the computing environment rather than from the method.
+RETRYABLE_STATUSES <- c("error", "timeout", "memory")
+
 # Which (scenario, replication, method) combinations are committed with the
 # current method fingerprints.
 # A replication whose generation failed counts as finished for every
@@ -434,7 +457,7 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE) {
     cur <- est$method %in% names(fps) & est$method_fp == fps[est$method]
     done <- unique(est[cur, c("scenario_key", "replication", "method")])
     if (retry && !is.null(att) && nrow(att)) {
-      bad <- att[att$final & att$status %in% c("error", "timeout") &
+      bad <- att[att$final & att$status %in% RETRYABLE_STATUSES &
                    att$method %in% names(fps) & att$method_fp == fps[att$method], , drop = FALSE]
       id_bad <- paste(bad$scenario_key, bad$replication, bad$method, sep = "\r")
       done <- done[!(paste(done$scenario_key, done$replication, done$method, sep = "\r") %in%
@@ -453,11 +476,19 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE) {
     }
   }
   if (retry && !is.null(att) && nrow(att)) {
-    failed_fit <- sum(att$final & att$status %in% c("error", "timeout") &
+    failed_fit <- sum(att$final & att$status %in% RETRYABLE_STATUSES &
                         att$method %in% names(fps) & att$method_fp == fps[att$method])
   }
   attr(done, "retried") <- c(generation = if (retry) failed_gen else 0L,
                              method = failed_fit)
+  # checksums of the committed data sets: work added to a replication later
+  # (a retry, an added or changed method) must see the same data
+  if (!is.null(reps) && nrow(reps) && "data_md5" %in% names(reps)) {
+    ok <- reps[reps$generator_fp == gen_fp & reps$generation_status == "ok" &
+                 !is.na(reps$data_md5), c("scenario_key", "replication", "data_md5")]
+    attr(done, "data_md5") <- stats::setNames(ok$data_md5,
+                                              paste(ok$scenario_key, ok$replication, sep = "\r"))
+  }
   done
 }
 
@@ -489,7 +520,7 @@ plan_tasks <- function(study, R, done) {
   grid[!(id_all %in% id_done), c("scenario_key", "replication", "method")]
 }
 
-build_tasks <- function(study, ctx, todo) {
+build_tasks <- function(study, ctx, todo, data_md5 = NULL) {
   out <- list()
   for (key in unique(todo$scenario_key)) {
     sub <- todo[todo$scenario_key == key, , drop = FALSE]
@@ -499,7 +530,8 @@ build_tasks <- function(study, ctx, todo) {
       ms <- sub$method[sub$replication == reps[j]]
       ms <- names(study$methods)[names(study$methods) %in% ms]
       out[[length(out) + 1L]] <- list(scenario_key = key, replication = reps[j],
-                                      seeds = seeds[[j]], methods = ms)
+                                      seeds = seeds[[j]], methods = ms,
+                                      expect_md5 = unname(data_md5[paste(key, reps[j], sep = "\r")]))
     }
   }
   out

@@ -428,10 +428,13 @@ failure_table <- function(res) {
           method = mn, estimand = en, generated = n_gen, generation_failed = n_genfail,
           attempted = NROW(r), usable = sum(r$valid %in% TRUE),
           statuses = if (length(tab)) paste(names(tab), tab, sep = ":", collapse = ", ") else "",
-          se_valid = sum(r$se_status %in% "valid"),
-          interval_valid = sum(r$interval_status %in% "valid"),
-          test_valid = sum(r$test_status %in% "valid"),
+          # counted among outputs that pass the failure policy, so that a
+          # structurally valid SE of an excluded fit is not counted
+          se_valid = sum(r$valid %in% TRUE & r$se_status %in% "valid"),
+          interval_valid = sum(r$valid %in% TRUE & r$interval_status %in% "valid"),
+          test_valid = sum(r$valid %in% TRUE & r$test_status %in% "valid"),
           with_warnings = sum(r$had_warning %in% TRUE),
+          fallback_used = sum(r$fallback %in% TRUE),
           stringsAsFactors = FALSE)
       }
     }
@@ -440,7 +443,9 @@ failure_table <- function(res) {
 }
 
 runtime_table <- function(res) {
-  att <- res$attempts
+  # all attempts, including those of earlier retry rounds: the cost of the
+  # run is what was spent, not only the attempts whose results are used
+  att <- res$attempts_all %||% res$attempts
   if (is.null(att) || !nrow(att)) return(NULL)
   grp <- unique(att[c("scenario_key", "method")])
   rows <- lapply(seq_len(nrow(grp)), function(i) {
@@ -506,8 +511,11 @@ as.data.frame.adempr_summary <- function(x, ...) {
 #' generate, how many were not yet analyzed, how many method fits failed,
 #' how many results were excluded by the validity rules, and how many were
 #' usable. The counts add up: `planned = generation_failed + not_generated +
-#' not_run + fit_failed + excluded + usable`. The report always prints this
-#' table, also when nothing failed.
+#' not_run + fit_failed + excluded + usable`. A primary fit that failed and
+#' was replaced by its fallback ([sim_failure_policy()]) is counted with the
+#' fallback output (usable or excluded), and `fallback_used` says how many
+#' results came from a fallback. The report always prints this table, also
+#' when nothing failed.
 #'
 #' @param run A run or results.
 #' @return A data frame with one row per scenario, method and estimand.
@@ -525,18 +533,22 @@ sim_flow <- function(run) {
   f <- failure_table(res)
   planned <- unname(planned_replications(man, man$study$scenarios$keys)[f$scenario_key])
   est <- res$estimates
-  fit_failed <- vapply(seq_len(nrow(f)), function(i) {
+  count <- function(cond) vapply(seq_len(nrow(f)), function(i) {
     if (is.null(est) || !nrow(est)) return(0L)
     sum(est$scenario_key == f$scenario_key[i] & est$method == f$method[i] &
-          est$estimand == f$estimand[i] & est$attempt_status != "ok")
+          est$estimand == f$estimand[i] & cond(est))
   }, integer(1))
+  # a failed primary fit replaced by a fallback output is not a failed fit:
+  # the fallback result is usable or excluded like any other output
+  fallback <- count(function(e) e$fallback %in% TRUE)
+  fit_failed <- count(function(e) e$attempt_status != "ok" & !(e$fallback %in% TRUE))
   out <- data.frame(
     scenario_id = f$scenario_id, method = f$method, estimand = f$estimand,
     planned = planned, generation_failed = f$generation_failed,
     not_generated = pmax(planned - f$generated - f$generation_failed, 0L),
     not_run = f$generated - f$attempted, fit_failed = fit_failed,
     excluded = f$attempted - fit_failed - f$usable, usable = f$usable,
-    stringsAsFactors = FALSE)
+    fallback_used = fallback, stringsAsFactors = FALSE)
   rownames(out) <- NULL
   out
 }

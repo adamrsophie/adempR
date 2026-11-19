@@ -167,7 +167,7 @@ truth_key <- function(truth, scenario, key) {
   if (is.null(truth$factors)) return(key)
   miss <- setdiff(truth$factors, names(scenario))
   if (length(miss)) stopf("The truth depends on unknown scenario field(s): %s.", paste(miss, collapse = ", "))
-  paste0("factors-", fingerprint(truth$factors, scenario[truth$factors]))
+  paste0("factors-", stream_fingerprint(truth$factors, scenario[truth$factors]))
 }
 
 #' @rdname sim_truth_exact

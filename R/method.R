@@ -82,8 +82,20 @@ sim_generator <- function(fun, check = NULL, version = NULL, depends = list(),
 }
 
 generator_fingerprint <- function(g) {
-  if (is.null(g$common) && !isTRUE(g$antithetic)) return(fingerprint(g$fun, g$version, g$depends))
-  fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic))
+  # Optional parts enter only when used, so the fingerprints of generators
+  # that do not use them are unchanged. Records and declared packages are
+  # part of what generation produces; the validation `check` is not.
+  extra <- Filter(Negate(is.null), list(common = g$common,
+    antithetic = if (isTRUE(g$antithetic)) TRUE, record = g$record,
+    packages = if (length(g$packages)) sort(g$packages)))
+  if (is.null(g$common) && !isTRUE(g$antithetic)) {
+    if (!length(extra)) return(fingerprint(g$fun, g$version, g$depends))
+    return(fingerprint(g$fun, g$version, g$depends, extra))
+  }
+  if (is.null(g$record) && !length(g$packages)) {
+    return(fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic)))
+  }
+  fingerprint(g$fun, g$version, g$depends, extra)
 }
 
 # Identity of the data stream of a scenario: the scenario itself, or the
@@ -94,7 +106,7 @@ data_stream_key <- function(study, key) {
   sc <- study$scenarios$values[[scenario_index(study$scenarios, key)]]
   miss <- setdiff(common, names(sc))
   if (length(miss)) stopf("`common` names unknown scenario factor(s): %s.", paste(miss, collapse = ", "))
-  paste0("common-", fingerprint(common, sc[common]))
+  paste0("common-", stream_fingerprint(common, sc[common]))
 }
 
 #' Generated data with protected metadata
@@ -293,14 +305,21 @@ sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
 }
 
 method_fingerprint <- function(m) {
-  # the fallback and the diagnostics change what is stored, so they are part
-  # of the fingerprint when present
-  if (is.null(m$fallback) && is.null(m$diagnostics)) {
+  # the fallback, the diagnostics, declared packages and the GPU flag change
+  # what is run or stored, so they are part of the fingerprint when present
+  # (and only then, so other fingerprints are unchanged)
+  extra <- Filter(Negate(is.null), list(
+    packages = if (length(m$packages)) sort(m$packages), gpu = if (isTRUE(m$gpu)) TRUE))
+  if (is.null(m$fallback) && is.null(m$diagnostics) && !length(extra)) {
     return(fingerprint(m$fun, m$extract, m$estimands, m$scenario_fields, m$oracle,
                        m$declares, m$version, m$depends, m$coupling))
   }
+  if (!length(extra)) {
+    return(fingerprint(m$fun, m$extract, m$estimands, m$scenario_fields, m$oracle,
+                       m$declares, m$version, m$depends, m$coupling, m$fallback, m$diagnostics))
+  }
   fingerprint(m$fun, m$extract, m$estimands, m$scenario_fields, m$oracle,
-              m$declares, m$version, m$depends, m$coupling, m$fallback, m$diagnostics)
+              m$declares, m$version, m$depends, m$coupling, m$fallback, m$diagnostics, extra)
 }
 
 call_flexible <- function(f, args) {

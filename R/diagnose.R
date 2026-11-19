@@ -168,8 +168,23 @@ sim_diagnose <- function(run, outlier_z = 5) {
   # methods with known performance: a miss beyond Monte Carlo error points
   # to noise or a bug in the generator or the evaluation
   ref_check <- if (!is.null(est) && nrow(est)) sim_check_reference(res) else NULL
+  # record and diagnostics callbacks that failed
+  cb <- bind_rows(list(
+    if (!is.null(res$records) && nrow(res$records)) {
+      r <- res$records[res$records$name == ".record_error", , drop = FALSE]
+      if (nrow(r)) data.frame(callback = "record", scenario_id = lab(r$scenario_key),
+                              method = NA_character_, replication = r$replication,
+                              message = r$message %||% NA_character_, stringsAsFactors = FALSE)
+    },
+    if (!is.null(res$diagnostics) && nrow(res$diagnostics)) {
+      d <- res$diagnostics[res$diagnostics$name == ".diagnostics_error", , drop = FALSE]
+      if (nrow(d)) data.frame(callback = "diagnostics", scenario_id = lab(d$scenario_key),
+                              method = d$method, replication = d$replication,
+                              message = d$message %||% NA_character_, stringsAsFactors = FALSE)
+    }))
   structure(list(
     failures = failure_table(res), messages = msgs, generation_failures = gen_fail,
+    callback_errors = cb,
     reference_check = ref_check, records = record_summary(res, lab),
     repeated_data = repeated, test_interval_disagreement = disagree,
     degenerate = degenerate,
@@ -188,6 +203,10 @@ print.adempr_diagnosis <- function(x, ...) {
         row.names = FALSE, right = FALSE)
   if (!is.null(x$generation_failures)) {
     cat(sprintf("\nData generation failed in %d replication(s).\n", nrow(x$generation_failures)))
+  }
+  if (!is.null(x$callback_errors) && nrow(x$callback_errors)) {
+    cat(sprintf("\nRecord or diagnostics callbacks failed in %d case(s) (see $callback_errors).\n",
+                nrow(x$callback_errors)))
   }
   if (!is.null(x$messages)) {
     cat("\nMost frequent errors and warnings:\n")

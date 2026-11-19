@@ -1,8 +1,13 @@
 # Scenario design ----------------------------------------------------------
 
+# Scenario keys index the random number streams, so their version stays
+# fixed when the encoding of other objects (functions, formulas,
+# environments) is revised: the same scenario keeps the same streams.
+SCENARIO_KEY_VERSION <- "2"
+
 scenario_key_of <- function(values) {
   values <- values[order(names(values), method = "radix")]
-  md5_string(c(CANONICAL_VERSION, canonical(values)))
+  md5_string(c(SCENARIO_KEY_VERSION, canonical(values)))
 }
 
 scenario_label_of <- function(values) {
@@ -290,4 +295,10 @@ scenario_index <- function(scenarios, key) {
   i <- match(key, scenarios$keys)
   if (anyNA(i)) stopf("Unknown scenario key: %s.", paste(key[is.na(i)], collapse = ", "))
   i
+}
+
+# Fingerprint of values that index random number streams (common random
+# number groups, shared truth factors); versioned like scenario keys.
+stream_fingerprint <- function(...) {
+  md5_string(c(SCENARIO_KEY_VERSION, canonical(list(...))))
 }

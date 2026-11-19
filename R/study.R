@@ -280,6 +280,13 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
   }
   est_ids <- names(study$estimands)
   scen_fields <- unique(unlist(lapply(study$scenarios$values, names)))
+  # scenario keys are computed once by sim_scenarios(); values edited in
+  # place afterwards would keep a key (and a frozen hash) they no longer have
+  live_keys <- vapply(study$scenarios$values, scenario_key_of, character(1))
+  if (!identical(unname(live_keys), unname(study$scenarios$keys))) {
+    add("scenarios", "error",
+        "scenario values were edited after sim_scenarios(); rebuild the design with sim_scenarios() so each scenario has the key of its values")
+  }
   for (pkg in study_packages(study)) {
     if (!requireNamespace(pkg, quietly = TRUE)) {
       add(paste0("package:", pkg), "error", "declared package is not installed")

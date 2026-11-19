@@ -17,8 +17,11 @@ A CONSORT style account of every planned replication, per scenario,
 method and estimand: how many data sets were generated or failed to
 generate, how many were not yet analyzed, how many method fits failed,
 how many results were excluded by the validity rules, and how many were
-usable. The counts add up: \code{planned = generation_failed + not_generated + not_run + fit_failed + excluded + usable}. The report always prints this
-table, also when nothing failed.
+usable. The counts add up: \code{planned = generation_failed + not_generated + not_run + fit_failed + excluded + usable}. A primary fit that failed and
+was replaced by its fallback (\code{\link[=sim_failure_policy]{sim_failure_policy()}}) is counted with the
+fallback output (usable or excluded), and \code{fallback_used} says how many
+results came from a fallback. The report always prints this table, also
+when nothing failed.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),

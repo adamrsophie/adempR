@@ -84,6 +84,7 @@ test_that("Monte Carlo truth uncertainty does not shrink with more outer replica
   p <- run_path()
   r1 <- sim_run(st, replications = 50, seed = 9, path = p)
   s1 <- as.data.frame(sim_summarise(r1))
+  n_cached <- length(list.files(file.path(p, "truth"), pattern = "\\.rds$"))
   r2 <- sim_run(st, replications = 150, seed = 9, path = p)
   s2 <- as.data.frame(sim_summarise(r2))
   pick <- function(s) s[s$method == "unadjusted" & s$measure == "bias", ]
@@ -93,7 +94,7 @@ test_that("Monte Carlo truth uncertainty does not shrink with more outer replica
   expect_equal(pick(s2)$mcse_total, sqrt(pick(s2)$mcse^2 + pick(s2)$truth_se^2))
   expect_true(pick(s2)$truth_sens_lower < pick(s2)$value && pick(s2)$value < pick(s2)$truth_sens_upper)
   # cached truth is reused, not recomputed
-  expect_length(list.files(file.path(p, "truth"), pattern = "\\.rds$"), 1L)
+  expect_length(list.files(file.path(p, "truth"), pattern = "\\.rds$"), n_cached)
 })
 
 test_that("unknown truth disables truth based measures only", {

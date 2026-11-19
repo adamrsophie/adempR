@@ -54,7 +54,8 @@ policy or design, or a removed method or scenario) is refused unless
 \code{update = "production"}; extensions are always allowed.}
 
 \item{retry_failed}{Rerun replications whose data generation failed and
-method fits that ended in an error or a timeout, with their original
+method fits that ended in an error, a timeout or a memory failure,
+with their original
 random number streams. Use it after fixing a failure caused by the
 computing environment (a missing file, package or license, memory).
 The retry is recorded as a revision and its results supersede the
