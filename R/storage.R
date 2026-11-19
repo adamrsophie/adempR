@@ -188,8 +188,38 @@ environment_info <- function(packages = character()) {
     threads = as.list(Sys.getenv(c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                                    "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"),
                                  unset = NA)),
+    git = git_info(),
     time = now_utc()
   )
+}
+
+# Version control state of the working directory, read with the git command
+# line tool when it is installed. NULL outside a repository or without git.
+git_info <- function(dir = getOption("adempR.git_dir", getwd())) {
+  git <- Sys.which("git")
+  if (!nzchar(git)) return(NULL)
+  run <- function(...) {
+    out <- tryCatch(suppressWarnings(system2(git, c("-C", shQuote(dir), ...),
+                                             stdout = TRUE, stderr = FALSE)),
+                    error = function(e) character())
+    if (!is.null(attr(out, "status")) && attr(out, "status") != 0) character() else out
+  }
+  sha <- run("rev-parse", "HEAD")
+  if (length(sha) != 1L) return(NULL)
+  status <- run("status", "--porcelain", "--untracked-files=no")
+  remote <- run("remote", "get-url", "origin")
+  list(commit = sha,
+       branch = run("rev-parse", "--abbrev-ref", "HEAD")[1] %||% NA_character_,
+       dirty = length(status) > 0L,
+       remote = if (length(remote)) strip_credentials(remote[1]) else NA_character_)
+}
+
+# Never store a token or password embedded in a remote URL.
+strip_credentials <- function(url) sub("^([a-z+]+://)[^@/]*@", "\\1", url)
+
+# Environment fields compared across sessions (not the time).
+environment_signature <- function(env) {
+  env[c("r_version", "platform", "os", "packages", "blas", "lapack")]
 }
 
 write_manifest <- function(p, manifest) {

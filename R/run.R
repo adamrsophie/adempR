@@ -125,6 +125,23 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   man
 }
 
+# Each call that works on a run directory records its computing environment.
+# A session whose software differs from the one that created the directory
+# is recorded and reported, because results may then differ numerically.
+record_session <- function(man) {
+  env <- environment_info(study_packages(man$study))
+  man$sessions <- c(man$sessions, list(env))
+  if (!identical(environment_signature(env), environment_signature(man$environment))) {
+    warnf("The computing environment differs from the one that created this run directory (R, platform, BLAS or package versions). The new session is recorded in the manifest and shown in the report.")
+  }
+  g <- env$git
+  if (identical(man$label, "production") && !is.null(g) && isTRUE(g$dirty)) {
+    warnf("Production run from a git working tree with uncommitted changes (commit %s): the code that produced these results cannot be recovered from version control.",
+          substr(g$commit, 1, 12))
+  }
+  man
+}
+
 # A frozen study may change only through sim_amend(), which records the new
 # hash. A study read back from a manifest is not rechecked: its fingerprint
 # recomputed in another session can differ for reasons unrelated to edits.
@@ -158,6 +175,15 @@ check_frozen <- function(study) {
 #' committed fits keep the settings they ran with. Requesting fewer
 #' replications than the directory holds gives a warning and keeps them all.
 #' Each of these changes is recorded as a revision in the manifest.
+#'
+#' Every call records its computing environment as a session in the
+#' manifest, and warns when the software differs from the session that
+#' created the directory. When the working directory (or
+#' `getOption("adempR.git_dir")`) is inside a git repository and the git
+#' command line tool is installed, the commit, branch, remote URL (with
+#' any embedded credentials removed) and whether the tree has uncommitted
+#' changes are recorded too; a production run from a tree with uncommitted
+#' changes gives a warning. Nothing is written to the repository.
 #'
 #' Backends: `"sequential"` is the reference implementation. `"future"`
 #' distributes chunks of tasks with \pkg{future.apply} using the current
@@ -231,6 +257,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
                  label %||% study$status$label)
   }
   if (!is.null(label)) man$label <- label
+  man <- record_session(man)
   man$status <- "running"
   write_manifest(p, man)
 

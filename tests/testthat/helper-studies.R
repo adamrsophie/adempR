@@ -51,3 +51,6 @@ skip_if_dev_namespace <- function() {
   testthat::skip_if(exists(".__DEVTOOLS__", envir = asNamespace("adempR"), inherits = FALSE),
                     "needs the installed package")
 }
+
+# Tests must not depend on the git state of the checkout they run in.
+options(adempR.git_dir = tempdir())

@@ -81,6 +81,15 @@ committed fits keep the settings they ran with. Requesting fewer
 replications than the directory holds gives a warning and keeps them all.
 Each of these changes is recorded as a revision in the manifest.
 
+Every call records its computing environment as a session in the
+manifest, and warns when the software differs from the session that
+created the directory. When the working directory (or
+\code{getOption("adempR.git_dir")}) is inside a git repository and the git
+command line tool is installed, the commit, branch, remote URL (with
+any embedded credentials removed) and whether the tree has uncommitted
+changes are recorded too; a production run from a tree with uncommitted
+changes gives a warning. Nothing is written to the repository.
+
 Backends: \code{"sequential"} is the reference implementation. \code{"future"}
 distributes chunks of tasks with \pkg{future.apply} using the current
 \code{\link[future:plan]{future::plan()}} (or a temporary multisession plan with \code{workers}

@@ -485,8 +485,10 @@ sim_completeness <- function(study) {
 sim_freeze <- function(study, label = c("production", "pilot")) {
   stopifnot(inherits(study, "adempr_study"))
   label <- match.arg(label)
+  g <- git_info()
   study$status <- list(label = label,
-                       frozen = list(hash = sim_fingerprint(study), time = now_utc()))
+                       frozen = list(hash = sim_fingerprint(study), time = now_utc(),
+                                     git_commit = g$commit, git_dirty = g$dirty))
   study
 }
 

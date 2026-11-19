@@ -118,8 +118,10 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
       ". Study fingerprint: <code>", html_escape(man$study_fingerprint), "</code>.</p>")
   frozen <- study$status$frozen
   add("<p>", if (is.null(frozen)) "The protocol was not frozen before this run." else
-    paste0("The protocol was frozen on ", html_escape(frozen$time), " with hash <code>", html_escape(frozen$hash),
-           "</code>. A frozen hash proves identity of the specification, not that it was fixed before results were seen."),
+    paste0("The protocol was frozen on ", html_escape(frozen$time), " with hash <code>", html_escape(frozen$hash), "</code>",
+           if (!is.null(frozen$git_commit)) paste0(" at git commit <code>", html_escape(frozen$git_commit), "</code>",
+             if (isTRUE(frozen$git_dirty)) " (with uncommitted changes)" else "") else "",
+           ". A frozen hash proves identity of the specification, not that it was fixed before results were seen; a commit or registration pushed to a public archive (for example a Zenodo or Software Heritage snapshot, or an OSF registration) fixes it in time."),
     " ", if (is.null(study$protocol$registration)) "No external registration is recorded." else
       paste0("External registration: ", html_escape(paste(unlist(study$protocol$registration), collapse = ", ")), "."),
     "</p>")
@@ -190,11 +192,30 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
       ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
       nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>")
   env <- man$environment
-  add(html_table(data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK",
-                                     names(env$packages)),
-                            value = c(env$r_version, env$platform, env$os, env$blas %||% "",
-                                      env$lapack %||% "", unlist(env$packages)),
-                            stringsAsFactors = FALSE)))
+  g <- env$git
+  git_rows <- if (is.null(g)) {
+    data.frame(item = "git", value = "not a git repository, or git not installed")
+  } else {
+    data.frame(item = c("git commit", "git branch", "uncommitted changes", "git remote"),
+               value = c(g$commit, g$branch %||% "", if (isTRUE(g$dirty)) "yes" else "no",
+                         g$remote %||% ""))
+  }
+  add(html_table(rbind(
+    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", names(env$packages)),
+               value = c(env$r_version, env$platform, env$os, env$blas %||% "",
+                         env$lapack %||% "", unlist(env$packages)),
+               stringsAsFactors = FALSE),
+    git_rows)))
+  sess <- man$sessions %||% list()
+  if (length(sess)) {
+    sig0 <- environment_signature(env)
+    differ <- vapply(sess, function(s) !identical(environment_signature(s), sig0), logical(1))
+    commits <- unique(unlist(lapply(sess, function(s) s$git$commit)))
+    add("<p>Sessions that worked on this run: ", length(sess), ". Sessions with a different software environment from the one that created the directory: ",
+        sum(differ), ". Git commits used: ",
+        if (length(commits)) html_escape(paste(substr(commits, 1, 12), collapse = ", ")) else "none recorded",
+        ".</p>")
+  }
   add("<h2>7. Failures and validity</h2>", html_table(attr(summ, "failures")[
     c("scenario_id", "method", "estimand", "generated", "generation_failed", "attempted",
       "usable", "statuses", "se_valid", "interval_valid", "test_valid", "with_warnings")]))
@@ -346,7 +367,7 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     study_fingerprint = man$study_fingerprint, fingerprints = man$fingerprints,
     revisions = man$revisions, amendments = study$amendments,
     frozen = study$status$frozen, protocol = unclass(study$protocol),
-    environment = man$environment, exported = now_utc()),
+    environment = man$environment, sessions = man$sessions, exported = now_utc()),
     file.path(dir, "manifest.json"), auto_unbox = TRUE, pretty = TRUE, null = "null",
     na = "null", digits = NA)
   if (report) sim_report(exported, file.path(dir, "report.html"), overwrite = TRUE)
