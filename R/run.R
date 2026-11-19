@@ -426,7 +426,8 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   if (!is.null(label)) man$label <- label
   p$method_fps <- unlist(man$fingerprints$methods)
   p$generator_fp <- man$fingerprints$generator
-  done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed)
+  done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed,
+                          estimands = lapply(study$methods, `[[`, "estimands"))
   # the budget is checked before the manifest changes or the task grid exists
   if (!is.null(scenario_replications)) {
     sr <- scenario_replications
@@ -563,7 +564,7 @@ RETRYABLE_STATUSES <- c("error", "timeout", "memory")
 # current method fingerprints.
 # A replication whose generation failed counts as finished for every
 # method: it is not rerun unless a retry is requested.
-committed_index <- function(path, fps, gen_fp, retry = FALSE) {
+committed_index <- function(path, fps, gen_fp, retry = FALSE, estimands = NULL) {
   res <- read_raw_results(path, repair = TRUE)
   est <- res$estimates
   att <- res$attempts
@@ -573,7 +574,25 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE) {
   done <- empty
   if (!is.null(est) && nrow(est)) {
     cur <- est$method %in% names(fps) & est$method_fp == fps[est$method]
-    done <- unique(est[cur, c("scenario_key", "replication", "method")])
+    e <- est[cur, , drop = FALSE]
+    # a task is complete only when its final attempt is committed and every
+    # estimand the method declares has a row; one row of a task whose other
+    # rows are missing does not suppress the rest of the work
+    id <- paste(e$scenario_key, e$replication, e$method, sep = "\r")
+    ok_task <- rep(TRUE, length(id))
+    if (!is.null(estimands)) {
+      have <- tapply(e$estimand, id, function(v) paste(sort(unique(v)), collapse = "\r"))
+      want <- vapply(e$method, function(m) paste(sort(unique(estimands[[m]])), collapse = "\r"),
+                     character(1))
+      ok_task <- unname(have[id]) == want
+    }
+    if (!is.null(att) && nrow(att)) {
+      fin <- att[att$final & att$method %in% names(fps) & att$method_fp == fps[att$method], , drop = FALSE]
+      ok_task <- ok_task & id %in% paste(fin$scenario_key, fin$replication, fin$method, sep = "\r")
+    } else {
+      ok_task <- rep(FALSE, length(id))
+    }
+    done <- unique(e[ok_task, c("scenario_key", "replication", "method")])
     if (retry && !is.null(att) && nrow(att)) {
       bad <- att[att$final & att$status %in% RETRYABLE_STATUSES &
                    att$method %in% names(fps) & att$method_fp == fps[att$method], , drop = FALSE]

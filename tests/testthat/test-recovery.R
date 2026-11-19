@@ -311,3 +311,31 @@ test_that("a truth value is published once; later writers get the committed valu
   expect_equal(publish_first(4, dir, "t-z", tmp, wait = 60), 4)
   expect_equal(readRDS(file.path(dir, "t-z.rds")), 4)
 })
+
+test_that("a missing value and the text NA are different content", {
+  expect_false(identical(adempR:::col_text(NA_character_), adempR:::col_text("NA")))
+  df <- data.frame(k = c(1, 1), note = c(NA, "NA"), stringsAsFactors = FALSE)
+  expect_error(adempR:::dedup_table(df, "k", "note", "estimate"), "Conflicting duplicate")
+})
+
+test_that("a task with a missing estimand row is not counted as complete", {
+  st <- sim_study("two", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+    estimands = list(sim_estimand("m1", sim_truth_exact(function(scenario) 0)),
+                     sim_estimand("m2", sim_truth_exact(function(scenario) 0))),
+    methods = list(a = function(data) list(sim_estimate("m1", mean(data$y)),
+                                           sim_estimate("m2", median(data$y)))))
+  path <- run_path()
+  run <- sim_run(st, replications = 2, seed = 1, path = path, chunk_size = 1)
+  full <- est_signature(run)
+  # drop one estimand row from a committed batch, keeping its checksum valid
+  b <- list.files(file.path(path, "batches"), pattern = "\\.rds$", full.names = TRUE)[1]
+  obj <- readRDS(b)
+  obj$estimates <- obj$estimates[obj$estimates$estimand == "m1", , drop = FALSE]
+  saveRDS(obj, b)
+  writeLines(unname(tools::md5sum(b)), sub("\\.rds$", ".md5", b))
+  run2 <- sim_resume(path, replications = 2)
+  expect_equal(est_signature(run2), full)
+  e <- sim_results(run2)$estimates
+  expect_equal(nrow(e), 4L)
+})

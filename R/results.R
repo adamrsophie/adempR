@@ -6,6 +6,11 @@ col_text <- function(x) {
     out[is.na(x)] <- ifelse(is.nan(x[is.na(x)]), "NaN", "NA")
     return(out)
   }
+  # strings are quoted, so a missing value and the text "NA" differ
+  if (is.character(x) || is.factor(x)) {
+    x <- as.character(x)
+    return(ifelse(is.na(x), "NA", paste0("'", x)))
+  }
   out <- as.character(x)
   out[is.na(out)] <- "NA"
   out
@@ -26,7 +31,8 @@ dedup_table <- function(df, keys, scientific, what) {
   if (any(conflict)) {
     bad <- df[conflict, keys, drop = FALSE][1, , drop = FALSE]
     stopf("Conflicting duplicate %s results: the same task (%s) was committed twice with different scientific content. The run directory is inconsistent; inspect the batches before continuing.",
-          what, paste(names(bad), vapply(bad, col_text, character(1)), sep = "=", collapse = ", "))
+          what, paste(names(bad), vapply(bad, function(v) as.character(v), character(1)),
+                      sep = "=", collapse = ", "))
   }
   df[!dup, , drop = FALSE]
 }
