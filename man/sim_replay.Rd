@@ -21,10 +21,14 @@ data, \code{NULL} when generation failed), \code{meta} (protected metadata),
 \code{generation} (recorded and replayed generation status and message),
 \code{estimates} (replayed), \code{committed} (stored rows), \code{attempts},
 \code{stored_fits} (retained fits of the current method versions, when
-kept), and logical \code{matches} (same generation outcome, raw outputs,
-attempt statuses and warning flags) and \code{data_matches} (replayed data
-identical to the retained copy). A retained artifact whose checksum
-does not match stops with an error.
+kept, from the round whose estimates are committed), and logical
+\code{matches} (same generation outcome, same data checksum as recorded,
+same data as the retained copy when there is one, and the same raw
+outputs, attempt statuses, fallback flags and warning flags),
+\code{data_checksum_matches} (replayed data have the checksum recorded with
+the replication) and \code{data_matches} (replayed data identical to the
+retained copy). A retained artifact whose checksum does not match
+stops with an error.
 }
 \description{
 Regenerates the data set of one replication from its recorded random

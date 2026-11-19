@@ -229,3 +229,53 @@ test_that("ambiguous scenario labels are refused", {
   sc <- list(keys = c("k1", "k2"), labels = c("x=1", "x=1"))
   expect_error(adempR:::resolve_scenario(list(scenarios = sc), "x=1"), "several")
 })
+
+test_that("replay detects changed data even when the estimates do not change", {
+  input <- tempfile(); writeLines("1", input)
+  st <- sim_study("constant", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) data.frame(y = as.numeric(readLines(input))),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(const = function(data) sim_estimate("mean", 0)))
+  run <- sim_run(st, replications = 1, seed = 1, path = run_path())
+  expect_true(sim_replay(run, 1, 1)$matches)
+  expect_true(sim_replay(run, 1, 1)$data_checksum_matches)
+  writeLines("2", input)
+  rp <- sim_replay(run, 1, 1)
+  expect_false(rp$data_checksum_matches)
+  expect_false(rp$matches)
+})
+
+test_that("capabilities count data only where retained artifacts hold data", {
+  st <- normal_study(n = 10L, mu = 0, retention = sim_retention(fits = TRUE))
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  cap <- sim_capabilities(run)
+  expect_false(cap$available[cap$analysis == "replay checked against stored data"])
+  expect_true(cap$available[cap$analysis == "inspection of fitted model objects"])
+  # deleted artifact files do not count
+  unlink(list.files(file.path(run$path, "artifacts"), full.names = TRUE))
+  cap <- sim_capabilities(run)
+  expect_false(cap$available[cap$analysis == "inspection of fitted model objects"])
+  # retained data are reported available
+  st2 <- normal_study(n = 10L, mu = 0, retention = sim_retention(data = TRUE))
+  cap2 <- sim_capabilities(sim_run(st2, replications = 2, seed = 1, path = run_path()))
+  expect_true(cap2$available[cap2$analysis == "replay checked against stored data"])
+  expect_false(cap2$available[cap2$analysis == "inspection of fitted model objects"])
+})
+
+test_that("replay returns the fit of the round whose estimates are committed", {
+  flag <- tempfile(); writeLines("x", flag)
+  ms <- list(a = function(data) sim_estimate("mean", mean(data$y)),
+             b = function(data) {
+               if (file.exists(flag)) stop("cannot allocate vector of size 9 Gb")
+               sim_estimate("mean", mean(data$y) + 1)
+             })
+  st <- normal_study(n = 5L, mu = 0, methods = ms, retention = sim_retention(fits = TRUE))
+  path <- run_path()
+  sim_run(st, replications = 1, seed = 1, path = path)
+  unlink(flag)
+  run <- sim_run(st, replications = 1, seed = 1, path = path, retry_failed = TRUE)
+  rp <- sim_replay(run, 1, 1)
+  expect_true(rp$matches)
+  expect_equal(rp$stored_fits$b$estimate, rp$stored_fits$a$estimate + 1)
+  expect_equal(rp$committed$round[rp$committed$method == "b"], 1L)
+})

@@ -615,6 +615,7 @@ commit_chunk <- function(study, results, p) {
     rep$generator_fp <- gen_fp
     rep$artifact <- NA_character_
     rep$artifact_fits <- NA_character_
+    rep$artifact_data <- NA
     if (length(r$artifacts)) {
       dir <- file.path(p$root, "artifacts")
       if (!dir.exists(dir)) dir.create(dir)
@@ -625,6 +626,7 @@ commit_chunk <- function(study, results, p) {
       # each artifact lists the method versions whose fits it holds
       fm <- names(r$artifacts$fits)
       rep$artifact_fits <- if (length(fm)) paste0(fm, "=", fps[fm], collapse = ";") else ""
+      rep$artifact_data <- !is.null(r$artifacts$data)
     }
     rep
   })

@@ -68,7 +68,8 @@ read_raw_results <- function(path, repair = FALSE) {
   arts <- NULL
   if (!is.null(all_reps) && "artifact" %in% names(all_reps)) {
     arts <- all_reps[!is.na(all_reps$artifact), intersect(
-      c("scenario_key", "replication", "generator_fp", "round", "artifact", "artifact_fits"),
+      c("scenario_key", "replication", "generator_fp", "round", "artifact", "artifact_fits",
+        "artifact_data"),
       names(all_reps)), drop = FALSE]
     rownames(arts) <- NULL
   }
