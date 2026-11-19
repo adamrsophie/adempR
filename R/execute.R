@@ -125,6 +125,18 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
       mctx$truth <- dtruth
       mctx$meta <- meta
     }
+    # a method that declared gpu = TRUE sees only its assigned device while
+    # it runs; the variable is restored afterwards
+    if (isTRUE(m$gpu) && !is.null(task$gpu)) {
+      mctx$gpu <- task$gpu
+      old_cuda <- Sys.getenv("CUDA_VISIBLE_DEVICES", unset = NA)
+      Sys.setenv(CUDA_VISIBLE_DEVICES = task$gpu)
+      restore_cuda <- function() {
+        if (is.na(old_cuda)) Sys.unsetenv("CUDA_VISIBLE_DEVICES") else Sys.setenv(CUDA_VISIBLE_DEVICES = old_cuda)
+      }
+    } else {
+      restore_cuda <- function() invisible()
+    }
     retries <- study$failure$retries
     for (attempt in seq_len(retries + 1L)) {
       mdata <- isolate_data(data)
@@ -202,6 +214,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
           value = suppressWarnings(as.numeric(v)), stringsAsFactors = FALSE)
       }
     }
+    restore_cuda()
     if (is.null(rows)) rows <- do.call(rbind, lapply(m$estimands, missing_row))
     rows$fallback <- used_fallback
     rows$attempt_status <- status

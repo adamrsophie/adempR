@@ -233,6 +233,13 @@ isolate_data <- function(x) {
 #'   named list or vector of numbers about each successful fit (iterations,
 #'   effective sample size, a convergence criterion). They are stored per
 #'   fit and returned by [sim_results()] as `diagnostics`.
+#' @param gpu The method uses a GPU. With `sim_run(gpus = )`, each batch of
+#'   tasks is assigned one device; while the method runs,
+#'   `CUDA_VISIBLE_DEVICES` holds that device and `context$gpu` names it.
+#'   Random numbers drawn on the device are outside adempR's streams, and
+#'   many GPU libraries are not bitwise reproducible; seed device generators
+#'   from `context$inner_seeds` and check reproducibility with
+#'   [sim_verify()]. Not part of the fingerprint.
 #' @return An object of class `adempr_method`.
 #' @examples
 #' sim_method(function(data) {
@@ -245,8 +252,10 @@ sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
                        version = NULL, depends = list(), packages = character(),
                        timeout = NULL, coupling = NULL, description = NULL,
                        fallback = NULL, role = c("method", "benchmark", "reference"),
-                       reference = NULL, settings_source = NULL, diagnostics = NULL) {
+                       reference = NULL, settings_source = NULL, diagnostics = NULL,
+                       gpu = FALSE) {
   role <- match.arg(role)
+  if (!is.logical(gpu) || length(gpu) != 1L || is.na(gpu)) stopf("`gpu` must be TRUE or FALSE.")
   if (!is.null(fallback)) check_function(fallback, "fallback")
   if (!is.null(diagnostics)) check_function(diagnostics, "diagnostics")
   if (!is.null(reference)) {
@@ -271,13 +280,16 @@ sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
   }
   if (!is.null(coupling)) check_id(coupling, "coupling")
   if (!is.list(declares)) stopf("`declares` must be a named list.")
-  structure(list(fun = fun, estimands = estimands, scenario_fields = scenario_fields,
+  out <- structure(list(fun = fun, estimands = estimands, scenario_fields = scenario_fields,
                  oracle = oracle, extract = extract, declares = declares,
                  version = version, depends = depends, packages = packages,
                  timeout = timeout, coupling = coupling, description = description,
                  fallback = fallback, role = role, reference = reference,
                  settings_source = settings_source, diagnostics = diagnostics),
             class = "adempr_method")
+  # added only when used, so the objects of other methods are unchanged
+  if (gpu) out$gpu <- TRUE
+  out
 }
 
 method_fingerprint <- function(m) {

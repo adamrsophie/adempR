@@ -241,6 +241,10 @@ check_frozen <- function(study) {
 #'   scenarios above `replications`, named by scenario label or key (see
 #'   [sim_run_adaptive()]). Counts only increase; they are stored in the
 #'   manifest and used by every summary.
+#' @param gpus Optional GPU device identifiers. Batches are assigned
+#'   devices in turn; methods declared with `sim_method(gpu = TRUE)` see
+#'   their batch's device (see [sim_method()]). With the future backend,
+#'   use as many workers as devices.
 #' @param cost Optional function of the scenario returning the relative cost
 #'   of one task (for example `function(scenario) scenario$n^2`, or times
 #'   per scenario from [sim_pilot()]). Tasks are then scheduled longest
@@ -264,9 +268,12 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
                     chunk_size = 25L, workers = NULL, max_tasks = 1e6,
                     update = FALSE, retry_failed = FALSE, label = NULL,
                     progress = interactive(), rng_registry = NULL, cost = NULL,
-                    scenario_replications = NULL) {
+                    scenario_replications = NULL, gpus = NULL) {
   stopifnot(inherits(study, "adempr_study"))
   backend <- match.arg(backend)
+  if (!is.null(gpus) && (!length(gpus) || anyNA(gpus) || !(is.numeric(gpus) || is.character(gpus)))) {
+    stopf("`gpus` must be device identifiers, for example 0:1.")
+  }
   if (!(isTRUE(update) || isFALSE(update) || identical(update, "production"))) {
     stopf("`update` must be TRUE, FALSE or \"production\".")
   }
@@ -345,6 +352,13 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
     tasks <- build_tasks(study, ctx, todo)
     if (!is.null(cost)) tasks <- lpt_order(study, tasks, cost)
     chunks <- split(tasks, ceiling(seq_along(tasks) / chunk_size))
+    if (!is.null(gpus)) {
+      # one device per batch, in turn, so concurrent batches use different devices
+      for (i in seq_along(chunks)) {
+        dev <- as.character(gpus[(i - 1L) %% length(gpus) + 1L])
+        chunks[[i]] <- lapply(chunks[[i]], function(t) { t$gpu <- dev; t })
+      }
+    }
     if (progress) {
       message(sprintf("Running %d task(s) in %d batch(es) with the %s backend.",
                       length(tasks), length(chunks), backend))

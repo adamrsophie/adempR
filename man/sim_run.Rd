@@ -20,7 +20,8 @@ sim_run(
   progress = interactive(),
   rng_registry = NULL,
   cost = NULL,
-  scenario_replications = NULL
+  scenario_replications = NULL,
+  gpus = NULL
 )
 
 sim_resume(path, ...)
@@ -81,6 +82,11 @@ has its own preassigned streams.}
 scenarios above \code{replications}, named by scenario label or key (see
 \code{\link[=sim_run_adaptive]{sim_run_adaptive()}}). Counts only increase; they are stored in the
 manifest and used by every summary.}
+
+\item{gpus}{Optional GPU device identifiers. Batches are assigned
+devices in turn; methods declared with \code{sim_method(gpu = TRUE)} see
+their batch's device (see \code{\link[=sim_method]{sim_method()}}). With the future backend,
+use as many workers as devices.}
 
 \item{...}{Further arguments passed to \code{sim_run()}.}
 }

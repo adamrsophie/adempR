@@ -21,7 +21,8 @@ sim_method(
   role = c("method", "benchmark", "reference"),
   reference = NULL,
   settings_source = NULL,
-  diagnostics = NULL
+  diagnostics = NULL,
+  gpu = FALSE
 )
 }
 \arguments{
@@ -89,6 +90,14 @@ Monte Carlo noise or a bug in the generator or the evaluation.}
 named list or vector of numbers about each successful fit (iterations,
 effective sample size, a convergence criterion). They are stored per
 fit and returned by \code{\link[=sim_results]{sim_results()}} as \code{diagnostics}.}
+
+\item{gpu}{The method uses a GPU. With \code{sim_run(gpus = )}, each batch of
+tasks is assigned one device; while the method runs,
+\code{CUDA_VISIBLE_DEVICES} holds that device and \code{context$gpu} names it.
+Random numbers drawn on the device are outside adempR's streams, and
+many GPU libraries are not bitwise reproducible; seed device generators
+from \code{context$inner_seeds} and check reproducibility with
+\code{\link[=sim_verify]{sim_verify()}}. Not part of the fingerprint.}
 }
 \value{
 An object of class \code{adempr_method}.
