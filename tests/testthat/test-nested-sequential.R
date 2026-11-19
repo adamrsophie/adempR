@@ -58,3 +58,38 @@ test_that("sequential runs stop on committed prefixes and refuse unsupported mea
   expect_error(sim_run_sequential(st, looks = c(40, 80), half_width = 0.05, seed = 1,
                                   path = run_path(), measures = "bias"), "Bernoulli")
 })
+
+test_that("sequential designs are stored, analyze only the prefix and cannot be changed", {
+  st <- normal_study(n = c(10L, 20L), mu = 0, measures = c("coverage"))
+  # a directory started by sim_run() holds replications beyond the first look
+  p0 <- run_path()
+  sim_run(st, replications = 12, seed = 1, path = p0)
+  expect_error(sim_run_sequential(st, looks = c(4, 8), half_width = 0.45, seed = 1, path = p0),
+               "not started by sim_run_sequential")
+  # unattainable target and invalid alpha are refused before any work
+  expect_error(sim_run_sequential(st, looks = c(4, 8), half_width = 0.05, seed = 1,
+                                  path = run_path()), "cannot be reached")
+  expect_error(sim_run_sequential(st, looks = c(4, 8), half_width = 0.45, seed = 1,
+                                  path = run_path(), alpha = 1.5), "alpha")
+  p <- run_path()
+  sq <- sim_run_sequential(st, looks = c(30, 60, 400), half_width = 0.2, seed = 1, path = p)
+  expect_false(is.na(sq$stopped_at))
+  n_stop <- sq$looks$replications[sq$looks$look == sq$stopped_at][1]
+  run <- sim_open(p)
+  expect_identical(run$manifest$sequential$analyzed, n_stop)
+  expect_identical(run$manifest$sequential$design$looks, c(30L, 60L, 400L))
+  # extending the directory with sim_run() does not change what is analyzed
+  sim_run(st, replications = n_stop + 10L, seed = 1, path = p)
+  s <- as.data.frame(sim_summarise(sim_open(p)))
+  expect_true(all(s$n_generated <= n_stop))
+  expect_match(paste(capture.output(print(sim_summarise(sim_open(p)))), collapse = " "),
+               "Sequential run")
+  f <- tempfile(fileext = ".html")
+  sim_report(sim_open(p), f, plots = FALSE)
+  expect_match(paste(readLines(f), collapse = " "), "Sequential stopping")
+  # rerunning with different looks is refused; the same design resumes
+  expect_error(sim_run_sequential(st, looks = c(30, 90, 400), half_width = 0.2, seed = 1, path = p),
+               "different sequential design")
+  sq2 <- sim_run_sequential(st, looks = c(30, 60, 400), half_width = 0.2, seed = 1, path = p)
+  expect_identical(sq2$stopped_at, sq$stopped_at)
+})

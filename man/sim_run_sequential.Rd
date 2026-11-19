@@ -54,6 +54,15 @@ does not cover continuous measures such as bias or MSE, Monte Carlo
 truth, or adaptive changes to the scenarios, which are refused.
 Stopping the Monte Carlo study is unrelated to stopping rules inside a
 simulated clinical trial.
+
+The design (looks, target, measures, alpha and number of cells) and the
+looks table are stored in the manifest after every look. A run directory
+not started by \code{sim_run_sequential()}, or started with a different
+design, is refused, and a target that cannot be reached even at the last
+look is refused before any work. Results, summaries and reports of the
+directory use the replications up to the analyzed look only, and
+summaries and reports state that the run was sequential and where the
+valid simultaneous intervals are.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = 20L),

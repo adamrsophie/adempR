@@ -174,6 +174,9 @@ sim_results <- function(run) {
   raw <- read_raw_results(run$path)
   keys <- study$scenarios$keys
   R <- man$replications
+  # A sequential run is analyzed at the replication count of its stopping
+  # look, even when later replications are on disk.
+  if (!is.null(man$sequential$analyzed)) R <- min(R, man$sequential$analyzed)
   # Results are selected by the fingerprints stored when they were run, never
   # by fingerprints recomputed in the current session.
   fps <- unlist(man$fingerprints$methods)

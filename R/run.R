@@ -107,7 +107,8 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   if (replications > man$replications) {
     changes <- c(changes, sprintf("replications extended from %d to %d", man$replications,
                                   as.integer(replications)))
-  } else if (replications < man$replications) {
+  } else if (replications < man$replications && is.null(man$sequential)) {
+    # (A sequential run analyzes its look prefix, so no warning there.)
     warnf("This run directory holds %d replications per scenario; %d were requested. All %d are kept and summarized.",
              man$replications, as.integer(replications), man$replications)
   }

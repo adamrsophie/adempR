@@ -225,6 +225,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
   attr(summ, "failures") <- failure_table(res)
   attr(summ, "runtime") <- runtime_table(res)
   attr(summ, "study") <- study$name
+  attr(summ, "sequential") <- man$sequential
   class(summ) <- c("adempr_summary", "data.frame")
   summ
 }
@@ -326,6 +327,10 @@ print.adempr_summary <- function(x, digits = 4, ...) {
                      of = df$n_generated, status = df$status,
                      stringsAsFactors = FALSE)
   print(show, row.names = FALSE, right = FALSE)
+  sq <- attr(x, "sequential")
+  if (!is.null(sq)) {
+    cat(sequential_note(sq), "\n", sep = "")
+  }
   f <- attr(x, "failures")
   if (!is.null(f) && any(f$usable < f$generated | f$generation_failed > 0)) {
     cat("\nFailures and invalid outputs (see attr(x, \"failures\")):\n")

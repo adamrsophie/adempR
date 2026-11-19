@@ -41,6 +41,15 @@ cp_interval <- function(k, n, conf) {
 #' Stopping the Monte Carlo study is unrelated to stopping rules inside a
 #' simulated clinical trial.
 #'
+#' The design (looks, target, measures, alpha and number of cells) and the
+#' looks table are stored in the manifest after every look. A run directory
+#' not started by `sim_run_sequential()`, or started with a different
+#' design, is refused, and a target that cannot be reached even at the last
+#' look is refused before any work. Results, summaries and reports of the
+#' directory use the replications up to the analyzed look only, and
+#' summaries and reports state that the run was sequential and where the
+#' valid simultaneous intervals are.
+#'
 #' @param study A [sim_study()].
 #' @param looks Increasing replication counts at which to look.
 #' @param half_width Target half width of every monitored interval.
@@ -82,15 +91,31 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
   if (!is_scalar_number(half_width) || half_width <= 0 || half_width >= 0.5) {
     stopf("`half_width` must be in (0, 0.5).")
   }
+  if (!is_scalar_number(alpha) || alpha <= 0 || alpha >= 1) {
+    stopf("`alpha` must be in (0, 1).")
+  }
+  looks <- as.integer(looks)
   K <- length(looks)
   cells <- sum(vapply(study$methods, function(m) length(m$estimands), integer(1))) *
-    length(study$scenarios) * length(measures)
+    length(study$scenarios$keys) * length(measures)
   conf <- 1 - alpha / (K * cells)
+  # The narrowest possible interval at the last look (all or no successes):
+  # if even that is wider than the target, the design cannot stop early.
+  best <- min(cp_half_widths(looks[K], conf))
+  if (best > half_width) {
+    stopf("The target half width %g cannot be reached even at the last look (%d replications): the narrowest interval there has half width %.4f. Add later looks or relax the target.",
+          half_width, looks[K], best)
+  }
+  design <- list(looks = looks, half_width = half_width, measures = measures,
+                 alpha = alpha, cells = cells, conf_level_per_interval = conf)
+  check_sequential_directory(path, design)
   tab <- list()
   stopped <- NA_integer_
   run <- NULL
   for (k in seq_len(K)) {
     run <- sim_run(study, replications = looks[k], seed = seed, path = path, ...)
+    # Each look analyzes the committed prefix 1..looks[k] only.
+    run$manifest$sequential <- list(design = design, analyzed = looks[k])
     s <- as.data.frame(sim_summarise(run, measures = do.call(sim_measures, as.list(measures))))
     s <- s[s$measure %in% measures, , drop = FALSE]
     kk <- round(s$value * s$n_eligible)
@@ -102,15 +127,53 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
                            value = s$value, n_eligible = s$n_eligible,
                            lower = ci[, "lower"], upper = ci[, "upper"], half_width = hw,
                            stringsAsFactors = FALSE)
-    if (all(hw <= half_width)) {
-      stopped <- k
-      break
-    }
+    if (all(hw <= half_width)) stopped <- k
+    # Recorded after every look, so an interrupted design resumes as itself.
+    run$manifest$sequential <- list(design = design, analyzed = looks[k], stopped_at = stopped,
+                                    looks = bind_rows(tab))
+    update_manifest(path, function(man) {
+      man$sequential <- run$manifest$sequential
+      man
+    })
+    if (!is.na(stopped)) break
   }
   structure(list(run = run, looks = bind_rows(tab), stopped_at = stopped,
                  conf_level_per_interval = conf, alpha = alpha, cells = cells,
                  half_width = half_width),
             class = "adempr_sequential")
+}
+
+cp_half_widths <- function(n, conf) {
+  k <- 0:n
+  ci <- cp_interval(k, n, conf)
+  p <- k / n
+  pmax(p - ci[, "lower"], ci[, "upper"] - p)
+}
+
+# A sequential design is fixed when the directory is first used. A directory
+# started by plain sim_run(), or one with a different design, is refused:
+# analyzing it at the looks would use replications beyond the look, and a
+# changed design would spend alpha again.
+check_sequential_directory <- function(path, design) {
+  if (!file.exists(run_paths(path)$manifest)) return(invisible())
+  man <- read_manifest(path)
+  old <- man$sequential$design
+  if (is.null(old)) {
+    stopf("%s was not started by sim_run_sequential(); a sequential design needs a new run directory.", path)
+  }
+  if (!identical(old, design)) {
+    stopf("%s was started with a different sequential design (looks, target, measures, alpha or cells). Changing the design after looking spends alpha again; use a new run directory.", path)
+  }
+  invisible()
+}
+
+sequential_note <- function(sq) {
+  d <- sq$design
+  paste0("Sequential run: analyzed at ", sq$analyzed, " replications (",
+         if (is.na(sq$stopped_at %||% NA)) "target not reached by the last look" else
+           paste0("stopped at look ", sq$stopped_at, " of ", length(d$looks)),
+         "). The intervals above are fixed sample intervals and do not keep their coverage after optional stopping; the valid simultaneous Clopper-Pearson intervals at level ",
+         format(d$conf_level_per_interval, digits = 6), " per cell are in the sequential looks table.")
 }
 
 #' @export

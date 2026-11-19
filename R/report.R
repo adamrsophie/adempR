@@ -191,6 +191,18 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   add("<h2>6. Execution</h2><p>Replications planned per scenario: ", html_escape(man$replications),
       ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
       nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>")
+  sq <- man$sequential
+  if (!is.null(sq)) {
+    lk <- sq$looks
+    last <- lk[lk$look == max(lk$look), c("scenario_id", "method", "estimand", "measure", "value",
+                                           "n_eligible", "lower", "upper", "half_width"),
+               drop = FALSE]
+    add("<h3>Sequential stopping</h3><p>", html_escape(sequential_note(sq)),
+        " Looks: ", html_escape(paste(sq$design$looks, collapse = ", ")),
+        "; target half width ", html_escape(sq$design$half_width), "; familywise alpha ",
+        html_escape(sq$design$alpha), " over ", sq$design$cells, " cells.</p>",
+        html_table(last))
+  }
   env <- man$environment
   g <- env$git
   git_rows <- if (is.null(g)) {
@@ -407,7 +419,8 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     study_fingerprint = man$study_fingerprint, fingerprints = man$fingerprints,
     revisions = man$revisions, amendments = study$amendments,
     frozen = study$status$frozen, protocol = unclass(study$protocol),
-    environment = man$environment, sessions = man$sessions, exported = now_utc()),
+    environment = man$environment, sessions = man$sessions, sequential = man$sequential,
+    exported = now_utc()),
     file.path(dir, "manifest.json"), auto_unbox = TRUE, pretty = TRUE, null = "null",
     na = "null", digits = NA)
   if (report) sim_report(exported, file.path(dir, "report.html"), overwrite = TRUE)

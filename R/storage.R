@@ -289,10 +289,20 @@ write_manifest <- function(p, manifest) {
     replications = manifest$replications,
     fingerprints = manifest$fingerprints,
     rng_registry = manifest$rng_registry,
-    revisions = manifest$revisions, environment = manifest$environment
+    revisions = manifest$revisions, environment = manifest$environment,
+    sequential = manifest$sequential
   )
   jsonlite::write_json(js, p$manifest_json, auto_unbox = TRUE, pretty = TRUE,
                        digits = NA, null = "null", na = "null")
+}
+
+# Change a stored manifest under the run lock.
+update_manifest <- function(path, f) {
+  p <- run_paths(path)
+  token <- acquire_lock(p)
+  on.exit(release_lock(p, token), add = TRUE)
+  write_manifest(p, f(read_manifest(path)))
+  invisible(TRUE)
 }
 
 read_manifest <- function(path) {
