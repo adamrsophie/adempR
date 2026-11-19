@@ -136,13 +136,20 @@ sim_data <- function(data, truth = list(), meta = list()) {
   structure(list(data = data, truth = truth, meta = meta), class = "adempr_data")
 }
 
-# Detect objects that cannot be isolated by copying.
+# Detect objects that cannot be isolated by copying: environments,
+# external pointers, weak references and S4 objects (reference classes are
+# S4), in elements and in attributes at any depth. The one allowance is the
+# `.internal.selfref` pointer data.table keeps on its tables, which
+# data.table::copy() replaces.
 contains_reference <- function(x, depth = 0L) {
   if (depth > 50L) return(FALSE)
-  if (is.environment(x) || typeof(x) %in% c("externalptr", "weakref", "bytecode")) {
+  if (is.environment(x) || isS4(x) || typeof(x) %in% c("externalptr", "weakref", "bytecode")) {
     return(TRUE)
   }
   if (is.function(x)) return(FALSE)
+  a <- attributes(x)
+  if (inherits(x, "data.table")) a[[".internal.selfref"]] <- NULL
+  for (el in a) if (contains_reference(el, depth + 1L)) return(TRUE)
   if (is.list(x)) {
     for (el in x) if (contains_reference(el, depth + 1L)) return(TRUE)
   }
@@ -153,7 +160,7 @@ check_generated <- function(x) {
   if (is.null(x)) stopf("The generator returned NULL.")
   if (isS4(x)) stopf("The generator returned an S4 object; supported outputs are vectors, matrices, data frames and lists of these.")
   if (contains_reference(x)) {
-    stopf("The generator returned an object containing an environment or external pointer (class %s). Such objects cannot be isolated between methods; return plain data instead.",
+    stopf("The generator returned an object containing an environment, external pointer or S4 object, in an element or an attribute (class %s). Such objects cannot be isolated between methods; return plain data instead.",
           paste(class(x), collapse = "/"))
   }
   invisible(TRUE)

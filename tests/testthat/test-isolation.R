@@ -64,3 +64,39 @@ test_that("methods see only declared scenario fields; oracles see everything", {
   v <- sim_validate(st, error = FALSE)
   expect_true(any(grepl("oracle", v$message)))
 })
+
+test_that("reference objects hidden in attributes are refused, data.table internals allowed", {
+  skip_if_not_installed("data.table")
+  shared <- new.env()
+  assign("v", 1, envir = shared)
+  mk <- function(gen) sim_study("attr", scenarios = sim_scenarios(n = 5L), generate = gen,
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(a = function(data) {
+      e <- attr(data, "box"); if (!is.null(e)) assign("v", 99, envir = e)
+      sim_estimate("mean", mean(data$y))
+    }, b = function(data) {
+      e <- attr(data, "box")
+      sim_estimate("mean", if (is.null(e)) mean(data$y) else get("v", envir = e))
+    }))
+  dt_env <- mk(function(scenario, context) {
+    d <- data.table::data.table(y = rnorm(scenario$n))
+    data.table::setattr(d, "box", shared)
+    d
+  })
+  r <- sim_run(dt_env, replications = 1, seed = 1, path = run_path())
+  expect_equal(sim_results(r)$replications$generation_status, "error")
+  expect_match(sim_results(r)$replications$generation_message, "attribute")
+  expect_equal(get("v", envir = shared), 1)
+  # nested: an environment in an attribute of a list column
+  df_env <- mk(function(scenario, context) {
+    d <- data.frame(y = rnorm(scenario$n))
+    attr(d$y, "box") <- shared
+    d
+  })
+  r2 <- sim_run(df_env, replications = 1, seed = 1, path = run_path())
+  expect_equal(sim_results(r2)$replications$generation_status, "error")
+  # a plain data.table keeps working
+  plain <- mk(function(scenario, context) data.table::data.table(y = c(1, 2, 3)))
+  r3 <- sim_run(plain, replications = 1, seed = 1, path = run_path())
+  expect_equal(sim_results(r3)$estimates$estimate, c(2, 2))
+})
