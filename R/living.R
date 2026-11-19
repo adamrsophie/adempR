@@ -43,9 +43,11 @@ sim_add_methods <- function(run, methods, reason = NULL, ...) {
 #' Leaderboard of a benchmark
 #'
 #' Ranks the methods in every scenario with [sim_rank()] and summarizes per
-#' method: the mean rank over scenarios, the number of scenarios ranked
-#' first, the mean probability of ranking first, and when the method
-#' entered the benchmark. A leaderboard is a summary; the scenario level
+#' method: the mean rank over the ranked scenarios, the number of scenarios
+#' ranked first (a tie for first credits each tied method with its share),
+#' the mean share of first place over bootstrap resamples, the number of
+#' scenarios that could not be ranked, and when the method entered the
+#' benchmark. A leaderboard is a summary; the scenario level
 #' results and their Monte Carlo errors remain the evidence.
 #'
 #' @param run A run or results.
@@ -59,8 +61,12 @@ sim_leaderboard <- function(run, measure = "mse", estimand = NULL, B = 200L) {
   man <- res$manifest
   r <- sim_rank(res, measure = measure, estimand = estimand, B = B)
   agg <- do.call(rbind, lapply(split(r, r$method), function(d) {
-    data.frame(method = d$method[1], scenarios = nrow(d), mean_rank = mean(d$rank),
-               first = sum(d$rank == 1), mean_p_first = mean(d$p_first), stringsAsFactors = FALSE)
+    ok <- d$status == "ok"
+    data.frame(method = d$method[1], scenarios = sum(ok), not_ranked = sum(!ok),
+               mean_rank = if (any(ok)) mean(d$rank[ok]) else NA_real_,
+               first = sum(d$first[ok]),
+               mean_p_first = if (any(ok)) mean(d$p_first[ok]) else NA_real_,
+               stringsAsFactors = FALSE)
   }))
   added <- vapply(agg$method, function(mn) {
     hit <- Filter(function(rv) {

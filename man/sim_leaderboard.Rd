@@ -20,8 +20,10 @@ A data frame, best mean rank first.
 }
 \description{
 Ranks the methods in every scenario with \code{\link[=sim_rank]{sim_rank()}} and summarizes per
-method: the mean rank over scenarios, the number of scenarios ranked
-first, the mean probability of ranking first, and when the method
-entered the benchmark. A leaderboard is a summary; the scenario level
+method: the mean rank over the ranked scenarios, the number of scenarios
+ranked first (a tie for first credits each tied method with its share),
+the mean share of first place over bootstrap resamples, the number of
+scenarios that could not be ranked, and when the method entered the
+benchmark. A leaderboard is a summary; the scenario level
 results and their Monte Carlo errors remain the evidence.
 }

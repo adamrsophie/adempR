@@ -36,23 +36,31 @@ order, 1 = reversed) is returned per cell, with its bootstrap mean.}
 }
 \value{
 A data frame with one row per scenario and method: \code{value},
-\code{loss}, \code{rank}, \code{mean_rank}, \code{p_first}, \code{n_common}, and, with a
-reference, \code{kendall} and \code{kendall_boot}.
+\code{loss}, \code{rank}, \code{first} (share of first place in the full sample),
+\code{mean_rank}, \code{p_first}, \code{n_common}, \code{status}, and, with a reference,
+\code{kendall} and \code{kendall_boot}.
 }
 \description{
 Ranks the methods in each scenario and estimand by a performance
 measure, on the replications where every ranked method has a usable
 result (paired, so the ranking compares methods on the same data sets).
 The uncertainty of the ranking comes from a paired bootstrap over
-replications: \code{p_first} is the proportion of resamples in which the
-method ranks first, and \code{mean_rank} its average rank. A ranking whose
-first place changes often between resamples is not established by the
-study.
+replications: \code{p_first} is the method's share of first place over the
+resamples (a resample in which k methods tie for the smallest loss
+credits each with 1/k, so the shares sum to 1), and \code{mean_rank} its
+average rank. A ranking whose first place changes often between
+resamples is not established by the study. Each scenario has its own
+bootstrap stream derived from \code{seed} and the scenario key, so its result
+does not depend on the other scenarios or their order. Scenarios that
+cannot be ranked (fewer than two replications usable by every method,
+or intervals without a single nominal level for coverage) are returned
+with a \code{status} and no ranks.
 }
 \details{
 Smaller is better for MAE, MSE, RMSE, empirical SE and width; for bias
 the absolute bias is ranked, and for coverage the distance from the
-nominal level of the intervals.
+nominal level of the intervals. With a truth that varies between data
+sets the empirical SE is the SD of the errors, as in \code{\link[=sim_summarise]{sim_summarise()}}.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
