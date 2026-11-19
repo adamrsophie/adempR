@@ -36,9 +36,11 @@ run_captured <- function(expr_fun, timeout = NULL) {
   # the English text and its translation in the current language.
   limit_msgs <- unique(c("reached elapsed time limit",
                          gettext("reached elapsed time limit", domain = "R")))
+  # Only the limit's own error is a timeout. An ordinary error raised after
+  # the deadline (compiled code that ran past the cooperative limit) stays
+  # an error; the attempt records the overrun separately.
   timed_out <- !is.null(err) && !is.null(timeout) &&
-    (any(vapply(limit_msgs, grepl, logical(1), x = conditionMessage(err), fixed = TRUE)) ||
-       unname(tt[["elapsed"]]) >= timeout)
+    any(vapply(limit_msgs, grepl, logical(1), x = conditionMessage(err), fixed = TRUE))
   list(value = value, error = err, timed_out = timed_out, warnings = warns,
        elapsed = unname(tt[["elapsed"]]),
        cpu = unname(tt[["user.self"]] + tt[["sys.self"]]))
@@ -154,12 +156,15 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
           with_packages(m$packages,
             call_flexible(m$fun, list(data = mdata, scenario = pub_scenario, context = mctx)))
         }, m$timeout)
+        # the limit covers the whole attempt: extraction gets what the fit
+        # left of it
+        ext_limit <- if (is.null(m$timeout)) NULL else max(m$timeout - fit$elapsed, 0.01)
         ext <- if (is.null(fit$error)) run_captured(function() {
           out <- if (is.null(m$extract)) fit$value else with_packages(m$packages,
             call_flexible(m$extract, list(fit = fit$value, data = mdata,
                                           scenario = pub_scenario, context = mctx)))
           outputs_to_rows(out, m$estimands)
-        }) else NULL
+        }, ext_limit) else NULL
         list(fit = fit, ext = ext)
       })
       fit <- both$fit
@@ -178,7 +183,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         ext_elapsed <- ext$elapsed
         warns <- c(warns, ext$warnings)
         if (!is.null(ext$error)) {
-          status <- "extraction_error"
+          status <- if (ext$timed_out) "timeout" else "extraction_error"
           message <- conditionMessage(ext$error)
         } else {
           rows <- ext$value
@@ -193,7 +198,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         elapsed = fit$elapsed + ext_elapsed, cpu = fit$cpu,
         timeout = m$timeout %||% NA_real_,
         # the limit is cooperative: compiled code can run past it unnoticed
-        overrun = !is.null(m$timeout) && status != "timeout" && fit$elapsed > m$timeout,
+        overrun = !is.null(m$timeout) && status != "timeout" && fit$elapsed + ext_elapsed > m$timeout,
         final = FALSE, fallback = FALSE, gpu = gpu_dev, stringsAsFactors = FALSE)
       if (status == "ok" || attempt > retries || status == "timeout") break
     }

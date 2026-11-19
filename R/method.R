@@ -225,8 +225,11 @@ isolate_data <- function(x) {
 #'   points but may not interrupt long running compiled code. This is a best
 #'   effort limit, not a hard timeout: an attempt that finishes after the
 #'   limit is kept and flagged in the `overrun` column of the attempts and
-#'   counted in the runtime table. A timeout is recognized whatever the
-#'   session language. Any elapsed time limit set by the caller with
+#'   counted in the runtime table. The limit covers the whole attempt: the
+#'   extraction step gets what the fit left of it. Only the limit's own
+#'   error is classified as a timeout, whatever the session language; an
+#'   ordinary error raised after the deadline stays an error and is flagged
+#'   as an overrun. Any elapsed time limit set by the caller with
 #'   [setTimeLimit()] is cleared after each attempt.
 #' @param coupling Optional name of a group of methods sharing one random
 #'   number stream.

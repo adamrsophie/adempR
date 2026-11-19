@@ -247,3 +247,34 @@ test_that("attempts that run past the cooperative limit are flagged", {
   att <- sim_results(sim_run(st, replications = 1, seed = 1, path = run_path()))$attempts
   expect_true(att$status == "timeout" || isTRUE(att$overrun))
 })
+
+test_that("only the limit's own error is a timeout, and extraction shares the limit", {
+  busy <- function(sec) { t0 <- Sys.time(); while (as.numeric(Sys.time() - t0) < sec) invisible(sum(seq_len(10))) }
+  m <- list(
+    late_error = sim_method(function(data) {
+      # code the limit cannot interrupt (as compiled code), then an
+      # ordinary error after the deadline
+      setTimeLimit(elapsed = Inf)
+      busy(0.3)
+      stop("singular matrix")
+    }, estimands = "mean", timeout = 0.1),
+    slow_extract = sim_method(function(data) list(m = mean(data$y)),
+      extract = function(fit) {
+        repeat Sys.sleep(0.02)
+      }, estimands = "mean", timeout = 0.2))
+  st <- normal_study(n = 5L, mu = 0, methods = m)
+  att <- sim_results(sim_run(st, replications = 1, seed = 1, path = run_path()))$attempts
+  a <- att[att$method == "late_error", ]
+  expect_equal(a$status, "error")
+  expect_true(a$overrun)
+  b <- att[att$method == "slow_extract", ]
+  expect_equal(b$status, "timeout")
+  expect_equal(b$failed_stage, "extract")
+  expect_lt(b$elapsed, 5)
+  # a translated limit message is still recognized
+  old <- Sys.getenv("LANGUAGE", unset = NA)
+  Sys.setenv(LANGUAGE = "de")
+  on.exit(if (is.na(old)) Sys.unsetenv("LANGUAGE") else Sys.setenv(LANGUAGE = old), add = TRUE)
+  r <- adempR:::run_captured(function() repeat Sys.sleep(0.02), timeout = 0.1)
+  expect_true(r$timed_out)
+})
