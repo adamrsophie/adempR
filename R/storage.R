@@ -71,6 +71,39 @@ atomic_save <- function(obj, dir, name, tmpdir) {
   invisible(final_data)
 }
 
+# Publish an object under `name` unless one is already committed there, and
+# return the committed object. Writers claim the name with an exclusive
+# directory, so two concurrent writers never replace each other's value and
+# every reader reports the first value committed. A claim left by a dead
+# process, or held past `wait` seconds, is removed.
+# ponytail: the claim is held only for one atomic_save, so the timeout is
+# a crash guard, not a lease; add a lease if writes ever become slow.
+publish_first <- function(obj, dir, name, tmpdir, wait = 30) {
+  f <- file.path(dir, paste0(name, ".rds"))
+  side <- file.path(dir, paste0(name, ".md5"))
+  committed <- function() file.exists(f) && file.exists(side) &&
+    identical(file_md5(f), readLines(side, warn = FALSE)[1])
+  claim <- file.path(dir, paste0(name, ".claim"))
+  deadline <- Sys.time() + wait
+  repeat {
+    if (committed()) return(readRDS(f))
+    if (dir.create(claim, showWarnings = FALSE)) {
+      on.exit(unlink(claim, recursive = TRUE), add = TRUE)
+      writeLines(as.character(Sys.getpid()), file.path(claim, "pid"))
+      if (committed()) return(readRDS(f))
+      atomic_save(obj, dir, name, tmpdir)
+      return(obj)
+    }
+    pid <- suppressWarnings(as.integer(tryCatch(
+      readLines(file.path(claim, "pid"), warn = FALSE)[1], error = function(e) NA)))
+    if ((!is.na(pid) && identical(pid_alive(pid), FALSE)) || Sys.time() > deadline) {
+      unlink(claim, recursive = TRUE)
+      deadline <- Sys.time() + wait
+    }
+    Sys.sleep(0.05)
+  }
+}
+
 # Read committed objects. Corrupt and uncommitted files are skipped and
 # reported; with `repair = TRUE` (only under the coordinator lock) they are
 # moved to the quarantine directory so their tasks are rerun.
@@ -294,20 +327,89 @@ strip_sources <- function(x) {
   x
 }
 
-# Variables carried by the enclosing environments of the functions in a
-# study, other than the global environment and package namespaces. A
-# serialized closure includes them, so an export lists them.
-closure_contents <- function(x, out = character()) {
-  if (is.function(x) && !is.primitive(x)) {
-    e <- environment(x)
-    if (!is.null(e) && !identical(e, globalenv()) && !isNamespace(e) &&
-        !identical(e, baseenv()) && !identical(e, emptyenv())) {
-      out <- c(out, ls(e, all.names = TRUE))
-    }
-    return(unique(out))
+# Functions are exported with only the bindings they need. A function
+# whose enclosing environment is not a package namespace is copied into a
+# new environment that holds exactly the variables its body and formals
+# name, found where R would find them (enclosing environments and the
+# global environment), with functions among them pruned the same way. The
+# exported study therefore runs in a clean process and carries no other
+# objects of the session. A function that looks variables up by name (get,
+# eval, environment and similar) cannot be pruned faithfully; it keeps its
+# whole enclosing environment and is reported.
+DYNAMIC_LOOKUP <- c("get", "get0", "mget", "exists", "environment", "parent.frame",
+                    "sys.function", "sys.call", "eval", "evalq", "ls", "as.list")
+
+export_functions <- function(x, memo = NULL) {
+  if (is.null(memo)) {
+    memo <- new.env(parent = emptyenv())
+    memo$pairs <- list(); memo$carried <- character(); memo$whole <- character()
+    out <- export_functions(x, memo)
+    attr(out, "carried") <- unique(memo$carried)
+    attr(out, "whole") <- unique(memo$whole)
+    return(out)
   }
-  if (is.list(x) && !is.data.frame(x)) for (el in x) out <- closure_contents(el, out)
-  unique(out)
+  if (is.function(x)) return(export_function(x, memo))
+  if (is.list(x) && !is.data.frame(x) && length(x)) {
+    a <- attributes(x)
+    x[] <- lapply(x, export_functions, memo = memo)
+    attributes(x) <- a
+  }
+  x
+}
+
+# Names a piece of code can look up: every symbol, except the field names
+# after `$` and `@`, which are not variables.
+code_names <- function(x) {
+  if (is.symbol(x)) return(if (nzchar(as.character(x))) as.character(x) else character())
+  if (is.call(x)) {
+    fn <- x[[1L]]
+    if (is.symbol(fn) && as.character(fn) %in% c("$", "@") && length(x) == 3L) {
+      return(c(as.character(fn), code_names(x[[2L]])))
+    }
+    return(unlist(lapply(as.list(x), code_names)))
+  }
+  if (is.pairlist(x) || is.list(x)) return(unlist(lapply(as.list(x), code_names)))
+  character()
+}
+
+export_function <- function(f, memo) {
+  if (is.primitive(f)) return(f)
+  for (pr in memo$pairs) if (identical(pr[[1]], f)) return(pr[[2]])
+  e <- environment(f)
+  if (is.null(e) || isNamespace(e) || identical(e, baseenv()) || identical(e, emptyenv())) return(f)
+  names_used <- unique(c(code_names(body(f)), unlist(lapply(formals(f), code_names))))
+  if (any(DYNAMIC_LOOKUP %in% names_used)) {
+    if (!identical(e, globalenv())) {
+      memo$whole <- c(memo$whole, ls(e, all.names = TRUE))
+      memo$carried <- c(memo$carried, ls(e, all.names = TRUE))
+    }
+    return(f)
+  }
+  # the new environment's parent is the first namespace on the chain (a
+  # function defined in a package's environment), else the global
+  # environment, so package functions resolve as before
+  top <- e
+  while (!identical(top, globalenv()) && !isNamespace(top) &&
+         !identical(top, emptyenv()) && !identical(top, baseenv())) top <- parent.env(top)
+  ne <- new.env(parent = if (isNamespace(top)) top else globalenv())
+  g <- utils::removeSource(f)
+  environment(g) <- ne
+  memo$pairs[[length(memo$pairs) + 1L]] <- list(f, g)
+  for (v in names_used) {
+    h <- e
+    repeat {
+      if (isNamespace(h) || identical(h, emptyenv()) || identical(h, baseenv())) { h <- NULL; break }
+      if (exists(v, envir = h, inherits = FALSE)) break
+      if (identical(h, globalenv())) { h <- NULL; break }
+      h <- parent.env(h)
+    }
+    if (is.null(h)) next
+    val <- get(v, envir = h, inherits = FALSE)
+    if (is.function(val)) val <- export_function(val, memo)
+    assign(v, val, envir = ne)
+    memo$carried <- c(memo$carried, v)
+  }
+  g
 }
 
 # Environment fields compared across sessions (not the time).

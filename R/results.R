@@ -183,14 +183,9 @@ sim_truth <- function(run) {
           t0 <- proc.time()[["elapsed"]]
           row <- if (is.null(seed)) compute_truth_one(tr, sc) else compute_truth_one(tr, sc, seed)
           row$truth_elapsed <- if (tr$kind == "mc") proc.time()[["elapsed"]] - t0 else NA_real_
-          # another reader may have published the value meanwhile: the first
+          # another reader may publish the value meanwhile: the first
           # committed value wins, so every reader reports the same row
-          if (file.exists(f) && file.exists(sidecar) &&
-              identical(file_md5(f), readLines(sidecar, warn = FALSE)[1])) {
-            row <- readRDS(f)
-          } else {
-            atomic_save(row, p$truth, nm, p$tmp)
-          }
+          row <- publish_first(row, p$truth, nm, p$tmp)
         }
       } else {
         row <- compute_truth_one(tr, sc)

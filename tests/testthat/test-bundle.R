@@ -82,8 +82,11 @@ test_that("bundles carry no source paths, stale files, formula cells or foreign 
   run <- sim_run(mk$study, replications = 3, seed = 1, path = run_path())
   expect_null(attr(run$manifest$study$methods$m$fun, "srcref"))
   dir <- tempfile("bundle-")
-  expect_message(sim_export(run, dir, report = FALSE), "secret")
+  expect_no_message(sim_export(run, dir, report = FALSE), message = "secret")
   res <- sim_import(dir)
+  expect_false(exists("secret", envir = environment(res$manifest$study$methods$m$fun),
+                      inherits = FALSE))
+  expect_false(grepl("do-not-share", rawToChar(serialize(res, NULL, ascii = TRUE)), fixed = TRUE))
   expect_null(attr(res$manifest$study$methods$m$fun, "srcref"))
   expect_false(grepl(dirname(mk$src), paste(readLines(file.path(dir, "manifest.json")), collapse = "")))
   expect_false(grepl("/", res$manifest$environment$blas %||% "", fixed = TRUE))
@@ -132,4 +135,84 @@ test_that("regeneration with the recorded registry reproduces an extended run", 
   expect_match(paste(readLines(file.path(dir, "README.md")), collapse = "\n"),
                "rng_registry = res$manifest$rng_registry", fixed = TRUE)
   expect_false(dir.exists(file.path(dir, "artifacts")))
+})
+
+test_that("exported functions keep only the bindings they use and still run", {
+  make <- function(k) {
+    secret <- "do-not-share"
+    helper <- function(x) x * k
+    function(data) sim_estimate("mean", helper(mean(data$y)))
+  }
+  run <- sim_run(normal_study(n = 10L, mu = 0, methods = list(m = make(2))),
+                 replications = 3, seed = 1, path = run_path())
+  dir <- tempfile("bundle-")
+  expect_message(sim_export(run, dir, report = FALSE), "helper, k|k, helper")
+  res <- sim_import(dir)
+  f <- res$manifest$study$methods$m$fun
+  expect_setequal(ls(environment(f)), "helper")
+  expect_setequal(ls(environment(environment(f)$helper)), "k")
+  expect_false(grepl("do-not-share", rawToChar(serialize(res, NULL, ascii = TRUE)), fixed = TRUE))
+  # the exported study identifies and computes the same as the original
+  expect_identical(method_fingerprint(res$manifest$study$methods$m),
+                   method_fingerprint(run$manifest$study$methods$m))
+  d <- data.frame(y = c(1, 2, 3))
+  expect_equal(f(d)$estimate, 4)
+  # a function that looks names up dynamically keeps its whole environment
+  dyn <- local({ hidden <- 1; function(data) sim_estimate("mean", get("hidden") + mean(data$y)) })
+  run2 <- sim_run(normal_study(n = 10L, mu = 0, methods = list(d = dyn)),
+                  replications = 2, seed = 1, path = run_path())
+  expect_message(sim_export(run2, tempfile("bundle-"), report = FALSE),
+                 "whole enclosing environments are exported, including: hidden")
+})
+
+test_that("a failed overwrite keeps the earlier bundle, and import checks the bundle as a whole", {
+  run <- sim_run(normal_study(n = 10L, mu = 0), replications = 3, seed = 1, path = run_path())
+  dir <- tempfile("bundle-")
+  suppressMessages(sim_export(run, dir, report = FALSE))
+  before <- readLines(file.path(dir, "CHECKSUMS.md5"))
+  local_mocked_bindings(sim_flow = function(...) stop("simulated failure"))
+  expect_error(suppressMessages(sim_export(run, dir, report = FALSE, overwrite = TRUE)),
+               "simulated failure")
+  expect_identical(readLines(file.path(dir, "CHECKSUMS.md5")), before)
+  expect_s3_class(sim_import(dir), "adempr_results")
+  expect_length(list.files(dirname(dir), pattern = paste0("^\\.", basename(dir)), all.files = TRUE), 0L)
+  # a file outside the checksums is refused
+  writeLines("x", file.path(dir, "extra.txt"))
+  expect_error(sim_import(dir), "not covered by its checksums: extra.txt")
+  unlink(file.path(dir, "extra.txt"))
+  # the JSON manifest must agree with the results object
+  mj <- file.path(dir, "manifest.json")
+  j <- jsonlite::read_json(mj)
+  j$seed <- 99
+  jsonlite::write_json(j, mj, auto_unbox = TRUE)
+  ck <- file.path(dir, "CHECKSUMS.md5")
+  lines <- readLines(ck)
+  lines[grepl("  manifest\\.json$", lines)] <- paste0(unname(tools::md5sum(mj)), "  manifest.json")
+  writeLines(lines, ck)
+  expect_error(sim_import(dir), "disagree on: seed")
+  # a checksum list naming only results.rds is not a bundle
+  writeLines(lines[grepl("results\\.rds", lines)], ck)
+  expect_error(sim_import(dir), "does not list manifest.json")
+})
+
+test_that("include_data copies only the artifacts of the current replications", {
+  flag <- tempfile(); writeLines("x", flag)
+  m <- function(data) {
+    if (file.exists(flag)) stop("cannot allocate vector of size 9 Gb")
+    sim_estimate("mean", mean(data$y))
+  }
+  st <- normal_study(n = 5L, mu = 0, methods = list(m = m),
+                     retention = sim_retention(data = TRUE))
+  path <- run_path()
+  sim_run(st, replications = 2, seed = 1, path = path)
+  unlink(flag)
+  run <- sim_run(st, replications = 2, seed = 1, path = path, retry_failed = TRUE)
+  on_disk <- list.files(file.path(path, "artifacts"), pattern = "\\.rds$")
+  used <- basename(stats::na.omit(sim_results(run)$replications$artifact))
+  dir <- tempfile("bundle-")
+  suppressMessages(sim_export(run, dir, report = FALSE, include_data = TRUE))
+  copied <- list.files(file.path(dir, "artifacts"), pattern = "\\.rds$")
+  expect_setequal(copied, used)
+  expect_true(length(on_disk) >= length(used))
+  expect_s3_class(sim_import(dir), "adempr_results")
 })

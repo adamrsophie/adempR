@@ -34,18 +34,27 @@ every file. Paths inside the bundle are relative, numerical library
 names are recorded without their directories, and source references
 (which hold the paths of sourced files) are removed from stored
 functions. The git remote URL, when recorded, names the repository and
-its owner. A function defined inside another function carries the
-objects of its enclosing environment; \code{sim_export()} lists them in a
-message so private objects are not shared unknowingly. Text cells that
+its owner. Every exported function keeps only the variables its code
+names (from enclosing environments and the global environment), so the
+exported study runs in a clean process and carries no other objects;
+\code{sim_export()} lists the variables it carries in a message. A function
+that looks variables up by name (\code{get()}, \code{eval()}, \code{environment()} and
+similar) keeps its whole enclosing environment, which is also reported.
+Text cells that
 a spreadsheet would read as formulas are written with a leading single
 quote. Generated data are copied only with \code{include_data = TRUE},
 because they may be large or private.
 }
 \details{
-\code{overwrite = TRUE} replaces an earlier bundle entirely and refuses any
-other non-empty directory. \code{sim_import()} verifies the checksums and
-refuses a bundle whose schema major version differs from this version
-of adempR.
+The bundle is built in a temporary sibling directory, verified, and
+only then moved into place, so a failed export leaves an earlier bundle
+intact. \code{overwrite = TRUE} replaces an earlier bundle entirely and
+refuses any other non-empty directory. \code{include_data = TRUE} copies the
+retained artifacts of the selected replications only, not files
+superseded by a retry. \code{sim_import()} verifies every checksum, refuses
+files not covered by them, refuses a bundle whose schema major version
+differs from this version of adempR, and checks that \code{manifest.json}
+and \code{results.rds} agree on the study, seed, label and fingerprints.
 
 A bundle contains R code (the study's functions). The checksums detect
 corruption, not tampering: import bundles only from trusted sources, as

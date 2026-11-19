@@ -479,17 +479,26 @@ csv_neutralize <- function(x) {
 #' names are recorded without their directories, and source references
 #' (which hold the paths of sourced files) are removed from stored
 #' functions. The git remote URL, when recorded, names the repository and
-#' its owner. A function defined inside another function carries the
-#' objects of its enclosing environment; `sim_export()` lists them in a
-#' message so private objects are not shared unknowingly. Text cells that
+#' its owner. Every exported function keeps only the variables its code
+#' names (from enclosing environments and the global environment), so the
+#' exported study runs in a clean process and carries no other objects;
+#' `sim_export()` lists the variables it carries in a message. A function
+#' that looks variables up by name (`get()`, `eval()`, `environment()` and
+#' similar) keeps its whole enclosing environment, which is also reported.
+#' Text cells that
 #' a spreadsheet would read as formulas are written with a leading single
 #' quote. Generated data are copied only with `include_data = TRUE`,
 #' because they may be large or private.
 #'
-#' `overwrite = TRUE` replaces an earlier bundle entirely and refuses any
-#' other non-empty directory. `sim_import()` verifies the checksums and
-#' refuses a bundle whose schema major version differs from this version
-#' of adempR.
+#' The bundle is built in a temporary sibling directory, verified, and
+#' only then moved into place, so a failed export leaves an earlier bundle
+#' intact. `overwrite = TRUE` replaces an earlier bundle entirely and
+#' refuses any other non-empty directory. `include_data = TRUE` copies the
+#' retained artifacts of the selected replications only, not files
+#' superseded by a retry. `sim_import()` verifies every checksum, refuses
+#' files not covered by them, refuses a bundle whose schema major version
+#' differs from this version of adempR, and checks that `manifest.json`
+#' and `results.rds` agree on the study, seed, label and fingerprints.
 #'
 #' A bundle contains R code (the study's functions). The checksums detect
 #' corruption, not tampering: import bundles only from trusted sources, as
@@ -518,23 +527,66 @@ csv_neutralize <- function(x) {
 #' @export
 sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data = FALSE) {
   if (!is_scalar_character(dir)) stopf("`dir` must be a path.")
+  replace <- FALSE
   if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE))) {
     if (!overwrite) stopf("%s exists and is not empty; use `overwrite = TRUE`.", dir)
     # Only an earlier bundle is replaced, and it is replaced entirely, so no
     # stale file from the earlier export survives into the new checksums.
-    if (!file.exists(file.path(dir, "CHECKSUMS.md5"))) {
+    if (!is_bundle_dir(dir)) {
       stopf("%s is not empty and is not an adempR bundle; refusing to overwrite it.", dir)
     }
-    unlink(dir, recursive = TRUE)
+    replace <- TRUE
   }
+  final <- dir
+  # The bundle is built in a sibling directory and moved into place only
+  # when complete, so a failed export never destroys the earlier bundle.
+  dir <- file.path(dirname(final), paste0(".", basename(final), ".staging-", new_uuid()))
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   res <- sim_results(run)
   man <- res$manifest
   study <- man$study
   dir.create(file.path(dir, "tables"), recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(dir, "code"), showWarnings = FALSE)
-  summ <- sim_summarise(res)
-  tabs <- list(scenarios = res$scenarios, replications = res$replications,
-               attempts = res$attempts, estimates = res$estimates, truth = res$truth,
+  # one sanitized snapshot feeds every format: the RDS, the CSV tables, the
+  # JSON manifest and the report
+  pruned <- export_functions(strip_sources(study))
+  carried <- attr(pruned, "carried")
+  whole <- attr(pruned, "whole")
+  attr(pruned, "carried") <- NULL
+  attr(pruned, "whole") <- NULL
+  if (length(carried)) {
+    message(sprintf("The exported functions carry these objects they use: %s. Check that none of them is private.",
+                    paste(utils::head(carried, 20), collapse = ", ")))
+  }
+  if (length(whole)) {
+    message(sprintf("Some functions look variables up by name, so their whole enclosing environments are exported, including: %s.",
+                    paste(utils::head(whole, 20), collapse = ", ")))
+  }
+  exported <- res
+  exported$path <- NULL
+  exported$manifest$study <- pruned
+  if (!is.null(exported$replications)) exported$replications$artifact <- NA_character_
+  exported$artifacts <- NULL
+  if (include_data && !is.null(res$path)) {
+    # only the artifacts of the selected (current) replications are copied;
+    # superseded files from earlier rounds stay behind
+    used <- unique(stats::na.omit(res$replications$artifact))
+    used <- used[file.exists(file.path(res$path, used))]
+    if (length(used)) {
+      dir.create(file.path(dir, "artifacts"), showWarnings = FALSE)
+      side <- sub("\\.rds$", ".md5", used)
+      side <- side[file.exists(file.path(res$path, side))]
+      ok <- file.copy(file.path(res$path, c(used, side)), file.path(dir, "artifacts"))
+      if (!all(ok)) stopf("Could not copy the retained artifacts into the bundle.")
+      exported$replications$artifact <- res$replications$artifact
+      if (!is.null(res$artifacts)) {
+        exported$artifacts <- res$artifacts[res$artifacts$artifact %in% used, , drop = FALSE]
+      }
+    }
+  }
+  summ <- sim_summarise(exported)
+  tabs <- list(scenarios = exported$scenarios, replications = exported$replications,
+               attempts = exported$attempts, estimates = exported$estimates, truth = exported$truth,
                summary = as.data.frame(summ), failures = attr(summ, "failures"),
                runtime = attr(summ, "runtime"), flow = sim_flow(res),
                estimands = bind_rows(lapply(study$estimands, function(e) {
@@ -559,25 +611,6 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   for (en in names(study$estimands)) {
     tf <- study$estimands[[en]]$truth$fun
     if (!is.null(tf)) writeLines(fun_source(tf), file.path(dir, "code", paste0("truth-", en, ".R")))
-  }
-  carried <- closure_contents(study)
-  if (length(carried)) {
-    message(sprintf("Functions in this study are closures whose enclosing environments are exported with them, including: %s. Check that none of these objects is private.",
-                    paste(utils::head(carried, 20), collapse = ", ")))
-  }
-  exported <- res
-  exported$path <- NULL
-  exported$manifest$study <- strip_sources(exported$manifest$study)
-  if (!is.null(exported$replications)) exported$replications$artifact <- NA_character_
-  exported$artifacts <- NULL
-  if (include_data && !is.null(res$path)) {
-    src <- file.path(res$path, "artifacts")
-    if (dir.exists(src)) {
-      dir.create(file.path(dir, "artifacts"), showWarnings = FALSE)
-      file.copy(list.files(src, full.names = TRUE), file.path(dir, "artifacts"))
-      exported$replications$artifact <- res$replications$artifact
-      exported$artifacts <- res$artifacts
-    }
   }
   saveRDS(exported, file.path(dir, "results.rds"))
   jsonlite::write_json(list(
@@ -622,26 +655,54 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   files <- setdiff(files, "CHECKSUMS.md5")
   sums <- tools::md5sum(file.path(dir, files))
   writeLines(paste(unname(sums), files, sep = "  "), file.path(dir, "CHECKSUMS.md5"))
-  invisible(dir)
+  verify_bundle(dir)
+  old <- NULL
+  if (replace) {
+    old <- file.path(dirname(final), paste0(".", basename(final), ".old-", new_uuid()))
+    if (!file.rename(final, old)) stopf("Could not move the earlier bundle %s aside.", final)
+  } else if (dir.exists(final)) {
+    unlink(final, recursive = TRUE)
+  }
+  if (!file.rename(dir, final)) {
+    if (!is.null(old)) file.rename(old, final)
+    stopf("Could not move the new bundle into %s; the earlier bundle is unchanged.", final)
+  }
+  if (!is.null(old)) unlink(old, recursive = TRUE)
+  invisible(final)
 }
 
-#' @rdname sim_export
-#' @export
-sim_import <- function(dir) {
+# A directory holds an adempR bundle when its checksum list names the
+# results and the manifest.
+is_bundle_dir <- function(dir) {
+  ck <- file.path(dir, "CHECKSUMS.md5")
+  if (!file.exists(ck)) return(FALSE)
+  files <- sub("^[0-9a-f]+  ", "", readLines(ck, warn = FALSE))
+  all(c("results.rds", "manifest.json") %in% files)
+}
+
+# Verify a bundle: every listed file matches its checksum, every file is
+# listed, the schema major version is this one, and the JSON manifest
+# agrees with the results object on the study, seed, label and
+# fingerprints. Returns the results.
+verify_bundle <- function(dir) {
   ck <- file.path(dir, "CHECKSUMS.md5")
   if (!file.exists(ck)) stopf("No CHECKSUMS.md5 in %s; not an adempR bundle.", dir)
   lines <- readLines(ck)
-  if (!any(grepl("  results\\.rds$", lines))) {
-    stopf("CHECKSUMS.md5 does not list results.rds; not a valid adempR bundle.")
-  }
   sums <- sub("  .*$", "", lines)
   files <- sub("^[0-9a-f]+  ", "", lines)
+  missing <- setdiff(c("results.rds", "manifest.json"), files)
+  if (length(missing)) {
+    stopf("CHECKSUMS.md5 does not list %s; not a valid adempR bundle.", paste(missing, collapse = " and "))
+  }
   actual <- unname(tools::md5sum(file.path(dir, files)))
   bad <- files[is.na(actual) | actual != sums]
   if (length(bad)) stopf("Checksum mismatch or missing file(s) in the bundle: %s.",
                          paste(bad, collapse = ", "))
-  mj <- file.path(dir, "manifest.json")
-  version <- if (file.exists(mj)) jsonlite::read_json(mj)$schema_version else NULL
+  extra <- setdiff(list.files(dir, recursive = TRUE, all.files = TRUE), c(files, "CHECKSUMS.md5"))
+  if (length(extra)) stopf("File(s) in the bundle not covered by its checksums: %s.",
+                           paste(extra, collapse = ", "))
+  j <- jsonlite::read_json(file.path(dir, "manifest.json"))
+  version <- j$schema_version
   if (!is_scalar_character(version)) stopf("The bundle has no schema version in manifest.json.")
   if (!identical(major_version(version), major_version(SCHEMA_VERSION))) {
     stopf("The bundle has schema version %s; this version of adempR reads schema %s.x.",
@@ -649,5 +710,22 @@ sim_import <- function(dir) {
   }
   res <- readRDS(file.path(dir, "results.rds"))
   if (!inherits(res, "adempr_results")) stopf("results.rds does not hold adempR results.")
+  man <- res$manifest
+  same <- function(a, b) identical(as.character(unlist(a %||% NA)), as.character(unlist(b %||% NA)))
+  agree <- c(schema_version = same(man$schema_version %||% version, version),
+             study = same(man$study$name, j$study),
+             seed = same(man$seed, j$seed),
+             label = same(man$label, j$label),
+             study_fingerprint = same(man$study_fingerprint, j$study_fingerprint),
+             fingerprints = same(man$fingerprints, j$fingerprints))
+  if (!all(agree)) {
+    stopf("manifest.json and results.rds disagree on: %s.", paste(names(agree)[!agree], collapse = ", "))
+  }
   res
+}
+
+#' @rdname sim_export
+#' @export
+sim_import <- function(dir) {
+  verify_bundle(dir)
 }

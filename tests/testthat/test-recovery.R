@@ -259,3 +259,20 @@ test_that("a batch committed before its inventory entry is added on the next res
   unlink(b)
   expect_warning(sim_results(run2), "missing from the run directory")
 })
+
+test_that("a truth value is published once; later writers get the committed value", {
+  dir <- tempfile(); tmp <- tempfile(); dir.create(dir); dir.create(tmp)
+  expect_equal(publish_first(1, dir, "t-x", tmp), 1)
+  expect_equal(publish_first(2, dir, "t-x", tmp), 1)
+  # a claim held by a live writer makes others wait for its value
+  dir.create(file.path(dir, "t-y.claim"))
+  writeLines(as.character(Sys.getpid()), file.path(dir, "t-y.claim", "pid"))
+  expect_equal(publish_first(3, dir, "t-y", tmp, wait = 0.2), 3)
+  expect_false(dir.exists(file.path(dir, "t-y.claim")))
+  # a claim left by a dead process is recovered at once
+  skip_on_os("windows")
+  dir.create(file.path(dir, "t-z.claim"))
+  writeLines("999999", file.path(dir, "t-z.claim", "pid"))
+  expect_equal(publish_first(4, dir, "t-z", tmp, wait = 60), 4)
+  expect_equal(readRDS(file.path(dir, "t-z.rds")), 4)
+})
