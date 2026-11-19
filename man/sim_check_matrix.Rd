@@ -19,7 +19,8 @@ sim_check_matrix(m, type = c("correlation", "covariance"), tol = 1e-10)
 \description{
 Checks that a matrix is square, symmetric, has a positive diagonal (unit
 diagonal for a correlation matrix) and is positive semidefinite
-(eigenvalues above \code{-tol} times the largest). The matrix is never
+(eigenvalues of the matrix scaled to unit diagonal above \code{-tol} times
+the largest). The matrix is never
 modified: a failing matrix is an error, because silently repairing it
 would change the data-generating mechanism.
 }

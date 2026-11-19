@@ -272,3 +272,17 @@ with_preserved_rng <- function(expr) {
   on.exit(rng_restore(state), add = TRUE)
   force(expr)
 }
+
+# Wrapper so tests can simulate a missing optional package.
+has_namespace <- function(pkg) requireNamespace(pkg, quietly = TRUE)
+
+# Show a value to the decimal place of the first significant digit of its
+# Monte Carlo standard error plus one, so no digit is printed that the
+# simulation cannot support; without an MCSE, four significant digits.
+fmt_mcse <- function(x, mcse) {
+  out <- fmt_num(x, 4)
+  ok <- is.finite(x) & is.finite(mcse) & mcse > 0
+  places <- pmax(0, -floor(log10(mcse[ok])) + 1)
+  out[ok] <- sprintf("%.*f", as.integer(places), x[ok])
+  out
+}

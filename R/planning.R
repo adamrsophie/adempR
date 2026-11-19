@@ -42,7 +42,12 @@ sim_plan_replications <- function(type = c("proportion", "mean"), p = NULL, sd =
     sd^2
   }
   mult <- if (is.null(half_width)) 1 else stats::qnorm(1 - (1 - level) / 2)^2
-  R <- as.integer(ceiling(mult * v / target^2 - 1e-9))
+  R <- ceiling(mult * v / target^2 - 1e-9)
+  if (R > .Machine$integer.max) {
+    stopf("The target needs %s replications, more than can be counted; relax the target.",
+          format(R, big.mark = ","))
+  }
+  R <- as.integer(R)
   structure(max(R, 1L), type = type, p = p, sd = sd, mcse = mcse, half_width = half_width)
 }
 
@@ -114,12 +119,16 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
   res <- sim_results(run)
   att <- res$attempts
   reps <- res$replications
-  # cost per task: generation plus all methods
-  per_task <- stats::aggregate(att$elapsed, by = list(scenario_key = att$scenario_key,
-                                                      replication = att$replication), FUN = sum)
-  names(per_task)[3] <- "methods_seconds"
-  per_task <- merge(per_task, reps[c("scenario_key", "replication", "generation_elapsed")],
-                    by = c("scenario_key", "replication"))
+  # cost per task: generation plus all methods (0 for data sets no method saw)
+  per_task <- reps[c("scenario_key", "replication", "generation_elapsed")]
+  per_task$methods_seconds <- 0
+  if (!is.null(att) && nrow(att)) {
+    ms <- stats::aggregate(att$elapsed, by = list(scenario_key = att$scenario_key,
+                                                  replication = att$replication), FUN = sum)
+    i <- match(paste(per_task$scenario_key, per_task$replication),
+               paste(ms$scenario_key, ms$replication))
+    per_task$methods_seconds[!is.na(i)] <- ms$x[i[!is.na(i)]]
+  }
   per_task$task_seconds <- per_task$methods_seconds + per_task$generation_elapsed
   cost <- do.call(rbind, lapply(split(per_task, per_task$scenario_key), function(d) {
     data.frame(scenario_key = d$scenario_key[1],

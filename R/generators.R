@@ -17,7 +17,8 @@ check_prob <- function(p, what, open = FALSE) {
 #'
 #' Checks that a matrix is square, symmetric, has a positive diagonal (unit
 #' diagonal for a correlation matrix) and is positive semidefinite
-#' (eigenvalues above `-tol` times the largest). The matrix is never
+#' (eigenvalues of the matrix scaled to unit diagonal above `-tol` times
+#' the largest). The matrix is never
 #' modified: a failing matrix is an error, because silently repairing it
 #' would change the data-generating mechanism.
 #'
@@ -42,7 +43,10 @@ sim_check_matrix <- function(m, type = c("correlation", "covariance"), tol = 1e-
   } else if (any(d <= 0)) {
     stopf("A covariance matrix must have a positive diagonal.")
   }
-  ev <- eigen(m, symmetric = TRUE, only.values = TRUE)$values
+  # Checked on the correlation scale, so that a large variance elsewhere in
+  # the matrix cannot hide an indefinite block within the tolerance.
+  s <- 1 / sqrt(d)
+  ev <- eigen(m * outer(s, s), symmetric = TRUE, only.values = TRUE)$values
   if (min(ev) < -tol * max(abs(ev))) {
     stopf("The %s matrix is not positive semidefinite (smallest eigenvalue %s). It is not repaired automatically.",
           type, format(min(ev), digits = 4))

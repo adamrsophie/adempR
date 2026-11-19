@@ -33,6 +33,8 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
   int_ok <- rows$estimate_status %in% USABLE_FOR_INTERVAL & rows$interval_status == "valid"
   test_ok <- rows$estimate_status %in% USABLE_FOR_INTERVAL & rows$test_status == "valid"
   e <- rows$estimate - truth
+  tt <- truth[has_truth]
+  varying_truth <- length(tt) > 1L && any(tt != tt[1])
   if (inherits(m, "adempr_measure")) {
     elig <- rep(TRUE, nrow(rows))
     if ("estimate" %in% m$requires) elig <- elig & usable
@@ -53,6 +55,20 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
       sel <- usable & has_truth
       t <- truth[sel]
       if (!length(t)) return(k_mean(numeric(), level))
+      if (!all(is.finite(e[sel]))) {
+        return(kernel_result(n = length(t), status = "infinite",
+                             note = "nonfinite errors"))
+      }
+      # A truth that is small next to the spread of the estimates makes the
+      # ratio unstable: it is reported, but flagged.
+      spread <- if (length(t) > 1L) stats::sd(rows$estimate[sel]) else 0
+      unstable <- function(r, ref) {
+        if (abs(ref) < spread) {
+          r$status <- "unstable"
+          r$note <- paste0(r$note, "; the truth is smaller than the empirical SE, so the ratio is unstable")
+        }
+        r
+      }
       if (all(t == t[1])) {
         if (abs(t[1]) < .Machine$double.eps^0.5) {
           kernel_result(n = length(t), status = "undefined",
@@ -60,7 +76,7 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
         } else {
           r <- k_mean(e[sel] / t[1], level)
           r$note <- "bias divided by the (constant) truth"
-          r
+          unstable(r, t[1])
         }
       } else {
         mt <- mean(t)
@@ -71,14 +87,26 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
         val <- sum(e[sel]) / sum(t)
         lin <- (e[sel] - val * t) / mt
         mc <- if (length(t) > 1L) stats::sd(lin) / sqrt(length(t)) else NA_real_
-        kernel_result(value = val, mcse = mc, n = length(t),
-                      note = "varying truth: ratio of averages, sum(error) / sum(truth), delta method MCSE")
+        z <- stats::qnorm(1 - (1 - level) / 2)
+        unstable(kernel_result(value = val, mcse = mc, lower = val - z * mc, upper = val + z * mc,
+                               n = length(t),
+                               note = "varying truth: ratio of averages, sum(error) / sum(truth), delta method MCSE"),
+                 mt)
       }
     },
-    empse = k_empse(rows$estimate[usable], level),
+    # With a truth that varies between data sets, the spread of the
+    # estimates includes the spread of the truth; the errors are used.
+    empse = if (varying_truth) {
+      r <- k_empse(e[usable & has_truth], level)
+      r$note <- paste(c("SD of the errors (truth varies between data sets)",
+                        if (!is.na(r$note)) r$note), collapse = "; ")
+      r
+    } else k_empse(rows$estimate[usable], level),
     mean_se = k_mean(rows$se[usable & se_ok], level),
     rmvar = k_rmvar(rows$se[usable & se_ok], level),
-    se_ratio = k_se_ratio(rows$estimate[usable & se_ok], rows$se[usable & se_ok], level),
+    se_ratio = if (varying_truth) {
+      k_se_ratio(e[usable & se_ok & has_truth], rows$se[usable & se_ok & has_truth], level)
+    } else k_se_ratio(rows$estimate[usable & se_ok], rows$se[usable & se_ok], level),
     coverage = {
       sel <- int_ok & has_truth
       r <- k_prop(rows$lower[sel] <= truth[sel] & truth[sel] <= rows$upper[sel], level)
@@ -190,7 +218,12 @@ measure_needs_truth <- function(m) {
 #' @param measures Measures to compute; defaults to the study's measures.
 #' @param weighted If `TRUE` and the scenario design has weights, adds
 #'   prespecified weighted averages over scenarios for each method,
-#'   estimand and measure (scenarios treated as independent).
+#'   estimand and measure (scenarios treated as independent; scenarios of
+#'   weight 0 are left out). When a scenario has a boundary proportion, the
+#'   weighted interval comes from exact per scenario intervals with a
+#'   Bonferroni split. An average over data generating mechanisms hides
+#'   where a method works and where it fails; report it next to the
+#'   scenario results, never instead of them.
 #' @return An object of class `adempr_summary`: a data frame with one row
 #'   per scenario, method, estimand and measure, and attributes `failures`
 #'   and `runtime`.
@@ -288,31 +321,61 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
 #' @export
 sim_summarize <- sim_summarise
 
+PROPORTION_MEASURES <- c("coverage", "noncoverage_lower", "noncoverage_upper", "rejection",
+                         "usable")
+
 weighted_rows <- function(summ, study) {
   w <- stats::setNames(study$scenarios$weights, study$scenarios$keys)
   grp <- unique(summ[c("method", "estimand", "measure")])
+  z <- stats::qnorm(1 - (1 - study$level) / 2)
   rows <- lapply(seq_len(nrow(grp)), function(i) {
     s <- summ[summ$method == grp$method[i] & summ$estimand == grp$estimand[i] &
                 summ$measure == grp$measure[i], , drop = FALSE]
-    ok <- s$status %in% c("ok", "boundary") & !is.na(s$value)
-    allok <- all(ok)
     ww <- w[s$scenario_key]
-    val <- if (allok) sum(ww * s$value) else NA_real_
-    mc <- if (allok && !anyNA(s$mcse)) sqrt(sum(ww^2 * s$mcse^2)) else NA_real_
+    # scenarios with weight 0 do not enter the average
+    s <- s[ww > 0, , drop = FALSE]
+    ww <- ww[ww > 0]
+    # the point value needs a value in every weighted scenario, whatever
+    # its uncertainty status
+    have <- !is.na(s$value) & is.finite(s$value)
+    val <- if (all(have)) sum(ww * s$value) else NA_real_
+    mc <- if (all(have) && !anyNA(s$mcse)) sqrt(sum(ww^2 * s$mcse^2)) else NA_real_
+    lo <- val - z * mc
+    hi <- val + z * mc
+    status <- if (all(have)) "ok" else "unavailable"
+    note <- if (all(have)) "weighted average; scenarios treated as independent" else
+      "some weighted scenarios have no value"
+    boundary <- s$status %in% "boundary"
+    if (all(have) && any(boundary)) {
+      if (grp$measure[i] %in% PROPORTION_MEASURES) {
+        # A plug-in MCSE of 0 is not certainty. Exact per scenario intervals
+        # at level 1 - (1 - level) / S all hold with probability at least
+        # `level`, so their weighted sum bounds the weighted proportion.
+        S <- nrow(s)
+        k <- round(s$value * s$n_eligible)
+        ci <- cp_interval(k, s$n_eligible, 1 - (1 - study$level) / S)
+        lo <- sum(ww * ci[, "lower"])
+        hi <- sum(ww * ci[, "upper"])
+        note <- "weighted average; interval from exact per scenario intervals with a Bonferroni split, because some scenarios observed no or only events"
+      } else {
+        lo <- hi <- mc <- NA_real_
+        note <- "weighted average; no interval, because some scenarios have a degenerate MCSE"
+      }
+      status <- "boundary"
+    }
     s1 <- s[1, , drop = FALSE]
     s1$scenario_key <- "weighted"
     s1$scenario_id <- "prespecified weighted average over scenarios"
     s1$label <- s1$measure
     s1$value <- val
     s1$mcse <- mc
-    s1$lower <- val - stats::qnorm(1 - (1 - study$level) / 2) * mc
-    s1$upper <- val + stats::qnorm(1 - (1 - study$level) / 2) * mc
+    s1$lower <- lo
+    s1$upper <- hi
     s1[c("n_eligible", "n_generated", "n_attempted", "n_completed", "n_valid",
          "n_generation_failed")] <- NA
     s1$truth_se <- s1$mcse_total <- s1$truth_sens_lower <- s1$truth_sens_upper <- NA_real_
-    s1$status <- if (allok) "ok" else "unavailable"
-    s1$note <- if (allok) "weighted average; scenarios treated as independent" else
-      "some scenarios have no usable value"
+    s1$status <- status
+    s1$note <- note
     s1
   })
   bind_rows(rows)
@@ -357,6 +420,7 @@ runtime_table <- function(res) {
     ok <- a$status == "ok"
     data.frame(scenario_key = grp$scenario_key[i], method = grp$method[i],
                attempts = nrow(a), failed = sum(!ok), timeouts = sum(a$status == "timeout"),
+               overruns = sum(a$overrun %in% TRUE),
                timeout_limit = a$timeout[1], total_seconds = sum(a$elapsed),
                mean_seconds = mean(a$elapsed), median_seconds = stats::median(a$elapsed),
                p90_seconds = unname(stats::quantile(a$elapsed, 0.9)),
@@ -368,7 +432,7 @@ runtime_table <- function(res) {
 }
 
 #' @export
-print.adempr_summary <- function(x, digits = 4, ...) {
+print.adempr_summary <- function(x, digits = "mcse", ...) {
   df <- as.data.frame(unclass(x), stringsAsFactors = FALSE)
   need <- c("scenario_id", "method", "estimand", "label", "value", "mcse", "n_eligible",
             "n_generated", "status")
@@ -376,7 +440,9 @@ print.adempr_summary <- function(x, digits = 4, ...) {
   if (!all(need %in% names(df))) return(print(df, ...))
   cat(sprintf("<adempR performance summary of `%s`>\n", attr(x, "study")))
   show <- data.frame(scenario = df$scenario_id, method = df$method, estimand = df$estimand,
-                     measure = df$label, value = fmt_num(df$value, digits),
+                     measure = df$label,
+                     value = if (identical(digits, "mcse")) fmt_mcse(df$value, df$mcse) else
+                       fmt_num(df$value, digits),
                      mcse = fmt_num(df$mcse, 2), n = df$n_eligible,
                      of = df$n_generated, status = df$status,
                      stringsAsFactors = FALSE)
@@ -402,4 +468,99 @@ as.data.frame.adempr_summary <- function(x, ...) {
   attr(x, "study") <- NULL
   class(x) <- "data.frame"
   x
+}
+
+#' Flow of replications through a run
+#'
+#' A CONSORT style account of every planned replication, per scenario,
+#' method and estimand: how many data sets were generated or failed to
+#' generate, how many were not yet analyzed, how many method fits failed,
+#' how many results were excluded by the validity rules, and how many were
+#' usable. The counts add up: `planned = generation_failed + not_generated +
+#' not_run + fit_failed + excluded + usable`. The report always prints this
+#' table, also when nothing failed.
+#'
+#' @param run A run or results.
+#' @return A data frame with one row per scenario, method and estimand.
+#' @examples
+#' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
+#'   generate = function(scenario, context) rnorm(scenario$n),
+#'   estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+#'   methods = list(avg = function(data) sim_estimate("mean", mean(data))))
+#' run <- sim_run(study, replications = 20, seed = 1, path = tempfile("adempR-run-"))
+#' sim_flow(run)
+#' @export
+sim_flow <- function(run) {
+  res <- sim_results(run)
+  man <- res$manifest
+  planned <- min(man$replications, man$sequential$analyzed %||% man$replications)
+  f <- failure_table(res)
+  est <- res$estimates
+  fit_failed <- vapply(seq_len(nrow(f)), function(i) {
+    if (is.null(est) || !nrow(est)) return(0L)
+    sum(est$scenario_key == f$scenario_key[i] & est$method == f$method[i] &
+          est$estimand == f$estimand[i] & est$attempt_status != "ok")
+  }, integer(1))
+  out <- data.frame(
+    scenario_id = f$scenario_id, method = f$method, estimand = f$estimand,
+    planned = planned, generation_failed = f$generation_failed,
+    not_generated = pmax(planned - f$generated - f$generation_failed, 0L),
+    not_run = f$generated - f$attempted, fit_failed = fit_failed,
+    excluded = f$attempted - fit_failed - f$usable, usable = f$usable,
+    stringsAsFactors = FALSE)
+  rownames(out) <- NULL
+  out
+}
+
+#' Acceptability of a performance measure
+#'
+#' Classifies each cell of a measure against an acceptable range, taking
+#' the Monte Carlo interval into account: `"inside"` when the whole
+#' interval lies in the range, `"outside"` when it lies entirely outside,
+#' and `"uncertain"` otherwise (more replications are needed to decide).
+#' For the rejection rate the default range is Bradley's (1978) liberal
+#' criterion, `alpha / 2` to `3 alpha / 2`; it applies to type I error, so
+#' use it on scenarios where the null hypothesis is true. Other measures
+#' need an explicit range.
+#'
+#' @param run A run or results.
+#' @param measure A built in measure.
+#' @param range Two numbers, the acceptable range.
+#' @param alpha Nominal level for the default rejection range.
+#' @return The rows of [sim_summarise()] for the measure with columns
+#'   `range_lower`, `range_upper` and `verdict`.
+#' @references Bradley JV (1978). Robustness? British Journal of
+#'   Mathematical and Statistical Psychology 31, 144-152.
+#' @examples
+#' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
+#'   generate = function(scenario, context) rnorm(scenario$n),
+#'   estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+#'   methods = list(t = function(data) {
+#'     sim_estimate("mean", mean(data), p_value = t.test(data)$p.value, null = 0)
+#'   }), measures = "rejection")
+#' run <- sim_run(study, replications = 100, seed = 1, path = tempfile("adempR-run-"))
+#' sim_acceptable(run)
+#' @export
+sim_acceptable <- function(run, measure = "rejection", range = NULL, alpha = 0.05) {
+  if (!is_scalar_character(measure) || !(measure %in% MEASURE_INFO$measure)) {
+    stopf("`measure` must be one built in measure; see sim_measure_info().")
+  }
+  if (is.null(range)) {
+    if (measure != "rejection") stopf("Give an acceptable `range` for %s.", measure)
+    if (!is_scalar_number(alpha) || alpha <= 0 || alpha >= 1) stopf("`alpha` must be in (0, 1).")
+    range <- c(alpha / 2, 3 * alpha / 2)
+  }
+  if (!is.numeric(range) || length(range) != 2L || anyNA(range) || range[1] > range[2]) {
+    stopf("`range` must be two increasing numbers.")
+  }
+  s <- as.data.frame(sim_summarise(run, measures = measure))
+  s <- s[s$measure == measure, , drop = FALSE]
+  s$range_lower <- range[1]
+  s$range_upper <- range[2]
+  s$verdict <- ifelse(is.na(s$lower) | is.na(s$upper), NA_character_,
+                      ifelse(s$lower >= range[1] & s$upper <= range[2], "inside",
+                             ifelse(s$upper < range[1] | s$lower > range[2], "outside",
+                                    "uncertain")))
+  rownames(s) <- NULL
+  s
 }

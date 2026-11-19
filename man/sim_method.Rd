@@ -48,7 +48,11 @@ and attached in both backends (see \code{\link[=sim_generator]{sim_generator()}}
 \item{timeout}{Optional elapsed time limit in seconds. Enforced with
 \code{\link[=setTimeLimit]{setTimeLimit()}}, which is cooperative: it interrupts R code at safe
 points but may not interrupt long running compiled code. This is a best
-effort limit, not a hard timeout.}
+effort limit, not a hard timeout: an attempt that finishes after the
+limit is kept and flagged in the \code{overrun} column of the attempts and
+counted in the runtime table. A timeout is recognized whatever the
+session language. Any elapsed time limit set by the caller with
+\code{\link[=setTimeLimit]{setTimeLimit()}} is cleared after each attempt.}
 
 \item{coupling}{Optional name of a group of methods sharing one random
 number stream.}

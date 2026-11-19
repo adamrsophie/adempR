@@ -130,6 +130,9 @@ sim_truth_exact <- function(fun, version = NULL, depends = list()) {
 sim_truth_numeric <- function(fun, error = NA_real_, version = NULL,
                               depends = list()) {
   check_function(fun, "fun", "scenario")
+  if (!identical(error, NA_real_) && (!is_scalar_number(error) || error < 0)) {
+    stopf("`error` must be a single nonnegative number (or NA).")
+  }
   new_truth("numeric", fun = fun, error = error, version = version,
             depends = depends)
 }
@@ -204,6 +207,9 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
         }
         out$truth <- v$value
         out$truth_error <- v$error %||% truth$error
+        if (!is.null(v$error) && (!is_scalar_number(v$error) || v$error < 0)) {
+          stopf("The error bound returned by a numeric truth function must be a single nonnegative number.")
+        }
       } else {
         if (!is_scalar_number(v)) stopf("A numeric truth function must return a single number.")
         out$truth <- v
@@ -226,8 +232,13 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
         out$truth <- mean(v)
         out$truth_se <- stats::sd(v) / sqrt(length(v))
         out$truth_method <- "Monte Carlo mean of independent contributions"
+        if (length(v) != truth$n) {
+          out$truth_method <- sprintf("%s (%d contributions returned; %d requested)",
+                                      out$truth_method, length(v), truth$n)
+        }
       }
-      out$truth_n <- truth$n
+      # the count actually used, not only the one requested
+      out$truth_n <- if (inherits(v, "adempr_truth_value")) truth$n else length(v)
     },
     dataset = {
       out$truth_status <- "dataset"

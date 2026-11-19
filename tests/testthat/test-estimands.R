@@ -156,3 +156,27 @@ test_that("a usable interval with missing data set truth is indeterminate, not a
   expect_lt(uc$lower, 0.5)
   expect_equal(uc$upper, 1)
 })
+
+test_that("empirical SE uses the errors when the truth varies between data sets", {
+  st <- sim_study("vt", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) {
+      t <- context$replication * 100
+      sim_data(data.frame(y = t + c(-1, 1)[1 + context$replication %% 2]), truth = list(m = t))
+    },
+    estimands = list(sim_estimand("m", truth = sim_truth_dataset())),
+    methods = list(a = function(data) sim_estimate("m", data$y[1], se = 1)),
+    measures = c("empse", "se_ratio"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 6, seed = 1, path = run_path())))
+  expect_equal(s$value[s$measure == "empse"], sd(rep(c(1, -1), 3)))
+  expect_match(s$note[s$measure == "empse"], "errors")
+})
+
+test_that("truth providers report their real precision", {
+  expect_error(sim_truth_numeric(function(scenario) 1, error = -1), "nonnegative")
+  tr <- sim_truth_mc(function(scenario, n) c(1, 3), n = 100)
+  row <- adempR:::compute_truth_one(tr, list(), seed = adempR:::rng_base_seed(1))
+  expect_equal(row$truth_n, 2)
+  expect_match(row$truth_method, "2 contributions returned; 100 requested")
+  bad <- sim_truth_numeric(function(scenario) list(value = 1, error = -1))
+  expect_error(adempR:::compute_truth_one(bad, list()), "nonnegative")
+})

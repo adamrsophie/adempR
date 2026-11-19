@@ -16,7 +16,12 @@ sim_summarize(run, measures = NULL, weighted = FALSE)
 
 \item{weighted}{If \code{TRUE} and the scenario design has weights, adds
 prespecified weighted averages over scenarios for each method,
-estimand and measure (scenarios treated as independent).}
+estimand and measure (scenarios treated as independent; scenarios of
+weight 0 are left out). When a scenario has a boundary proportion, the
+weighted interval comes from exact per scenario intervals with a
+Bonferroni split. An average over data generating mechanisms hides
+where a method works and where it fails; report it next to the
+scenario results, never instead of them.}
 }
 \value{
 An object of class \code{adempr_summary}: a data frame with one row

@@ -18,7 +18,9 @@ sim_measure(
 
 \item{contribution}{Function of a data frame of eligible rows (columns
 \code{estimate}, \code{se}, \code{lower}, \code{upper}, \code{truth}, \code{p_value}, ...) returning
-one number per row.}
+one number per row. Return a logical vector for a proportion: it then
+gets an exact interval. Missing contributions give status
+\code{missing_contributions} and no value.}
 
 \item{aggregate}{\code{"mean"} or a function of the contributions returning a
 list with \code{value} and \code{mcse}.}

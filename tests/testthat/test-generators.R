@@ -52,3 +52,10 @@ test_that("DGP checks distinguish fluctuation from a wrong mechanism", {
                          function(scenario) c(prev = scenario$p + 0.05), n = 200, seed = 1)
   expect_true(all(wrong$flag))
 })
+
+test_that("an indefinite block is found next to a large variance", {
+  m <- diag(c(1e12, 1, 1))
+  m[2, 3] <- m[3, 2] <- 10
+  expect_error(sim_check_matrix(m, "covariance"), "not positive semidefinite")
+  expect_error(sim_rmvnorm(5, c(0, 0, 0), m), "not positive semidefinite")
+})

@@ -166,3 +166,88 @@ test_that("bias eliminated coverage handles varying truth, infinity and dependen
   r <- adempR:::k_be_coverage(rows, rep(TRUE, 200), rep(TRUE, 200), rep(0, 200))
   expect_true(r$mcse > 0 && r$lower < r$value && r$value < r$upper)
 })
+
+test_that("weighted summaries keep boundary uncertainty and ignore zero weights", {
+  m <- list(wide = function(data) sim_estimate("mean", 0, lower = -100, upper = 100, level = 0.95))
+  st <- normal_study(n = c(10L, 20L, 30L), mu = 0, measures = c("coverage", "rmse"), methods = m)
+  st$scenarios$weights <- c(0.5, 0.5, 0)
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 2, seed = 1, path = run_path()),
+                                   weighted = TRUE))
+  wc <- s[s$scenario_key == "weighted" & s$measure == "coverage", ]
+  expect_equal(wc$value, 1)
+  expect_identical(wc$status, "boundary")
+  expect_lt(wc$lower, 1)
+  wr <- s[s$scenario_key == "weighted" & s$measure == "rmse", ]
+  expect_equal(wr$value, 0)
+})
+
+test_that("custom measures refuse missing contributions and invalid aggregates", {
+  rows <- data.frame(estimate = c(1, 2, NA))
+  m <- sim_measure("m", contribution = function(rows) rows$estimate)
+  expect_identical(adempR:::k_custom(m, rows)$status, "missing_contributions")
+  num01 <- sim_measure("n", contribution = function(rows) c(0, 1, 1))
+  r <- adempR:::k_custom(num01, rows)
+  expect_true(is.na(r$lower) || r$status != "boundary")
+  expect_equal(r$mcse, sd(c(0, 1, 1)) / sqrt(3))
+  bad <- sim_measure("b", contribution = function(rows) c(1, 2, 3),
+                     aggregate = function(x) list(value = "x", mcse = 1))
+  expect_error(adempR:::k_custom(bad, rows), "single numeric")
+})
+
+test_that("paired accumulators keep small differences and large counts", {
+  x <- 1e8 * c(1, -1, 1, -1)
+  y <- x + c(0, 1, 0, -1)
+  a <- sim_accumulate(sim_accumulator(), x[1:2], y[1:2])
+  b <- sim_accumulate(sim_accumulator(), x[3:4], y[3:4])
+  m <- sim_accumulated(sim_merge(a, b))
+  expect_equal(m$mcse_mean_diff, sd(x - y) / 2)
+  acc <- sim_accumulate(sim_accumulator(), 1)
+  for (i in 1:40) acc <- sim_merge(acc, acc)
+  expect_equal(sim_accumulated(acc)$n, 2^40)
+  expect_error(sim_accumulate(sim_accumulator(), c(1, Inf)), "finite")
+})
+
+test_that("root mean squares, relative bias and planning handle extreme values", {
+  expect_equal(adempR:::k_rmse(c(1e200, 1e200))$value, 1e200)
+  expect_equal(adempR:::k_rmse(c(1e-200, 2e-200))$value, sqrt(mean(c(1, 4))) * 1e-200)
+  expect_equal(adempR:::k_rmvar(c(1e155, 2e155))$value, sqrt(2.5) * 1e155)
+  expect_error(sim_plan_replications("proportion", mcse = 1e-6), "relax")
+  # truth near zero relative to the spread is flagged
+  st <- normal_study(n = 10L, mu = 1e-6, measures = c("relbias"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 5, seed = 1, path = run_path())))
+  expect_identical(s$status[s$measure == "relbias"], "unstable")
+})
+
+test_that("the robust z score uses mad() once", {
+  # replication 6 has robust z of about 6.1 with mad(), 4.1 with a double scaling
+  vals <- c(-1, -0.5, 0, 0.5, 1, 7)
+  m <- list(a = function(data, context) sim_estimate("mean", vals[context$replication]))
+  st <- normal_study(n = 5L, mu = 0, methods = m)
+  run <- sim_run(st, replications = 6, seed = 1, path = run_path())
+  d <- sim_diagnose(run, outlier_z = 5)
+  expect_true(any(d$outliers$quantity == "estimate"))
+})
+
+test_that("diagnostics flag fixed data, test and interval disagreement, degenerate estimates", {
+  fixed <- sim_study("fixed", scenarios = sim_scenarios(n = 10L),
+    generate = function(scenario, context) data.frame(y = seq_len(scenario$n)),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 5.5)),
+                     sim_estimand("median", sim_truth_exact(function(scenario) 5.5))),
+    methods = list(m = function(data) {
+      list(sim_estimate("mean", mean(data$y)), sim_estimate("median", mean(data$y)))
+    }))
+  d <- sim_diagnose(sim_run(fixed, replications = 3, seed = 1, path = run_path()))
+  expect_equal(d$repeated_data$distinct, 1L)
+  expect_true(any(grepl("all 3 replications", d$degenerate$problem)))
+  expect_true(any(d$degenerate$estimand == "mean = median"))
+  # a method whose p value comes from a different statistic than its interval
+  odd <- normal_study(n = 10L, mu = 0, methods = list(odd = function(data) {
+    m <- mean(data$y); se <- sd(data$y) / sqrt(10)
+    sim_estimate("mean", m, se = se, lower = m - 1.96 * se, upper = m + 1.96 * se,
+                 level = 0.95, p_value = 0.01, null = 0)
+  }))
+  d2 <- sim_diagnose(sim_run(odd, replications = 6, seed = 1, path = run_path()))
+  expect_gt(d2$test_interval_disagreement$n_disagree, 0)
+  expect_null(sim_diagnose(sim_run(normal_study(n = 10L, mu = 0), replications = 6, seed = 1,
+                                   path = run_path()))$repeated_data)
+})

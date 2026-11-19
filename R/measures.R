@@ -33,7 +33,7 @@ MEASURE_INFO <- data.frame(
   ),
   direction = c("closer to 0", "closer to 0", "lower", "lower", "lower",
                 "lower", "none", "none", "closer to 0", "closer to nominal",
-                "closer to nominal / 2", "closer to nominal / 2", "closer to nominal", "lower",
+                "closer to (1 - nominal) / 2", "closer to (1 - nominal) / 2", "closer to nominal", "lower",
                 "depends on hypothesis", "higher", "higher"),
   mcse_method = c(
     "sd(e) / sqrt(R)",
@@ -129,7 +129,9 @@ sim_measure_info <- function() MEASURE_INFO
 #' @param id Identifier.
 #' @param contribution Function of a data frame of eligible rows (columns
 #'   `estimate`, `se`, `lower`, `upper`, `truth`, `p_value`, ...) returning
-#'   one number per row.
+#'   one number per row. Return a logical vector for a proportion: it then
+#'   gets an exact interval. Missing contributions give status
+#'   `missing_contributions` and no value.
 #' @param aggregate `"mean"` or a function of the contributions returning a
 #'   list with `value` and `mcse`.
 #' @param requires Character vector of required inputs among `"estimate"`,
@@ -181,23 +183,31 @@ k_mean <- function(x, level = 0.95) {
 }
 
 k_rmse <- function(e, level = 0.95) {
-  r <- k_mean(e^2, level)
-  if (r$status %in% c("no_eligible", "infinite")) {
-    r$value <- sqrt(r$value)
-    r$lower <- r$upper <- r$mcse <- NA_real_
-    return(r)
+  k_root_mean_square(e, level, "RMSE")
+}
+
+# Root mean square of x, computed on a scaled copy so that squares cannot
+# overflow or underflow when the answer itself is representable.
+k_root_mean_square <- function(x, level, what) {
+  n <- length(x)
+  if (n == 0L) return(kernel_result(status = "no_eligible", note = "no eligible replications"))
+  if (anyNA(x)) {
+    return(kernel_result(n = n, status = "undefined", note = "undefined values (for example Inf - Inf)"))
   }
-  mse <- r$value
-  out <- kernel_result(value = sqrt(mse), n = r$n, status = r$status, note = r$note)
-  if (mse == 0) {
-    out$status <- "degenerate"
-    out$note <- "RMSE is 0; the delta method MCSE is undefined"
-    return(out)
+  if (any(is.infinite(x))) {
+    return(kernel_result(value = Inf, n = n, status = "infinite", note = "infinite values"))
   }
+  s <- max(abs(x))
+  if (s == 0) {
+    return(kernel_result(value = 0, n = n, status = "degenerate",
+                         note = sprintf("%s is 0; the delta method MCSE is undefined", what)))
+  }
+  r <- k_mean((x / s)^2, level)
+  out <- kernel_result(value = s * sqrt(r$value), n = n, status = r$status, note = r$note)
   if (!is.na(r$mcse)) {
-    out$mcse <- r$mcse / (2 * sqrt(mse))
-    out$lower <- sqrt(max(r$lower, 0))
-    out$upper <- sqrt(r$upper)
+    out$mcse <- s * r$mcse / (2 * sqrt(r$value))
+    out$lower <- s * sqrt(max(r$lower, 0))
+    out$upper <- s * sqrt(r$upper)
   }
   out
 }
@@ -236,24 +246,7 @@ k_empse <- function(x, level = 0.95) {
 }
 
 k_rmvar <- function(se, level = 0.95) {
-  r <- k_mean(se^2, level)
-  if (r$status %in% c("no_eligible", "infinite")) {
-    r$value <- sqrt(r$value)
-    r$mcse <- r$lower <- r$upper <- NA_real_
-    return(r)
-  }
-  v <- r$value
-  out <- kernel_result(value = sqrt(v), n = r$n, status = r$status, note = r$note)
-  if (v == 0) {
-    out$status <- "degenerate"
-    return(out)
-  }
-  if (!is.na(r$mcse)) {
-    out$mcse <- r$mcse / (2 * sqrt(v))
-    out$lower <- sqrt(max(r$lower, 0))
-    out$upper <- sqrt(r$upper)
-  }
-  out
+  k_root_mean_square(se, level, "RMVAR")
 }
 
 # Relative error in model based SE, percent (Morris, White and Crowther
@@ -363,14 +356,25 @@ k_custom <- function(measure, rows, level = 0.95) {
   if (!(is.numeric(x) || is.logical(x)) || length(x) != nrow(rows)) {
     stopf("Custom measure `%s` must return one number per eligible row.", measure$id)
   }
+  if (anyNA(x)) {
+    return(kernel_result(n = length(x), status = "missing_contributions",
+                         note = sprintf("%d of %d contributions are missing", sum(is.na(x)),
+                                        length(x))))
+  }
+  # A proportion is declared by returning logical contributions; numbers
+  # that happen to be 0 or 1 are averaged as numbers.
+  binary <- is.logical(x)
   x <- as.double(x)
   if (identical(measure$aggregate, "mean")) {
-    if (all(x %in% c(0, 1))) return(k_prop(x == 1, level))
+    if (binary) return(k_prop(x == 1, level))
     return(k_mean(x, level))
   }
   r <- measure$aggregate(x)
-  if (!is.list(r) || is.null(r$value)) {
-    stopf("The aggregate of custom measure `%s` must return a list with `value` and `mcse`.",
+  num_or_na <- function(v) is.null(v) || (length(v) == 1L && (is.numeric(v) || is.na(v)))
+  if (!is.list(r) || !is_scalar_number(r$value) && !identical(r$value, NA_real_) ||
+      !num_or_na(r$mcse) || !num_or_na(r$lower) || !num_or_na(r$upper) ||
+      isTRUE(r$mcse < 0) || isTRUE(r$lower > r$upper)) {
+    stopf("The aggregate of custom measure `%s` must return a list with a single numeric `value`, a nonnegative `mcse` (or NA) and optional `lower` <= `upper`.",
           measure$id)
   }
   mc <- r$mcse %||% NA_real_
