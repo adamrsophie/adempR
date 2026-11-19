@@ -218,3 +218,29 @@ test_that("declared population, conditioning and other fields must match the est
   odd <- sim_validate(mk(list(estimator = "x")), error = FALSE)
   expect_true(any(odd$status == "error" & grepl("unknown field", odd$message)))
 })
+
+test_that("a shared Monte Carlo truth sees only its declared factors", {
+  seen <- tempfile()
+  tr <- sim_truth_mc(function(scenario, n) {
+    cat(sort(names(scenario)), "\n", file = seen, append = TRUE)
+    rnorm(n, scenario$mu + if (is.null(scenario$n)) 0 else scenario$n)
+  }, n = 100, factors = "mu")
+  st <- sim_study("shared2", scenarios = sim_scenarios(n = c(10L, 20L), mu = 0),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", tr)),
+    methods = list(m = function(data) sim_estimate("mean", mean(data))))
+  run <- sim_run(st, replications = 1, seed = 1, path = run_path())
+  t <- sim_truth(run)
+  # the sample size is invisible, so the shared value is near 0 whichever
+  # scenario evaluated it first
+  expect_true(all(abs(t$truth) < 1))
+  expect_equal(unique(trimws(readLines(seen))), "mu")
+})
+
+test_that("numeric truths are cached with the run like exact truths", {
+  st <- normal_study(n = 5L, mu = 0)
+  st$estimands$mean$truth <- sim_truth_numeric(function(scenario) 0)
+  run <- sim_run(st, replications = 1, seed = 1, path = run_path())
+  sim_truth(run)
+  expect_gte(length(list.files(file.path(run$path, "truth"), pattern = "rds$")), 1L)
+})

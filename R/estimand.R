@@ -116,7 +116,8 @@ new_truth <- function(kind, ..., version = NULL, depends = list()) {
 #'   fields the truth depends on. Scenarios with the same values of these
 #'   fields share one Monte Carlo truth (computed once, from one stream),
 #'   for example when the truth does not depend on the sample size. `fun`
-#'   then must use only these fields.
+#'   then receives a scenario holding only these fields; any other field
+#'   reads as `NULL`.
 #' @return An object of class `adempr_truth`.
 #' @examples
 #' sim_truth_exact(function(scenario) scenario$mu)
@@ -248,6 +249,10 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
     },
     mc = {
       if (is.null(seed)) stopf("Monte Carlo truth needs an assigned random number stream.")
+      # a truth shared across scenarios sees only the factors it declares,
+      # so its value cannot depend on fields that differ between the
+      # scenarios sharing it
+      if (!is.null(truth$factors)) scenario <- as.list(scenario)[truth$factors]
       v <- with_rng_state(seed, truth$fun(scenario, truth$n))
       if (inherits(v, "adempr_truth_value")) {
         out$truth <- v$value

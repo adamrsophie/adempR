@@ -41,7 +41,8 @@ constants), included in its fingerprint.}
 fields the truth depends on. Scenarios with the same values of these
 fields share one Monte Carlo truth (computed once, from one stream),
 for example when the truth does not depend on the sample size. \code{fun}
-then must use only these fields.}
+then receives a scenario holding only these fields; any other field
+reads as \code{NULL}.}
 }
 \value{
 An object of class \code{adempr_truth}.

@@ -170,7 +170,7 @@ sim_truth <- function(run) {
       key <- study$scenarios$keys[i]
       sc <- study$scenarios$values[[i]]
       row <- NULL
-      if (tr$kind %in% c("mc", "exact", "numerical")) {
+      if (tr$kind %in% c("mc", "exact", "numeric")) {
         # every computed truth is cached under its stored fingerprint, so
         # rereading a run reports the value computed when it was evaluated
         tk <- if (tr$kind == "mc") truth_key(tr, sc, key) else key
