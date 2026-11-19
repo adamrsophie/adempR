@@ -248,8 +248,8 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
     stopf("%s exists and is not an adempR run directory; refusing to write into it.", path)
   }
   ensure_dirs(p)
-  acquire_lock(p)
-  on.exit(release_lock(p), add = TRUE)
+  lock_token <- acquire_lock(p)
+  on.exit(release_lock(p, lock_token), add = TRUE)
   man <- if (file.exists(p$manifest)) {
     reconcile_manifest(read_manifest(path), study, seed, replications, update)
   } else {

@@ -4,19 +4,24 @@
 \alias{sim_unlock}
 \title{Remove a stale run lock}
 \usage{
-sim_unlock(path)
+sim_unlock(path, force = FALSE)
 }
 \arguments{
 \item{path}{Run directory.}
+
+\item{force}{Remove the lock even when its owner is running on this host.}
 }
 \value{
 \code{TRUE}, invisibly.
 }
 \description{
-A run directory admits one coordinator at a time. If a run was killed in
-a way that left the lock behind and the stale lock cannot be detected
-automatically (for example the process ran on another machine), remove it
+A run directory admits one coordinator at a time. On Unix, a lock left
+by a process that is no longer running on the same host is recovered
+automatically. A lock held on another host, or any lock on Windows
+(where adempR cannot check whether a process is alive), must be removed
 with \code{sim_unlock()} after making sure no coordinator is running.
+\code{sim_unlock()} refuses to remove a lock whose owner is a running process
+on this host unless \code{force = TRUE}.
 }
 \examples{
 path <- tempfile("adempR-run-")

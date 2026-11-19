@@ -117,32 +117,49 @@ lock_owner <- function(p) {
 
 acquire_lock <- function(p) {
   host <- Sys.info()[["nodename"]]
+  # A random token identifies this coordinator: process ids repeat across
+  # containers that share a file system and a host name.
+  # tempfile() names do not touch the R random number stream of the caller.
+  token <- paste0(Sys.getpid(), "-", basename(tempfile("")), "-", format(Sys.time(), "%OS6"))
   if (!dir.create(p$lock, showWarnings = FALSE)) {
     owner <- lock_owner(p)
     stale <- !is.null(owner) && identical(owner$host, host) &&
       identical(pid_alive(owner$pid), FALSE)
-    if (stale) {
-      message(sprintf("Recovering a stale lock left by process %s (no longer running).",
-                      owner$pid))
-      unlink(p$lock, recursive = TRUE)
-      if (!dir.create(p$lock, showWarnings = FALSE)) {
-        stopf("Could not acquire the run lock at %s.", p$lock)
-      }
-    } else {
+    if (!stale || !take_over_stale_lock(p, owner)) {
       stopf("The run directory is locked by %s. Only one coordinator may run at a time. If that process is no longer running, call sim_unlock(\"%s\").",
             if (is.null(owner)) "an unknown process" else
               sprintf("process %s on %s since %s", owner$pid, owner$host, owner$time),
             p$root)
     }
+    message(sprintf("Recovered a stale lock left by process %s (no longer running).",
+                    owner$pid))
   }
-  jsonlite::write_json(list(pid = Sys.getpid(), host = host, time = now_utc()),
+  jsonlite::write_json(list(pid = Sys.getpid(), host = host, time = now_utc(), token = token),
                        file.path(p$lock, "owner.json"), auto_unbox = TRUE)
-  invisible(TRUE)
+  token
 }
 
-release_lock <- function(p) {
+# Two coordinators can both see the same dead owner. Each moves the lock
+# aside under a unique name (an atomic rename) and checks that what it moved
+# is the dead owner's lock; one that moved a fresh lock puts it back. Only
+# then is the lock created again, and dir.create() admits one winner.
+take_over_stale_lock <- function(p, owner) {
+  aside <- paste0(p$lock, ".stale-", Sys.getpid(), "-", basename(tempfile("")))
+  if (!file.rename(p$lock, aside)) return(FALSE)
+  moved <- tryCatch(jsonlite::fromJSON(file.path(aside, "owner.json")), error = function(e) NULL)
+  if (!identical(moved[c("pid", "host", "time")], owner[c("pid", "host", "time")])) {
+    # ponytail: if a third process created a lock in between, the moved
+    # live lock cannot be restored; its owner then fails at release, not here.
+    file.rename(aside, p$lock)
+    return(FALSE)
+  }
+  unlink(aside, recursive = TRUE)
+  dir.create(p$lock, showWarnings = FALSE)
+}
+
+release_lock <- function(p, token) {
   owner <- lock_owner(p)
-  if (!is.null(owner) && identical(as.integer(owner$pid), Sys.getpid())) {
+  if (!is.null(owner) && identical(owner$token, token)) {
     unlink(p$lock, recursive = TRUE)
   }
   invisible(TRUE)
@@ -150,21 +167,32 @@ release_lock <- function(p) {
 
 #' Remove a stale run lock
 #'
-#' A run directory admits one coordinator at a time. If a run was killed in
-#' a way that left the lock behind and the stale lock cannot be detected
-#' automatically (for example the process ran on another machine), remove it
+#' A run directory admits one coordinator at a time. On Unix, a lock left
+#' by a process that is no longer running on the same host is recovered
+#' automatically. A lock held on another host, or any lock on Windows
+#' (where adempR cannot check whether a process is alive), must be removed
 #' with `sim_unlock()` after making sure no coordinator is running.
+#' `sim_unlock()` refuses to remove a lock whose owner is a running process
+#' on this host unless `force = TRUE`.
 #'
 #' @param path Run directory.
+#' @param force Remove the lock even when its owner is running on this host.
 #' @return `TRUE`, invisibly.
 #' @examples
 #' path <- tempfile("adempR-run-")
 #' dir.create(file.path(path, "LOCK"), recursive = TRUE)
 #' sim_unlock(path)
 #' @export
-sim_unlock <- function(path) {
+sim_unlock <- function(path, force = FALSE) {
   lk <- file.path(path, "LOCK")
-  if (dir.exists(lk)) unlink(lk, recursive = TRUE)
+  if (!dir.exists(lk)) return(invisible(TRUE))
+  owner <- lock_owner(list(lock = lk))
+  if (!force && !is.null(owner) && identical(owner$host, Sys.info()[["nodename"]]) &&
+      isTRUE(pid_alive(owner$pid))) {
+    stopf("The lock is held by process %s on this host, which is still running. Stop it first, or use `force = TRUE`.",
+          owner$pid)
+  }
+  unlink(lk, recursive = TRUE)
   invisible(TRUE)
 }
 

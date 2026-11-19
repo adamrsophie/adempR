@@ -131,7 +131,7 @@ benchmark scripts are planned for a later release.
 * Function fingerprints use deparsed code and the values of referenced
   free variables. Objects reached through other routes (for example a
   global option, or a file read at run time) must be declared in `depends`.
-* A lock held by a process on another host cannot be checked and must be
-  released with `sim_unlock()`.
+* A lock held by a process on another host, or any stale lock on Windows,
+  cannot be checked and must be released with `sim_unlock()`.
 * Export bundles contain R code; their checksums detect corruption, not
   tampering.

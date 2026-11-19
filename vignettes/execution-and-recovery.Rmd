@@ -59,8 +59,11 @@ The tests kill R with `SIGKILL` at each stage of a commit (after the data
 file is written, before the sidecar, after the commit) and check that the
 resumed run equals an uninterrupted one. If a run died holding the lock,
 the next run on the same host detects that the process is gone and takes
-over the lock. A lock held on another host must be released with
-`sim_unlock()` after checking that no process is running.
+over the lock (on Unix; on Windows adempR cannot check whether a process is
+alive). A lock held on another host, or any stale lock on Windows, must be
+released with `sim_unlock()` after checking that no process is running.
+`sim_unlock()` refuses a lock whose owner is still running on the same host
+unless `force = TRUE`.
 
 ## Corruption and duplicates
 

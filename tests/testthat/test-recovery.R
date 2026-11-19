@@ -99,7 +99,11 @@ test_that("a live lock blocks a second coordinator; incompatible directories are
   jsonlite::write_json(list(pid = Sys.getpid(), host = Sys.info()[["nodename"]], time = "now"),
                        file.path(p, "LOCK", "owner.json"), auto_unbox = TRUE)
   expect_error(sim_run(st, replications = 2, seed = 1, path = p), "locked")
-  sim_unlock(p)
+  if (.Platform$OS.type == "unix") {
+    expect_error(sim_unlock(p), "still running")
+  }
+  sim_unlock(p, force = TRUE)
+  expect_false(dir.exists(file.path(p, "LOCK")))
   expect_error(sim_run(st, replications = 2, seed = 99, path = p), "seed")
   other <- run_path()
   dir.create(other)
@@ -111,4 +115,23 @@ test_that("an unavailable optional backend fails clearly", {
   skip_if(requireNamespace("future.apply", quietly = TRUE), "future.apply is installed")
   expect_error(sim_run(normal_study(n = 10L, mu = 0), 2, seed = 1, path = run_path(),
                        backend = "future"), "future")
+})
+
+test_that("a stale lock is taken over once, and a fresh lock is never stolen", {
+  skip_on_os("windows")
+  p <- adempR:::run_paths(run_path())
+  dir.create(p$root)
+  dead <- list(pid = 999999L, host = Sys.info()[["nodename"]], time = "t0")
+  skip_if(isTRUE(adempR:::pid_alive(dead$pid)), "pid 999999 is in use")
+  dir.create(p$lock)
+  jsonlite::write_json(dead, file.path(p$lock, "owner.json"), auto_unbox = TRUE)
+  # a second coordinator that saw the same dead owner after the first took over
+  tok <- suppressMessages(adempR:::acquire_lock(p))
+  expect_false(adempR:::take_over_stale_lock(p, dead))
+  expect_identical(adempR:::lock_owner(p)$token, tok)
+  expect_length(list.files(p$root, pattern = "stale"), 0L)
+  adempR:::release_lock(p, "not-mine")
+  expect_true(dir.exists(p$lock))
+  adempR:::release_lock(p, tok)
+  expect_false(dir.exists(p$lock))
 })
