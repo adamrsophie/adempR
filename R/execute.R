@@ -163,7 +163,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
           out <- if (is.null(m$extract)) fit$value else with_packages(m$packages,
             call_flexible(m$extract, list(fit = fit$value, data = mdata,
                                           scenario = pub_scenario, context = mctx)))
-          outputs_to_rows(out, m$estimands)
+          outputs_to_rows(out, m$estimands, study$estimands)
         }, ext_limit) else NULL
         list(fit = fit, ext = ext)
       })
@@ -209,7 +209,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         out <- with_packages(m$packages,
           call_flexible(m$fallback, list(data = isolate_data(data), scenario = pub_scenario,
                                          context = mctx)))
-        outputs_to_rows(out, m$estimands)
+        outputs_to_rows(out, m$estimands, study$estimands)
       }, m$timeout))
       # the fallback is recorded as an attempt of its own: its outcome,
       # warnings and cost

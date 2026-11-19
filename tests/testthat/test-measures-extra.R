@@ -48,6 +48,47 @@ test_that("grid estimands give pointwise and grid averaged performance", {
   expect_equal(sum(!is.na(g$at)), 3L)
   avg <- g[g$measure == "grid_mean_mse", ]
   expect_equal(avg$value, mean(g$value[!is.na(g$at)]))
-  expect_true(is.finite(avg$mcse))
+  # the MCSE from replication-level averages, computed by hand
+  e <- sim_results(run)$estimates
+  per <- tapply((e$estimate - e$truth)^2, e$replication, mean)
+  expect_equal(avg$mcse, sd(per) / sqrt(length(per)), tolerance = 1e-12)
+  expect_equal(avg$n_eligible, 40L)
+  expect_equal(avg$n_incomplete, 0L)
   expect_error(sim_summarise_grid(run, "nope"), "No grid estimand")
+})
+
+test_that("grid estimates match by coordinate, check lengths and follow eligibility", {
+  grid <- c(1, 2)
+  expect_error(sim_estimate_grid("g", c(1, 2, 3), c(1, 2, 3), se = c(0.1, 0.2)),
+               "one entry per grid point")
+  expect_error(sim_estimate_grid("g", grid, 1), "one entry per grid point")
+  mk <- function(method) sim_study("grid2", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) data.frame(y = 0),
+    estimands = sim_estimand_grid("g", grid, truth = function(scenario, at) at),
+    methods = list(m = method), measures = c("bias", "coverage"))
+  # the method lists the grid in reverse order with matching values
+  rev_m <- function(data) sim_estimate_grid("g", rev(grid), rev(grid))
+  b <- sim_summarise_grid(sim_run(mk(rev_m), replications = 2, seed = 1, path = run_path()), "g")
+  expect_equal(b$value[!is.na(b$at)], c(0, 0))
+  # an estimate at a point the estimand does not have is refused
+  bad <- function(data) sim_estimate_grid("g", c(1, 3), c(1, 3))
+  r <- sim_run(mk(bad), replications = 1, seed = 1, path = run_path())
+  expect_match(sim_results(r)$attempts$message[1], "not a point of that grid")
+  # nonconverged fits on even replications have intervals that miss; the
+  # grid coverage excludes them exactly like the pointwise coverage
+  nc <- function(data, context) {
+    odd <- context$replication %% 2 == 1
+    lapply(sim_estimate_grid("g", grid, grid, lower = grid + if (odd) -1 else 5,
+                             upper = grid + if (odd) 1 else 6), function(e) {
+      e$converged <- odd
+      e
+    })
+  }
+  r <- sim_run(mk(nc), replications = 10, seed = 1, path = run_path())
+  g <- sim_summarise_grid(r, "g", "coverage")
+  expect_equal(g$value[!is.na(g$at)], c(1, 1))
+  avg <- g[g$measure == "grid_mean_coverage", ]
+  expect_equal(avg$value, 1)
+  expect_equal(avg$n_eligible, 5L)
+  expect_equal(avg$n_incomplete, 5L)
 })

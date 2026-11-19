@@ -293,9 +293,13 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
 #' `sim_estimand_grid()` creates the components, named `<id>_1`, `<id>_2`,
 #' ...; `sim_estimate_grid()` returns a method's estimates for all of them;
 #' `sim_summarise_grid()` collects a measure along the grid and adds its
-#' average over the grid points (for example the integrated squared error
-#' from `"mse"`), with an MCSE that accounts for the correlation between
-#' points.
+#' equally weighted average over the grid points (a discrete version of the
+#' integrated squared error from `"mse"`), with an MCSE that accounts for
+#' the correlation between points. The average uses the eligibility rules
+#' of [sim_summarise()] and only replications in which every grid point is
+#' eligible; `n_incomplete` counts the others. Each estimate from
+#' `sim_estimate_grid()` carries its grid coordinate and is matched to the
+#' component at that coordinate.
 #'
 #' @param id Identifier stem.
 #' @param grid Numeric grid points.
@@ -346,12 +350,24 @@ sim_estimand_grid <- function(id, grid, truth, ...) {
 #' @export
 sim_estimate_grid <- function(id, grid, values, se = NULL, lower = NULL, upper = NULL,
                               level = NA_real_) {
+  if (!is.numeric(grid) || !length(grid) || anyNA(grid) || anyDuplicated(grid)) {
+    stopf("`grid` must be distinct numbers.")
+  }
   k <- length(grid)
-  if (length(values) != k) stopf("`values` must have one entry per grid point.")
+  for (nm in c("values", "se", "lower", "upper")) {
+    v <- get(nm)
+    if ((nm == "values" || !is.null(v)) && length(v) != k) {
+      stopf("`%s` must have one entry per grid point (%d); got %d.", nm, k, length(v))
+    }
+  }
   pick <- function(v, i) if (is.null(v)) NA_real_ else v[i]
+  # each estimate carries its grid coordinate; it is matched to the
+  # component with that coordinate, whatever the order of `grid`
   lapply(seq_len(k), function(i) {
-    sim_estimate(paste0(id, "_", i), values[i], se = pick(se, i), lower = pick(lower, i),
-                 upper = pick(upper, i), level = level)
+    e <- sim_estimate(paste0(id, "_", i), values[i], se = pick(se, i), lower = pick(lower, i),
+                      upper = pick(upper, i), level = level)
+    e$grid <- list(of = id, at = grid[i])
+    e
   })
 }
 
@@ -370,29 +386,41 @@ sim_summarise_grid <- function(run, id, measure = "bias") {
   s <- as.data.frame(sim_summarise(res, measures = measure))
   s <- s[s$estimand %in% ids & s$measure == measure, , drop = FALSE]
   s$at <- at[match(s$estimand, ids)]
-  point <- s[c("scenario_id", "method", "estimand", "at", "measure", "value", "mcse")]
-  # grid average: mean over points of each replication's contribution, so
+  point <- s[c("scenario_id", "method", "estimand", "at", "measure", "value", "mcse", "n_eligible")]
+  # grid average: the equally weighted mean over the grid points of each
+  # replication's contributions (a discrete average, not an integral), so
   # its MCSE uses the replication-level averages and is valid under any
-  # correlation between points
+  # correlation between points. Rows are selected by the rules of
+  # sim_summarise(); a replication counts only when every grid point is
+  # eligible, and the others are reported as incomplete.
   avg <- NULL
   if (measure %in% c("bias", "mse", "coverage")) {
     e <- res$estimates
-    e <- e[e$estimand %in% ids & !is.na(e$truth), , drop = FALSE]
-    e <- if (measure == "coverage") e[e$interval_status == "valid", , drop = FALSE] else
-      e[e$valid & is.finite(e$estimate), , drop = FALSE]
+    e <- e[e$estimand %in% ids, , drop = FALSE]
+    elig <- !is.na(e$truth) & if (measure == "coverage") {
+      e$estimate_status %in% USABLE_FOR_INTERVAL & e$interval_status == "valid"
+    } else e$valid & is.finite(e$estimate)
     e$contrib <- switch(measure, bias = e$estimate - e$truth, mse = (e$estimate - e$truth)^2,
                         coverage = as.numeric(e$lower <= e$truth & e$truth <= e$upper))
+    e$contrib[!elig] <- NA_real_
     rows <- list()
     for (grp in split(e, list(e$scenario_key, e$method), drop = TRUE)) {
-      per <- tapply(grp$contrib, grp$replication, function(v) if (length(v) == length(ids)) mean(v) else NA_real_)
+      per <- tapply(seq_len(nrow(grp)), grp$replication, function(j) {
+        v <- grp$contrib[j]
+        if (length(v) == length(ids) && !anyNA(v)) mean(v) else NA_real_
+      })
+      n_rep <- length(per)
       per <- per[!is.na(per)]
       n <- length(per)
-      if (!n) next
       rows[[length(rows) + 1L]] <- data.frame(
         scenario_id = study$scenarios$labels[match(grp$scenario_key[1], study$scenarios$keys)],
         method = grp$method[1], estimand = id, at = NA_real_,
-        measure = paste0("grid_mean_", measure), value = mean(per),
-        mcse = if (n > 1) stats::sd(per) / sqrt(n) else NA_real_, stringsAsFactors = FALSE)
+        measure = paste0("grid_mean_", measure), value = if (n) mean(per) else NA_real_,
+        mcse = if (n > 1) stats::sd(per) / sqrt(n) else NA_real_,
+        n_eligible = n, n_incomplete = n_rep - n,
+        note = sprintf("equally weighted mean over %d grid points; %d of %d replications have every point eligible",
+                       length(ids), n, n_rep),
+        stringsAsFactors = FALSE)
     }
     avg <- bind_rows(rows)
   }

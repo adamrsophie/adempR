@@ -53,9 +53,13 @@ point, so every measure, comparison and diagnostic applies to each point.
 \code{sim_estimand_grid()} creates the components, named \verb{<id>_1}, \verb{<id>_2},
 ...; \code{sim_estimate_grid()} returns a method's estimates for all of them;
 \code{sim_summarise_grid()} collects a measure along the grid and adds its
-average over the grid points (for example the integrated squared error
-from \code{"mse"}), with an MCSE that accounts for the correlation between
-points.
+equally weighted average over the grid points (a discrete version of the
+integrated squared error from \code{"mse"}), with an MCSE that accounts for
+the correlation between points. The average uses the eligibility rules
+of \code{\link[=sim_summarise]{sim_summarise()}} and only replications in which every grid point is
+eligible; \code{n_incomplete} counts the others. Each estimate from
+\code{sim_estimate_grid()} carries its grid coordinate and is matched to the
+component at that coordinate.
 }
 \examples{
 grid <- c(0.5, 1, 2)

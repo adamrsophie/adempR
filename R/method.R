@@ -501,12 +501,24 @@ missing_row <- function(estimand) {
 # are recorded by the caller as extraction failures. Validity is classified
 # later, at evaluation, so that a change of failure policy does not require
 # refitting.
-outputs_to_rows <- function(out, targets) {
+outputs_to_rows <- function(out, targets, estimands = list()) {
   if (inherits(out, "adempr_estimate")) out <- list(out)
   if (!is.list(out) || !length(out) ||
       !all(vapply(out, inherits, logical(1), "adempr_estimate"))) {
     stopf("The method returned an object of class %s; it must return sim_estimate() or a list of sim_estimate() results (or supply `extract`).",
           paste(class(out), collapse = "/"))
+  }
+  # grid estimates are matched to the component at their coordinate
+  for (j in seq_along(out)) {
+    g <- out[[j]]$grid
+    if (is.null(g)) next
+    hit <- Filter(function(e) identical(e$grid$of, g$of) &&
+                    isTRUE(all.equal(e$grid$at, g$at, tolerance = 1e-12)), estimands)
+    if (length(hit) != 1L) {
+      stopf("The method returned an estimate of `%s` at grid point %s, which is not a point of that grid estimand.",
+            g$of, format(g$at, digits = 15))
+    }
+    out[[j]]$estimand <- hit[[1]]$id
   }
   ids <- vapply(out, `[[`, character(1), "estimand")
   if (anyDuplicated(ids)) {
