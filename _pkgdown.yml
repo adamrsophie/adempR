@@ -125,6 +125,7 @@ reference:
   - sim_plot
   - sim_report
   - sim_export
+  - sim_lockfile
 - title: Generator helpers
   contents:
   - sim_rmvnorm

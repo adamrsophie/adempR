@@ -388,6 +388,25 @@ code_names <- function(x) {
   character()
 }
 
+# The environment where R finds `v` starting from `e`, or NULL when package
+# code (a namespace, its imports, base) or nothing supplies it. A namespace
+# on the chain (a function defined in a package's environment, such as a
+# test file) falls through to the global environment for names the package
+# does not supply, as R does.
+lookup_home <- function(v, e) {
+  repeat {
+    if (identical(e, emptyenv()) || identical(e, baseenv())) return(NULL)
+    if (isNamespace(e)) {
+      if (exists(v, envir = e, inherits = FALSE) || exists(v, envir = parent.env(e), inherits = FALSE) ||
+          exists(v, envir = baseenv(), inherits = FALSE)) return(NULL)
+      e <- globalenv()
+    }
+    if (exists(v, envir = e, inherits = FALSE)) return(e)
+    if (identical(e, globalenv())) return(NULL)
+    e <- parent.env(e)
+  }
+}
+
 export_function <- function(f, memo) {
   if (is.primitive(f)) return(f)
   for (pr in memo$pairs) if (identical(pr[[1]], f)) return(pr[[2]])
@@ -400,12 +419,7 @@ export_function <- function(f, memo) {
     # names that fall through to the global environment do not travel with
     # a whole environment
     for (v in names_used) {
-      h <- e
-      while (!identical(h, globalenv()) && !isNamespace(h) && !identical(h, emptyenv()) &&
-             !identical(h, baseenv()) && !exists(v, envir = h, inherits = FALSE)) h <- parent.env(h)
-      if (identical(h, globalenv()) && exists(v, envir = h, inherits = FALSE)) {
-        memo$unshipped <- c(memo$unshipped, v)
-      }
+      if (identical(lookup_home(v, e), globalenv())) memo$unshipped <- c(memo$unshipped, v)
     }
     return(f)
   }
