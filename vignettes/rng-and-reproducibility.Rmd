@@ -72,6 +72,17 @@ The test suite checks each of these by comparing estimates bit for bit:
   registry gives each complete identity its own positive index and that
   the replication is a single positive whole number; pass
   `domain = run$manifest$rng_domain` for a pilot run.
+* Two runs can be compared with `sim_verify()`: with the same seed it
+  checks that every estimate is reproduced; with different seeds it is a
+  seed sensitivity check, comparing each measure in units of the combined
+  Monte Carlo error.
+
+Package code is identified by the package name and version recorded in the
+fingerprints. A package loaded from source with `pkgload::load_all()`, or
+one whose functions were changed with `trace()` or `assignInNamespace()`,
+runs code that its version does not identify; `sim_run()` warns when a
+package declared by the generator or a method is in that state. Install
+the package and restart R before a production run.
 
 ```{r}
 study <- sim_study("streams",

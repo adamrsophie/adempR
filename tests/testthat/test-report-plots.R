@@ -24,3 +24,18 @@ test_that("the zip plot uses coverage eligibility and has a power version", {
   expect_null(sim_plot(run, "zip", reference = "null"))
   expect_null(sim_plot(run, "precision", measure = "coverage"))
 })
+
+test_that("Bland-Altman and interval-by-truth plots draw and validate their inputs", {
+  st <- normal_study(n = 20L, mu = 0, methods = c(normal_study()$methods,
+    list(med = function(data) sim_estimate("mean", median(data$y), lower = median(data$y) - 0.5,
+                                           upper = median(data$y) + 0.5, level = 0.95))))
+  run <- sim_run(st, replications = 15, seed = 2, path = run_path())
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f)
+  dev <- grDevices::dev.cur()
+  expect_null(sim_plot(run, "bland_altman"))
+  expect_null(sim_plot(run, "interval_truth"))
+  expect_identical(grDevices::dev.cur(), dev)
+  grDevices::dev.off()
+  expect_error(sim_plot(run, "bland_altman", methods = c("med", "nope")), "two methods")
+})

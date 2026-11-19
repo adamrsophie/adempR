@@ -251,6 +251,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   if (!is_count(chunk_size, 1)) stopf("`chunk_size` must be a positive whole number.")
   sim_validate(study, error = TRUE)
   check_frozen(study)
+  warn_patched(study_packages(study))
   replications <- as.integer(replications)
   p <- run_paths(path)
   if (dir.exists(path) && !file.exists(p$manifest)) {
@@ -659,4 +660,29 @@ truth_stream_keys <- function(study) {
                                             component = en, stringsAsFactors = FALSE)
   }
   bind_rows(rows)
+}
+
+# A package is identified by name and version in fingerprints. A namespace
+# loaded from source (pkgload::load_all()) or with traced or replaced
+# functions runs code that its version number does not identify.
+patched_namespaces <- function(pkgs) {
+  pkgs <- pkgs[vapply(pkgs, isNamespaceLoaded, logical(1))]
+  pkgs[vapply(pkgs, function(p) {
+    ns <- asNamespace(p)
+    if (exists(".__DEVTOOLS__", envir = ns, inherits = FALSE)) return(TRUE)
+    any(vapply(ls(ns, all.names = TRUE), function(nm) {
+      inherits(get(nm, envir = ns, inherits = FALSE), "functionWithTrace")
+    }, logical(1)))
+  }, logical(1))]
+}
+
+warn_patched <- function(pkgs) {
+  bad <- patched_namespaces(pkgs)
+  if (length(bad)) {
+    warning(sprintf(paste0("Package(s) %s are loaded from source or have traced functions; ",
+                           "fingerprints identify packages by name and version, which do not ",
+                           "identify this code. Install the package and restart R before a ",
+                           "production run."), paste(bad, collapse = ", ")), call. = FALSE)
+  }
+  invisible(bad)
 }

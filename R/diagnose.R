@@ -312,7 +312,13 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
 #'   with failures shown explicitly;
 #' * `"precision"`: a performance measure with its Monte Carlo interval
 #'   across scenarios and methods;
-#' * `"runtime"`: distribution of elapsed time per attempt by method.
+#' * `"runtime"`: distribution of elapsed time per attempt by method;
+#' * `"bland_altman"`: agreement of two methods on the same data sets:
+#'   difference of their estimates against their mean, with the mean
+#'   difference and limits of agreement (mean +/- 1.96 SD);
+#' * `"interval_truth"`: each interval drawn at its true value (useful when
+#'   the truth varies between data sets), with the line of equality;
+#'   intervals that miss the truth are highlighted.
 #'
 #' @param run A run or results.
 #' @param type Plot type.
@@ -320,6 +326,8 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
 #'   `"est_se"` and `"zip"`; defaults to the first.
 #' @param estimand Estimand; defaults to the first.
 #' @param measure Measure for `"precision"`.
+#' @param methods For `"bland_altman"`, the two methods compared (defaults
+#'   to the first two that target the estimand).
 #' @param reference For `"zip"`: rank intervals against the true value
 #'   (`"truth"`, a coverage zip plot) or against the declared null value
 #'   (`"null"`, a power zip plot, where intervals that exclude the null are
@@ -341,16 +349,16 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
 #' sim_plot(run, "precision", measure = "coverage")
 #' @export
 sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "precision",
-                                   "runtime"),
+                                   "runtime", "bland_altman", "interval_truth"),
                      scenario = 1L, estimand = NULL, measure = "bias",
-                     reference = c("truth", "null"), ...) {
+                     reference = c("truth", "null"), methods = NULL, ...) {
   type <- match.arg(type)
   res <- sim_results(run)
   study <- res$manifest$study
   estimand <- estimand %||% names(study$estimands)[1]
   est <- res$estimates
   cols <- grDevices::hcl.colors(max(3L, length(study$methods)), "Dark 3")
-  if (type %in% c("estimates", "est_se", "zip")) {
+  if (type %in% c("estimates", "est_se", "zip", "bland_altman", "interval_truth")) {
     key <- resolve_scenario(study, scenario)
     lab <- study$scenarios$labels[match(key, study$scenarios$keys)]
     sub <- est[est$scenario_key == key & est$estimand == estimand, , drop = FALSE]
@@ -381,6 +389,48 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
                    main = lab, ...)
     if (length(truth) == 1L) graphics::abline(v = truth, col = "firebrick", lty = 2)
     graphics::legend("topright", legend = ms, col = cols[seq_along(ms)], pch = 16, bty = "n")
+  } else if (type == "bland_altman") {
+    ok <- sub$valid & is.finite(sub$estimate)
+    avail <- unique(sub$method[ok])
+    methods <- methods %||% utils::head(avail, 2L)
+    if (length(methods) != 2L || !all(methods %in% avail)) {
+      stopf("`methods` must name two methods with usable estimates for this scenario.")
+    }
+    a <- sub[ok & sub$method == methods[1], c("replication", "estimate")]
+    b <- sub[ok & sub$method == methods[2], c("replication", "estimate")]
+    m <- merge(a, b, by = "replication")
+    if (nrow(m) < 2L) stopf("Fewer than two data sets have usable estimates from both methods.")
+    avg <- (m$estimate.x + m$estimate.y) / 2
+    dif <- m$estimate.x - m$estimate.y
+    md <- mean(dif)
+    lim <- md + c(-1.96, 1.96) * stats::sd(dif)
+    graphics::plot(avg, dif, pch = 16, cex = 0.6, col = grDevices::adjustcolor("black", 0.5),
+                   xlab = sprintf("mean of %s and %s", methods[1], methods[2]),
+                   ylab = sprintf("%s minus %s", methods[1], methods[2]), main = lab,
+                   ylim = range(c(dif, lim)), ...)
+    graphics::abline(h = 0, col = "grey60")
+    graphics::abline(h = md, col = "firebrick", lwd = 2)
+    graphics::abline(h = lim, col = "firebrick", lty = 2)
+    graphics::mtext(sprintf("%d paired data sets; mean difference %.3g, limits %.3g to %.3g",
+                            nrow(m), md, lim[1], lim[2]), side = 3, line = 0.2, cex = 0.8)
+  } else if (type == "interval_truth") {
+    ok <- sub$interval_status == "valid" & sub$estimate_status %in% USABLE_FOR_INTERVAL &
+      !is.na(sub$truth)
+    r <- sub[ok, , drop = FALSE]
+    if (!nrow(r)) stopf("No valid intervals with a truth to plot.")
+    ms <- unique(r$method)
+    op <- graphics::par(mfrow = c(1L, length(ms)), mar = c(4, 4, 3, 1))
+    on.exit(graphics::par(op), add = TRUE)
+    for (mm in ms) {
+      q <- r[r$method == mm, , drop = FALSE]
+      miss <- q$truth < q$lower | q$truth > q$upper
+      graphics::plot(range(q$truth), range(c(q$lower, q$upper, q$truth)), type = "n",
+                     xlab = "true value", ylab = "interval", main = paste(mm, lab, sep = "\n"), ...)
+      graphics::segments(q$truth, q$lower, q$truth, q$upper,
+                         col = ifelse(miss, "firebrick", grDevices::adjustcolor("grey30", 0.4)))
+      graphics::abline(0, 1, col = "steelblue", lwd = 2)
+      graphics::mtext(sprintf("%d of %d miss", sum(miss), nrow(q)), side = 3, line = 0.2, cex = 0.8)
+    }
   } else if (type == "zip") {
     reference <- match.arg(reference)
     # the rows coverage uses in sim_summarise(): generated data sets, an

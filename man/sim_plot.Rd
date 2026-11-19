@@ -6,11 +6,13 @@
 \usage{
 sim_plot(
   run,
-  type = c("estimates", "est_se", "zip", "failures", "precision", "runtime"),
+  type = c("estimates", "est_se", "zip", "failures", "precision", "runtime",
+    "bland_altman", "interval_truth"),
   scenario = 1L,
   estimand = NULL,
   measure = "bias",
   reference = c("truth", "null"),
+  methods = NULL,
   ...
 )
 }
@@ -32,6 +34,9 @@ sim_plot(
 the rejections). The dotted lines give the Monte Carlo confidence
 interval of the proportion of intervals that contain the reference.}
 
+\item{methods}{For \code{"bland_altman"}, the two methods compared (defaults
+to the first two that target the estimand).}
+
 \item{...}{Graphical parameters passed to the main plotting call.}
 }
 \value{
@@ -49,7 +54,13 @@ same rows as coverage in \code{\link[=sim_summarise]{sim_summarise()}};
 with failures shown explicitly;
 \item \code{"precision"}: a performance measure with its Monte Carlo interval
 across scenarios and methods;
-\item \code{"runtime"}: distribution of elapsed time per attempt by method.
+\item \code{"runtime"}: distribution of elapsed time per attempt by method;
+\item \code{"bland_altman"}: agreement of two methods on the same data sets:
+difference of their estimates against their mean, with the mean
+difference and limits of agreement (mean +/- 1.96 SD);
+\item \code{"interval_truth"}: each interval drawn at its true value (useful when
+the truth varies between data sets), with the line of equality;
+intervals that miss the truth are highlighted.
 }
 }
 \examples{

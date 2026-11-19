@@ -210,3 +210,13 @@ test_that("methods get reproducible inner streams that differ between tasks", {
   expect_identical(f(2), f(2))
   expect_false(identical(f(2)[[1]], f(2)[[2]]))
 })
+
+test_that("a traced namespace of a declared package triggers a warning", {
+  m <- list(md = sim_method(function(data) sim_estimate("mean", stats::median(data$y)),
+                            packages = "tools"))
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = "bias")
+  expect_silent(adempR:::warn_patched("tools"))
+  suppressMessages(trace("file_ext", quote(NULL), where = asNamespace("tools"), print = FALSE))
+  on.exit(suppressMessages(untrace("file_ext", where = asNamespace("tools"))), add = TRUE)
+  expect_warning(sim_run(st, replications = 2, seed = 1, path = run_path()), "traced functions")
+})
