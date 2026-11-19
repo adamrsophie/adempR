@@ -77,3 +77,40 @@ test_that("the future backend reproduces the sequential reference", {
                   chunk_size = 9)
   expect_identical(est_signature(seq_run), est_signature(par1))
 })
+
+test_that("a stochastic extract uses the method stream, not the caller's", {
+  st <- sim_study("x", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = sim_method(function(data) mean(data),
+      extract = function(fit) sim_estimate("mean", fit + rnorm(1)))))
+  set.seed(1)
+  r1 <- sim_run(st, 3, seed = 1, path = tempfile("adempR-x-"), progress = FALSE)
+  set.seed(2)
+  before <- .Random.seed
+  r2 <- sim_run(st, 3, seed = 1, path = tempfile("adempR-x-"), progress = FALSE)
+  expect_identical(.Random.seed, before)
+  expect_identical(sim_results(r1)$estimates$estimate, sim_results(r2)$estimates$estimate)
+  expect_true(sim_replay(r1, scenario = 1, replication = 2)$matches)
+})
+
+test_that("exact truth functions and generator checks must be deterministic", {
+  st <- sim_study("d", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) rnorm(1)))),
+    methods = list(m = function(data) sim_estimate("mean", mean(data))))
+  before <- .Random.seed
+  expect_error(sim_run(st, 2, seed = 1, path = tempfile("adempR-d-"), progress = FALSE),
+               "validation failed")
+  expect_match(as.data.frame(sim_validate(st, error = FALSE))$message, "must be deterministic", all = FALSE)
+  expect_identical(.Random.seed, before)
+})
+
+test_that("sim_data(NULL) is recorded as a generation failure", {
+  st <- sim_study("n", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) sim_data(NULL),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = function(data) sim_estimate("mean", mean(data))))
+  run <- sim_run(st, 2, seed = 1, path = tempfile("adempR-n-"), progress = FALSE)
+  expect_true(all(sim_results(run)$replications$generation_status == "error"))
+})

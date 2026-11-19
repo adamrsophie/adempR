@@ -32,8 +32,13 @@ run_captured <- function(expr_fun, timeout = NULL) {
   )
   if (!is.null(timeout)) setTimeLimit(elapsed = Inf)
   tt <- proc.time() - t0
-  timed_out <- !is.null(err) &&
-    grepl("elapsed time limit", conditionMessage(err), fixed = TRUE)
+  # The message of R's time limit error is translated, so compare with both
+  # the English text and its translation in the current language.
+  limit_msgs <- unique(c("reached elapsed time limit",
+                         gettext("reached elapsed time limit", domain = "R")))
+  timed_out <- !is.null(err) && !is.null(timeout) &&
+    (any(vapply(limit_msgs, grepl, logical(1), x = conditionMessage(err), fixed = TRUE)) ||
+       unname(tt[["elapsed"]]) >= timeout)
   list(value = value, error = err, timed_out = timed_out, warnings = warns,
        elapsed = unname(tt[["elapsed"]]),
        cpu = unname(tt[["user.self"]] + tt[["sys.self"]]))
@@ -56,6 +61,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
   gen <- with_rng_state(task$seeds$data, run_captured(function() {
     out <- study$generator$fun(scenario, gctx)
     check_generated(out)
+    if (inherits(out, "adempr_data")) check_generated(out$data)
     out
   }))
   repl <- data.frame(scenario_key = key, replication = rep,
@@ -76,7 +82,6 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
     data <- generated$data
     dtruth <- generated$truth
     meta <- generated$meta
-    check_generated(data)
   } else {
     data <- generated
     dtruth <- list()
@@ -102,9 +107,23 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
     retries <- study$failure$retries
     for (attempt in seq_len(retries + 1L)) {
       mdata <- isolate_data(data)
-      fit <- with_rng_state(seed, run_captured(function() {
-        call_flexible(m$fun, list(data = mdata, scenario = pub_scenario, context = mctx))
-      }, m$timeout))
+      # Fit and extraction share the method's stream: random numbers drawn in
+      # `extract` continue the stream of the fit and never touch the caller's
+      # generator.
+      both <- with_rng_state(seed, {
+        fit <- run_captured(function() {
+          call_flexible(m$fun, list(data = mdata, scenario = pub_scenario, context = mctx))
+        }, m$timeout)
+        ext <- if (is.null(fit$error)) run_captured(function() {
+          out <- if (is.null(m$extract)) fit$value else
+            call_flexible(m$extract, list(fit = fit$value, data = mdata,
+                                          scenario = pub_scenario, context = mctx))
+          outputs_to_rows(out, m$estimands)
+        }) else NULL
+        list(fit = fit, ext = ext)
+      })
+      fit <- both$fit
+      ext <- both$ext
       status <- "ok"
       message <- NA_character_
       stage <- "fit"
@@ -116,12 +135,6 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
         message <- conditionMessage(fit$error)
       } else {
         stage <- "extract"
-        ext <- run_captured(function() {
-          out <- if (is.null(m$extract)) fit$value else
-            call_flexible(m$extract, list(fit = fit$value, data = mdata,
-                                          scenario = pub_scenario, context = mctx))
-          outputs_to_rows(out, m$estimands)
-        })
         ext_elapsed <- ext$elapsed
         warns <- c(warns, ext$warnings)
         if (!is.null(ext$error)) {

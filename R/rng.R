@@ -51,6 +51,25 @@ with_rng_state <- function(seed, expr) {
   force(expr)
 }
 
+# Evaluate a function that must be deterministic (exact and numerical
+# truths, generator checks). The caller's generator is restored, and a call
+# that draws random numbers stops with an error instead of silently
+# advancing the caller's stream or giving a different value at every call.
+deterministic_call <- function(what, fun, ...) {
+  state <- rng_save()
+  on.exit(rng_restore(state), add = TRUE)
+  set.seed(1L, kind = RNG_KIND[1], normal.kind = RNG_KIND[2], sample.kind = RNG_KIND[3])
+  before <- get(".Random.seed", envir = globalenv())
+  out <- fun(...)
+  after <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+    get(".Random.seed", envir = globalenv())
+  }
+  if (!identical(before, after)) {
+    stopf("%s draws random numbers, but it must be deterministic. Use a Monte Carlo truth (sim_truth_mc()) for a value that needs simulation.", what)
+  }
+  out
+}
+
 rng_base_seed <- function(seed) {
   if (!is_count(seed)) {
     stopf("`seed` must be a single nonnegative whole number.")

@@ -283,7 +283,8 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE) {
   if (!is.null(study$generator$check)) {
     for (i in seq_along(study$scenarios$values)) {
       msg <- tryCatch({
-        study$generator$check(study$scenarios$values[[i]])
+        deterministic_call("The generator check", study$generator$check,
+                           study$scenarios$values[[i]])
         NULL
       }, error = function(e) conditionMessage(e))
       if (!is.null(msg)) {

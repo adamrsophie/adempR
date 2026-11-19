@@ -190,14 +190,14 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
                     stringsAsFactors = FALSE)
   val <- switch(truth$kind,
     exact = {
-      v <- truth$fun(scenario)
+      v <- deterministic_call("The exact truth function", truth$fun, scenario)
       if (!is_scalar_number(v)) stopf("An exact truth function must return a single number.")
       out$truth <- v
       out$truth_se <- 0
       out$truth_method <- "analytic"
     },
     numeric = {
-      v <- truth$fun(scenario)
+      v <- deterministic_call("The numerical truth function", truth$fun, scenario)
       if (is.list(v)) {
         if (!is_scalar_number(v$value)) {
           stopf("A numeric truth function returning a list must contain a single number `value`.")
