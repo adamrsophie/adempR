@@ -64,9 +64,13 @@ fingerprint.}
 4, ...) that share one data stream; \code{context$antithetic} is \code{TRUE} in
 the second of each pair, and the generator should then use the
 antithetic draws (for example \code{-z} for standard normal \code{z}, \code{1 - u}
-for uniform \code{u}). Pairs are negatively correlated by design, so the
-usual MCSE does not apply: summarize with \code{\link[=sim_summarise_antithetic]{sim_summarise_antithetic()}}.
-Part of the fingerprint.}
+for uniform \code{u}). Pairs are dependent by design, so the pair is the
+independent unit: \code{\link[=sim_summarise]{sim_summarise()}} computes every MCSE with a
+delete-one-pair jackknife, \code{\link[=sim_compare]{sim_compare()}} and \code{\link[=sim_rank]{sim_rank()}} use pair
+level MCSEs and resample whole pairs, and confidence sequences and
+sequential stopping, which need independent replications, refuse
+antithetic runs. \code{\link[=sim_summarise_antithetic]{sim_summarise_antithetic()}} also reports the gain
+over independent replications. Part of the fingerprint.}
 }
 \value{
 An object of class \code{adempr_generator}.

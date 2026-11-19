@@ -52,9 +52,13 @@
 #'   4, ...) that share one data stream; `context$antithetic` is `TRUE` in
 #'   the second of each pair, and the generator should then use the
 #'   antithetic draws (for example `-z` for standard normal `z`, `1 - u`
-#'   for uniform `u`). Pairs are negatively correlated by design, so the
-#'   usual MCSE does not apply: summarize with [sim_summarise_antithetic()].
-#'   Part of the fingerprint.
+#'   for uniform `u`). Pairs are dependent by design, so the pair is the
+#'   independent unit: [sim_summarise()] computes every MCSE with a
+#'   delete-one-pair jackknife, [sim_compare()] and [sim_rank()] use pair
+#'   level MCSEs and resample whole pairs, and confidence sequences and
+#'   sequential stopping, which need independent replications, refuse
+#'   antithetic runs. [sim_summarise_antithetic()] also reports the gain
+#'   over independent replications. Part of the fingerprint.
 #' @return An object of class `adempr_generator`.
 #' @examples
 #' sim_generator(function(scenario, context) {

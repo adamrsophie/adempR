@@ -207,7 +207,9 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
     d <- db - da
     base$contrast <- "difference (method - reference)"
     base$value <- mean(d)
-    base$mcse <- stats::sd(d) / sqrt(n)
+    units <- rep_units(study, a$replication[common])
+    base$mcse <- if (anyDuplicated(units)) cluster_mcse(d, units) else stats::sd(d) / sqrt(n)
+    if (anyDuplicated(units)) notes <- c(notes, "MCSE from antithetic pairs")
     base$lower <- base$value - z * base$mcse
     base$upper <- base$value + z * base$mcse
     base$rho <- suppressWarnings(stats::cor(da, db))
@@ -241,8 +243,10 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
     relative_precision = "percent increase in precision of method vs reference",
     empse_ratio = "ratio EmpSE(method) / EmpSE(reference)",
     rmse_ratio = "ratio RMSE(method) / RMSE(reference)")
+  # antithetic pairs are resampled whole
+  units <- rep_units(study, a$replication[common])
   boots <- with_rng_state(boot_state, vapply(seq_len(B), function(i) {
-    stat(sample.int(n, n, replace = TRUE))
+    stat(boot_index(units))
   }, numeric(1)))
   failed <- sum(!is.finite(boots))
   boots <- boots[is.finite(boots)]

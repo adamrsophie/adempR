@@ -52,3 +52,47 @@ test_that("a control variate with known mean reduces the Monte Carlo error", {
   expect_equal(cv$value, as.data.frame(sim_summarise(run))$value[1])
   expect_error(sim_control_variate(run, "nope", 0), "No recorded quantity")
 })
+
+test_that("every summary, comparison and ranking of antithetic runs uses the pairs", {
+  gen <- sim_generator(function(scenario, context) {
+    z <- rnorm(scenario$n)
+    if (context$antithetic) z <- -z
+    data.frame(y = scenario$mu + z)
+  }, antithetic = TRUE)
+  st <- sim_study("anti", scenarios = sim_scenarios(n = 20L, mu = 0), generate = gen,
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) scenario$mu))),
+    methods = list(
+      mean = function(data) {
+        m <- mean(data$y); s <- sd(data$y) / sqrt(nrow(data))
+        sim_estimate("mean", m, se = s, lower = m - 1.96 * s, upper = m + 1.96 * s, level = 0.95)
+      },
+      trim = function(data) sim_estimate("mean", mean(data$y, trim = 0.2))),
+    measures = c("bias", "mse", "coverage", "empse"))
+  run <- sim_run(st, replications = 40, seed = 3, path = run_path())
+  s <- as.data.frame(sim_summarise(run))
+  e <- sim_results(run)$estimates
+  em <- e[e$method == "mean", ]
+  em <- em[order(em$replication), ]
+  pair <- (em$replication + 1) %/% 2
+  # linear measures: the delete-one-pair jackknife equals sd(pair means) / sqrt(pairs)
+  pm_mse <- tapply((em$estimate - em$truth)^2, pair, mean)
+  get <- function(ms, mt = "mean") s[s$method == mt & s$measure == ms, ]
+  expect_equal(get("mse")$mcse, sd(pm_mse) / sqrt(20), tolerance = 1e-10)
+  # the estimates of a pair are mirror images: every pair mean of the error is 0
+  expect_equal(get("bias")$mcse, 0, tolerance = 1e-12)
+  cov_x <- as.numeric(em$lower <= em$truth & em$truth <= em$upper)
+  expect_equal(get("coverage")$mcse, sd(tapply(cov_x, pair, mean)) / sqrt(20), tolerance = 1e-10)
+  expect_true(is.finite(get("empse")$mcse))
+  expect_match(get("empse")$note, "antithetic pairs")
+  ref <- sim_summarise_antithetic(run, "mse")
+  expect_equal(get("mse")$mcse, ref$mcse[ref$method == "mean"], tolerance = 1e-10)
+  # paired comparison: MCSE from pair means of the differences
+  cmp <- as.data.frame(sim_compare(run, c("mean", "trim"), measures = "mse", bootstrap = 50))
+  et <- e[e$method == "trim", ]
+  et <- et[order(et$replication), ]
+  d <- (et$estimate - et$truth)^2 - (em$estimate - em$truth)^2
+  expect_equal(cmp$mcse[cmp$measure == "mse"], sd(tapply(d, pair, mean)) / sqrt(20), tolerance = 1e-10)
+  # ranking resamples pairs, confidence sequences refuse
+  expect_s3_class(sim_rank(run, "mse", B = 20), "data.frame")
+  expect_error(sim_confidence_sequence(run, "coverage"), "independent replications")
+})

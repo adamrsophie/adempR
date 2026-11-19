@@ -42,6 +42,9 @@ sim_confidence_sequence <- function(run, measure = c("coverage", "rejection", "b
   if (!is_scalar_number(alpha) || alpha <= 0 || alpha >= 1) stopf("`alpha` must be in (0, 1).")
   res <- sim_results(run)
   study <- res$manifest$study
+  if (isTRUE(study$generator$antithetic)) {
+    stopf("Confidence sequences need independent replications; antithetic pairs are dependent. Use sim_summarise(), whose MCSEs come from the pairs.")
+  }
   t_opt <- t_opt %||% res$manifest$replications
   if (!is_scalar_number(t_opt) || t_opt < 1) stopf("`t_opt` must be a positive number.")
   e <- res$estimates

@@ -1,5 +1,68 @@
 # Variance reduction ------------------------------------------------------
 
+# Independent sampling units of a set of replications: with an antithetic
+# generator, replications 2k - 1 and 2k form one unit (pair k).
+rep_units <- function(study, replication) {
+  if (isTRUE(study$generator$antithetic)) (as.integer(replication) + 1L) %/% 2L else
+    as.integer(replication)
+}
+
+# Bootstrap resample of positions that keeps units together. With
+# independent replications it is the ordinary resample.
+boot_index <- function(units) {
+  n <- length(units)
+  if (!anyDuplicated(units)) return(sample.int(n, n, replace = TRUE))
+  u <- unique(units)
+  pick <- u[sample.int(length(u), length(u), replace = TRUE)]
+  pos <- split(seq_len(n), factor(units, levels = u))
+  unlist(pos[match(pick, u)], use.names = FALSE)
+}
+
+# MCSE of a mean of contributions that are dependent within units (cluster
+# robust); with one contribution per unit it is sd(x) / sqrt(n).
+cluster_mcse <- function(x, units) {
+  n <- length(x)
+  G <- length(unique(units))
+  if (G < 2L) return(NA_real_)
+  s <- tapply(x - mean(x), units, sum)
+  sqrt(sum(s^2) * G / (G - 1)) / n
+}
+
+# Delete-one-pair jackknife MCSE of a measure for antithetic replications:
+# valid for linear and nonlinear measures alike, and equal to
+# sd(pair means) / sqrt(pairs) for a mean over complete pairs.
+pair_jackknife <- function(m, rows, study, estimand, r) {
+  if (!r$status %in% c("ok", "boundary", "unstable") || !is.finite(r$value)) return(r)
+  units <- rep_units(study, rows$replication)
+  u <- unique(units)
+  np <- length(u)
+  note <- function(txt) paste(c(if (!is.na(r$note)) r$note, txt), collapse = "; ")
+  if (np < 2L) {
+    r$mcse <- r$lower <- r$upper <- NA_real_
+    r$note <- note("antithetic pairs: fewer than two pairs, no MCSE")
+    return(r)
+  }
+  th <- vapply(u, function(k) {
+    v <- measure_cell(m, rows[units != k, , drop = FALSE], study, estimand)$value
+    if (is.null(v)) NA_real_ else v
+  }, numeric(1))
+  if (anyNA(th)) {
+    r$mcse <- r$lower <- r$upper <- NA_real_
+    r$note <- note("antithetic pairs: the measure is undefined without some pair, no MCSE")
+    return(r)
+  }
+  r$mcse <- sqrt((np - 1) / np * sum((th - mean(th))^2))
+  z <- stats::qnorm(1 - (1 - study$level) / 2)
+  r$lower <- r$value - z * r$mcse
+  r$upper <- r$value + z * r$mcse
+  if (identical(m, "coverage") || (is.character(m) && m %in% PROPORTION_MEASURES)) {
+    r$lower <- max(0, r$lower)
+    r$upper <- min(1, r$upper)
+  }
+  r$note <- note(sprintf("MCSE from %d antithetic pairs (delete-one-pair jackknife)", np))
+  r
+}
+
 vr_contributions <- function(res, measure) {
   e <- res$estimates
   if (measure == "coverage") {

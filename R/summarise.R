@@ -282,6 +282,11 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
           } else {
             measure_cell(m, rows, study, estimand)
           }
+          # antithetic replications are dependent in pairs: the uncertainty
+          # comes from the pairs, the independent units
+          if (isTRUE(study$generator$antithetic) && nrow(rows)) {
+            r <- pair_jackknife(m, rows, study, estimand, r)
+          }
           label <- if (identical(m, "rejection") && nrow(rows)) {
             # the label uses exactly the rows the rejection rate uses
             rejection_label(rows[rows$estimate_status %in% USABLE_FOR_INTERVAL &

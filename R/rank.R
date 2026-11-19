@@ -109,7 +109,8 @@ sim_rank <- function(run, measure = "mse", methods = NULL, estimand = NULL, B = 
         rank_value(measure, cc$e, cc$t, cc$lo, cc$up)
       }, numeric(1))
       rk <- rank(loss, ties.method = "average")
-      boot <- vapply(seq_len(B), function(b) rank(losses(sample.int(n, n, replace = TRUE)),
+      units <- rep_units(study, common)
+      boot <- vapply(seq_len(B), function(b) rank(losses(boot_index(units)),
                                                   ties.method = "average"), numeric(length(methods)))
       boot <- matrix(boot, nrow = length(methods))
       df <- data.frame(scenario_key = key,
