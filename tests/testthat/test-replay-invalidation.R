@@ -89,3 +89,41 @@ test_that("retention policies determine what can be recomputed", {
   art <- readRDS(file.path(run$path, sim_results(run)$replications$artifact[1]))
   expect_s3_class(art$fits$t_interval, "adempr_estimate")
 })
+
+test_that("fingerprints distinguish formulas, calls, strings, dates and environments", {
+  fp <- adempR:::fingerprint
+  expect_false(fp(y ~ x) == fp(y ~ x + z))
+  expect_false(fp(quote(a + b)) == fp(quote(a * b)))
+  expect_false(fp("a,b") == fp(c("a", "b")))
+  expect_false(fp(as.Date("2026-01-01")) == fp(as.numeric(as.Date("2026-01-01"))))
+  expect_false(fp(NA_character_) == fp("NA"))
+  e1 <- new.env(); e1$x <- 1
+  e2 <- new.env(); e2$x <- 2
+  expect_false(fp(e1) == fp(e2))
+  mk <- function(fml) { force(fml); function(data) fml }
+  expect_false(fp(mk(y ~ x)) == fp(mk(y ~ x + z)))
+  expect_false(fp(list(y ~ x)) == fp(list(y ~ x + z)))
+})
+
+test_that("formula-valued scenario factors get distinct keys", {
+  a <- sim_scenarios(n = c(10L, 20L), model = list(y ~ x))
+  b <- sim_scenarios(n = c(10L, 20L), model = list(y ~ x + z))
+  expect_false(any(a$keys %in% b$keys))
+  expect_length(sim_scenarios(n = 10L, model = list(y ~ x, y ~ x + z))$keys, 2L)
+})
+
+test_that("a changed formula in a method factory requires an update", {
+  g <- function(scenario, context) {
+    x <- rnorm(20); z <- x + rnorm(20)
+    data.frame(x = x, z = z, y = x + z + rnorm(20))
+  }
+  mk <- function(fml) { force(fml); function(data) {
+    sim_estimate("b", unname(stats::coef(stats::lm(fml, data))[2])) } }
+  mkst <- function(fml) sim_study("f", scenarios = sim_scenarios(n = 20L), generate = g,
+    estimands = list(sim_estimand("b", sim_truth_unknown())),
+    methods = list(reg = mk(fml)), measures = "empse")
+  p <- tempfile("adempR-fml-")
+  sim_run(mkst(y ~ x), 3, seed = 1, path = p, progress = FALSE)
+  expect_error(sim_run(mkst(y ~ x + z), 3, seed = 1, path = p, progress = FALSE),
+               "changed")
+})

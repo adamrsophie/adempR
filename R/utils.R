@@ -63,89 +63,171 @@ md5_string <- function(x) {
   md5_bytes(charToRaw(enc2utf8(paste(x, collapse = "\n"))))
 }
 
-# Canonical text representation of an R value used for fingerprints.
-# Functions are represented by their deparsed formals and body (never by
-# serialize(), whose bytecode and source references are unstable), plus the
-# values captured in a non-global closure environment.
-canonical <- function(x, depth = 0L) {
-  if (depth > 20L) return("<depth-limit>")
-  if (is.null(x)) return("NULL")
-  if (is.function(x)) return(canonical_function(x, depth))
-  if (is.environment(x)) {
-    return(paste0("<environment:", environmentName(x), ">"))
+# Canonical text representation of an R value used for fingerprints and
+# scenario keys. Every value is encoded with a type tag, its length, its
+# attributes and quoted elements, so values of different types, lengths or
+# contents never share an encoding ("a,b" differs from c("a", "b"), a Date
+# from its number, NA from "NA"). Language objects are deparsed, S4 objects
+# hashed through their serialization, and environments encoded by their
+# contents. Functions are represented by their deparsed formals and body
+# (never by serialize(), whose bytecode and source references are unstable)
+# plus the values of the free variables they capture.
+CANONICAL_VERSION <- "2"
+
+canonical <- function(x, depth = 0L, seen = NULL) {
+  if (depth > 30L) stopf("A value is nested too deeply to fingerprint (more than 30 levels).")
+  if (is.null(x)) return("N")
+  if (inherits(x, "adempr_canonical")) return(paste0("C", enc_str(unclass(x))))
+  if (is.function(x)) return(paste0("F", enc_str(canonical_function(x, depth, seen))))
+  if (is.environment(x)) return(canonical_env(x, depth, seen))
+  if (typeof(x) == "externalptr") {
+    stopf("An external pointer cannot be fingerprinted. Give the method or generator a `version` and keep the object out of its closure, or create it inside the function.")
   }
-  if (inherits(x, "adempr_canonical")) return(unclass(x))
+  attrs <- canonical_attributes(x, depth, seen)
+  if (isS4(x)) {
+    return(paste0("S4", enc_str(md5_bytes(serialize(x, NULL, version = 2L))), attrs))
+  }
+  if (is.language(x) || typeof(x) %in% c("symbol", "language", "promise", "...")) {
+    txt <- paste(deparse(x, control = c("keepNA", "keepInteger", "niceNames")), collapse = "\n")
+    return(paste0("L", enc_str(txt), attrs))
+  }
   if (is.list(x)) {
-    nm <- names(x) %||% rep("", length(x))
-    parts <- vapply(seq_along(x), function(i) {
-      paste0(nm[i], "=", canonical(x[[i]], depth + 1L))
-    }, character(1))
-    cls <- paste(class(x), collapse = "/")
-    return(paste0(cls, "(", paste(parts, collapse = ","), ")"))
-  }
-  if (is.atomic(x) && length(x) > 1000L) {
-    # large data: hash the serialization (deterministic for atomic data)
-    return(paste0("<", typeof(x), ":", md5_bytes(serialize(x, NULL, version = 2L)), ">"))
+    parts <- vapply(seq_along(x), function(i) canonical(x[[i]], depth + 1L, seen),
+                    character(1))
+    return(paste0("V", length(x), "[", paste(parts, collapse = ""), "]", attrs))
   }
   if (is.atomic(x)) {
-    vals <- if (is.double(x)) {
-      ifelse(is.na(x) & !is.nan(x), "NA", formatC(x, digits = 17, format = "g"))
+    if (length(x) > 1000L) {
+      body <- md5_bytes(serialize(as.vector(x), NULL, version = 2L))
     } else {
-      as.character(x)
+      body <- paste(canonical_atoms(x), collapse = ",")
     }
-    vals[is.na(vals)] <- "NA"
-    nm <- names(x)
-    if (!is.null(nm)) vals <- paste0(nm, "=", vals)
-    d <- dim(x)
-    dims <- if (is.null(d)) "" else paste0("[", paste(d, collapse = "x"), "]")
-    lv <- if (is.factor(x)) paste0("{", paste(levels(x), collapse = "|"), "}") else ""
-    return(paste0(typeof(x), dims, lv, "(", paste(vals, collapse = ","), ")"))
+    return(paste0(typeof(x), length(x), "[", body, "]", attrs))
   }
-  paste0("<", typeof(x), ">")
+  stopf("A value of type `%s` cannot be fingerprinted.", typeof(x))
 }
 
-canonical_function <- function(f, depth = 0L) {
+enc_str <- function(s) paste0(nchar(s, type = "bytes"), ":", s)
+
+canonical_atoms <- function(x) {
+  x <- as.vector(x)
+  if (is.character(x)) {
+    out <- encodeString(x, quote = "\"")
+    out[is.na(x)] <- "NA"
+    return(out)
+  }
+  if (is.double(x)) {
+    out <- formatC(x, digits = 17, format = "g")
+    out[is.na(x)] <- "NA"
+    out[is.nan(x)] <- "NaN"
+    return(out)
+  }
+  if (is.complex(x)) {
+    out <- paste0(canonical_atoms(Re(x)), "+", canonical_atoms(Im(x)), "i")
+    out[is.na(x)] <- "NA"
+    return(out)
+  }
+  if (is.raw(x)) return(as.character(x))
+  out <- as.character(x)
+  out[is.na(x)] <- "NA"
+  out
+}
+
+# All attributes in name order, except source references and the
+# environment of formulas (formulas are identified by their text).
+canonical_attributes <- function(x, depth, seen) {
+  a <- attributes(x)
+  if (is.null(a)) return("")
+  drop <- c("srcref", "srcfile", "wholeSrcref")
+  if (inherits(x, "formula")) drop <- c(drop, ".Environment")
+  a <- a[setdiff(names(a), drop)]
+  if (!length(a)) return("")
+  a <- a[order(names(a), method = "radix")]
+  parts <- vapply(names(a), function(n) {
+    paste0(enc_str(n), canonical(a[[n]], depth + 1L, seen))
+  }, character(1))
+  paste0("A", length(a), "{", paste(parts, collapse = ""), "}")
+}
+
+# Environments: the global environment and package namespaces are named;
+# any other environment is encoded by its contents, with a guard against
+# cycles (an environment that contains itself).
+canonical_env <- function(e, depth, seen) {
+  if (identical(e, globalenv())) return("E<global>")
+  if (identical(e, emptyenv())) return("E<empty>")
+  if (identical(e, baseenv())) return("E<base>")
+  if (isNamespace(e)) {
+    nm <- getNamespaceName(e)
+    return(paste0("E<ns:", nm, "@", package_version_string(nm), ">"))
+  }
+  for (s in seen) if (identical(s, e)) return("E<cycle>")
+  seen <- c(seen, list(e))
+  vars <- sort(ls(e, all.names = TRUE), method = "radix")
+  parts <- vapply(vars, function(v) {
+    paste0(enc_str(v), canonical(get(v, envir = e, inherits = FALSE), depth + 1L, seen))
+  }, character(1))
+  paste0("E", length(vars), "{", paste(parts, collapse = ""), "}",
+         canonical_attributes(e, depth, seen))
+}
+
+package_version_string <- function(pkg) {
+  tryCatch(as.character(utils::packageVersion(pkg)), error = function(e) "?")
+}
+
+canonical_function <- function(f, depth = 0L, seen = NULL) {
   if (is.primitive(f)) return(paste0("<primitive:", deparse(f)[1], ">"))
   fo <- formals(f)
-  fo_txt <- if (is.null(fo)) "" else paste(names(fo), vapply(fo, function(v) {
-    paste(deparse(v), collapse = " ")
+  fo_txt <- if (is.null(fo)) "" else paste(enc_str(names(fo)), vapply(fo, function(v) {
+    enc_str(paste(deparse(v), collapse = " "))
   }, character(1)), sep = "=", collapse = ",")
   body_txt <- paste(deparse(body(f), control = c("keepNA", "keepInteger")),
                     collapse = "\n")
-  env_txt <- if (depth < 4L) canonical_free_variables(f, depth) else ""
-  paste0("function(", fo_txt, ")", body_txt, "|free:", env_txt)
+  env <- environment(f)
+  if (!is.null(env) && (isNamespace(env) || identical(env, baseenv()))) {
+    # A function from a package is identified by its package and version.
+    nm <- if (isNamespace(env)) getNamespaceName(env) else "base"
+    return(paste0("<pkg:", nm, "@", package_version_string(nm), ":",
+                  md5_string(c(fo_txt, body_txt)), ">"))
+  }
+  env_txt <- if (depth < 6L) canonical_free_variables(f, depth, seen) else "<depth>"
+  paste0("function(", fo_txt, ")", enc_str(body_txt), "|free:", env_txt)
 }
 
 # Values of the free variables a function refers to, looked up along its
-# enclosing environments until a package namespace or the base environment.
-# Only referenced names are included, so unrelated variables that happen to
-# live in the same environment do not change the fingerprint. Objects from
-# package namespaces are represented by the package version instead.
-canonical_free_variables <- function(f, depth) {
+# enclosing environments down to and including the global environment.
+# Lookup stops at package environments on the search path, so the result
+# does not depend on which packages happen to be attached: functions from
+# packages are recorded through the declared `packages` and the
+# environment record instead. Only referenced names are included, so
+# unrelated variables in the same environment do not change the
+# fingerprint.
+canonical_free_variables <- function(f, depth, seen) {
   env <- environment(f)
   if (is.null(env)) return("")
   vars <- tryCatch(codetools::findGlobals(f), error = function(e) character())
-  vars <- sort(unique(vars))
+  vars <- sort(unique(vars), method = "radix")
   out <- character()
   for (v in vars) {
     e <- env
-    while (!identical(e, emptyenv())) {
-      if (isNamespace(e) || identical(e, baseenv())) {
-        e <- NULL
+    found <- FALSE
+    repeat {
+      if (identical(e, emptyenv()) || isNamespace(e) || identical(e, baseenv())) break
+      if (exists(v, envir = e, inherits = FALSE)) {
+        found <- TRUE
         break
       }
-      if (exists(v, envir = e, inherits = FALSE)) break
+      if (identical(e, globalenv())) break
       e <- parent.env(e)
     }
-    if (is.null(e) || identical(e, emptyenv())) next
+    if (!found) next
     val <- get(v, envir = e, inherits = FALSE)
-    out <- c(out, paste0(v, "=", canonical(val, depth + 1L)))
+    out <- c(out, paste0(enc_str(v), canonical(val, depth + 1L, seen)))
   }
   paste(out, collapse = ";")
 }
 
 fingerprint <- function(...) {
-  md5_string(canonical(list(...)))
+  md5_string(c(CANONICAL_VERSION, canonical(list(...))))
 }
 
 short_hash <- function(h) substr(h, 1L, 12L)

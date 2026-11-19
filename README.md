@@ -102,12 +102,12 @@ perf <- as.data.frame(sim_summarise(run))
 perf[perf$measure %in% c("coverage", "rejection"),
      c("scenario_id", "method", "label", "value", "mcse")]
 #>   scenario_id method        label value    mcse
-#>    n=10, mu=0      t     coverage 0.943 0.00733
-#>    n=10, mu=0      t type_i_error 0.057 0.00733
-#>    n=10, mu=0   wald     coverage 0.916 0.00877
-#>    n=10, mu=0   wald type_i_error 0.084 0.00877
-#>  n=10, mu=0.5      t        power 0.304 0.01455
-#>  n=10, mu=0.5   wald        power 0.397 0.01547
+#>    n=10, mu=0      t     coverage 0.946 0.00715
+#>    n=10, mu=0      t type_i_error 0.054 0.00715
+#>    n=10, mu=0   wald     coverage 0.909 0.00909
+#>    n=10, mu=0   wald type_i_error 0.091 0.00909
+#>  n=10, mu=0.5      t        power 0.285 0.01427
+#>  n=10, mu=0.5   wald        power 0.382 0.01536
 #>  ...
 ```
 
@@ -119,10 +119,10 @@ suggest:
 cmp <- sim_compare(run, c("t", "wald"), measures = "coverage")
 cmp[c("scenario_id", "value", "mcse", "n_common")]
 #>   scenario_id  value    mcse n_common
-#>    n=10, mu=0 -0.027 0.00513     1000
-#>    n=40, mu=0 -0.009 0.00299     1000
-#>  n=10, mu=0.5 -0.036 0.00589     1000
-#>  n=40, mu=0.5 -0.008 0.00282     1000
+#>    n=10, mu=0 -0.037 0.00597     1000
+#>    n=40, mu=0 -0.006 0.00244     1000
+#>  n=10, mu=0.5 -0.027 0.00513     1000
+#>  n=40, mu=0.5 -0.009 0.00299     1000
 ```
 
 Stop R at any point and call `sim_run()` again with the same arguments: only

@@ -2,7 +2,7 @@
 
 scenario_key_of <- function(values) {
   values <- values[order(names(values), method = "radix")]
-  md5_string(canonical(values))
+  md5_string(c(CANONICAL_VERSION, canonical(values)))
 }
 
 scenario_label_of <- function(values) {

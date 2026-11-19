@@ -18,7 +18,7 @@
 # marks a corrupt file. Network and object stores are not covered by this
 # contract.
 
-SCHEMA_VERSION <- "1.0.0"
+SCHEMA_VERSION <- "2.0.0"
 
 fault_point <- function(name) {
   if (identical(getOption("adempR.fault"), name)) {
