@@ -104,19 +104,23 @@ read_committed <- function(dir, quarantine, repair = FALSE) {
     out[[basename(f)]] <- obj
   }
   inv <- file.path(dir, "INVENTORY")
-  if (file.exists(inv)) {
-    listed <- unique(readLines(inv, warn = FALSE))
-    listed <- listed[nzchar(listed)]
-    present <- sub("\\.rds$", "", names(out))
-    gone <- setdiff(listed, sub("\\.md5$", "", basename(side)))
-    for (g in gone) {
-      problems <- c(problems, sprintf("committed batch %s is missing from the run directory; %s",
-                                      g, if (repair) "its tasks will be rerun" else
-                                        "resume the run to rerun its tasks"))
-    }
-    if (repair) {
-      keep <- intersect(listed, present)
-      writeLines(keep, inv)
+  listed <- if (file.exists(inv)) unique(readLines(inv, warn = FALSE)) else character()
+  listed <- listed[nzchar(listed)]
+  present <- sub("\\.rds$", "", names(out))
+  gone <- setdiff(listed, sub("\\.md5$", "", basename(side)))
+  for (g in gone) {
+    problems <- c(problems, sprintf("committed batch %s is missing from the run directory; %s",
+                                    g, if (repair) "its tasks will be rerun" else
+                                      "resume the run to rerun its tasks"))
+  }
+  if (repair) {
+    # a batch committed by a process that stopped before appending it to the
+    # inventory is added here, so its later loss is detected too
+    keep <- union(intersect(listed, present), present)
+    if (!identical(keep, listed)) {
+      tmp <- paste0(inv, ".tmp")
+      writeLines(keep, tmp)
+      file.rename(tmp, inv)
     }
   }
   if (length(problems)) warning(paste(problems, collapse = "\n"), call. = FALSE)
@@ -160,21 +164,33 @@ acquire_lock <- function(p) {
   token
 }
 
-# Two coordinators can both see the same dead owner. Each moves the lock
-# aside under a unique name (an atomic rename) and checks that what it moved
-# is the dead owner's lock; one that moved a fresh lock puts it back. Only
-# then is the lock created again, and dir.create() admits one winner.
+# Two coordinators can both see the same dead owner. A takeover is done
+# only while holding a second lock, LOCK.takeover, created with an atomic
+# dir.create(): one contender at a time checks, under that lock, that the
+# run lock still belongs to the dead owner, removes it and creates it again.
+# A coordinator that is not taking over cannot replace an existing run lock
+# (its dir.create() fails), so no live lock is ever moved or removed.
 take_over_stale_lock <- function(p, owner) {
-  aside <- paste0(p$lock, ".stale-", Sys.getpid(), "-", basename(tempfile("")))
-  if (!file.rename(p$lock, aside)) return(FALSE)
-  moved <- tryCatch(jsonlite::fromJSON(file.path(aside, "owner.json")), error = function(e) NULL)
-  if (!identical(moved[c("pid", "host", "time")], owner[c("pid", "host", "time")])) {
-    # ponytail: if a third process created a lock in between, the moved
-    # live lock cannot be restored; its owner then fails at release, not here.
-    file.rename(aside, p$lock)
+  mutex <- paste0(p$lock, ".takeover")
+  host <- Sys.info()[["nodename"]]
+  if (!dir.create(mutex, showWarnings = FALSE)) {
+    # a takeover lock left by a contender that died is itself stale
+    mo <- tryCatch(jsonlite::fromJSON(file.path(mutex, "owner.json")), error = function(e) NULL)
+    if (is.null(mo) || !identical(mo$host, host) || !identical(pid_alive(mo$pid), FALSE)) {
+      return(FALSE)
+    }
+    unlink(mutex, recursive = TRUE)
+    if (!dir.create(mutex, showWarnings = FALSE)) return(FALSE)
+  }
+  on.exit(unlink(mutex, recursive = TRUE), add = TRUE)
+  jsonlite::write_json(list(pid = Sys.getpid(), host = host), file.path(mutex, "owner.json"),
+                       auto_unbox = TRUE)
+  current <- lock_owner(p)
+  if (is.null(current) || !identical(current[c("pid", "host", "time")], owner[c("pid", "host", "time")]) ||
+      !identical(pid_alive(current$pid), FALSE)) {
     return(FALSE)
   }
-  unlink(aside, recursive = TRUE)
+  unlink(p$lock, recursive = TRUE)
   dir.create(p$lock, showWarnings = FALSE)
 }
 
@@ -307,12 +323,22 @@ write_manifest <- function(p, manifest) {
   tmp <- tempfile("manifest-", tmpdir = p$tmp, fileext = ".rds")
   saveRDS(manifest, tmp)
   md5 <- file_md5(tmp)
-  if (file.exists(p$manifest)) file.copy(p$manifest, paste0(p$manifest, ".bak"), overwrite = TRUE)
+  tmp_md5 <- sub("\\.rds$", ".md5", tmp)
+  writeLines(md5, tmp_md5)
+  side <- paste0(p$manifest, ".md5")
+  # The backup is the previous manifest only when that one verifies: a
+  # damaged primary never replaces a good backup. The backup carries its
+  # own checksum.
+  if (manifest_verifies(p$manifest)) {
+    ok <- file.copy(p$manifest, paste0(p$manifest, ".bak"), overwrite = TRUE) &&
+      file.copy(side, paste0(p$manifest, ".bak.md5"), overwrite = TRUE)
+    if (!isTRUE(ok)) stopf("Could not back up the manifest of %s.", p$root)
+  }
   if (!file.rename(tmp, p$manifest)) {
-    unlink(tmp)
+    unlink(c(tmp, tmp_md5))
     stopf("Could not commit the manifest of %s.", p$root)
   }
-  writeLines(md5, paste0(p$manifest, ".md5"))
+  if (!file.rename(tmp_md5, side)) stopf("Could not commit the manifest checksum of %s.", p$root)
   js <- list(
     schema_version = manifest$schema_version, study = manifest$study$name,
     label = manifest$label, seed = manifest$seed,
@@ -333,6 +359,14 @@ write_manifest <- function(p, manifest) {
   invisible(TRUE)
 }
 
+# A manifest file that exists and matches its checksum sidecar (a file
+# without a sidecar is accepted, as written by older versions).
+manifest_verifies <- function(f) {
+  if (!file.exists(f)) return(FALSE)
+  side <- paste0(f, ".md5")
+  !file.exists(side) || identical(readLines(side, warn = FALSE)[1], file_md5(f))
+}
+
 # Change a stored manifest under the run lock.
 update_manifest <- function(path, f) {
   p <- run_paths(path)
@@ -345,12 +379,10 @@ update_manifest <- function(path, f) {
 read_manifest <- function(path) {
   p <- run_paths(path)
   if (!file.exists(p$manifest)) stopf("No adempR run found at %s.", path)
-  side <- paste0(p$manifest, ".md5")
-  ok <- !file.exists(side) || identical(readLines(side, warn = FALSE)[1], file_md5(p$manifest))
-  m <- if (ok) tryCatch(readRDS(p$manifest), error = function(e) NULL)
+  m <- if (manifest_verifies(p$manifest)) tryCatch(readRDS(p$manifest), error = function(e) NULL)
   if (is.null(m)) {
     bak <- paste0(p$manifest, ".bak")
-    m <- if (file.exists(bak)) tryCatch(readRDS(bak), error = function(e) NULL)
+    m <- if (manifest_verifies(bak)) tryCatch(readRDS(bak), error = function(e) NULL)
     if (is.null(m)) stopf("The manifest of %s is damaged and has no readable backup.", path)
     warnf("The manifest of %s failed its checksum; using the previous manifest (manifest.rds.bak). Results committed after it are still read from their batches.", path)
   }

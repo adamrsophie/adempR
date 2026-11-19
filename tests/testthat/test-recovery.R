@@ -158,6 +158,16 @@ test_that("a damaged manifest falls back to its backup and a bare directory rest
   writeBin(as.raw(1:10), f)
   expect_warning(man <- read_manifest(path), "checksum")
   expect_equal(man$replications, 3L)
+  # the next write must not copy the damaged primary over the good backup
+  good_bak <- readBin(paste0(f, ".bak"), "raw", 1e6)
+  suppressWarnings(write_manifest(run_paths(path), man))
+  expect_identical(readBin(paste0(f, ".bak"), "raw", 1e6), good_bak)
+  expect_true(manifest_verifies(paste0(f, ".bak")))
+  expect_equal(read_manifest(path)$replications, 3L)
+  # a damaged backup is never used
+  writeBin(as.raw(1:10), f)
+  writeBin(as.raw(1:5), paste0(f, ".bak"))
+  expect_error(read_manifest(path), "no readable backup")
   # a first call stopped after creating the folders but before the manifest
   path2 <- run_path()
   for (d in c("batches", "truth", "tmp", "quarantine")) dir.create(file.path(path2, d), recursive = TRUE)
@@ -207,4 +217,45 @@ test_that("changes that alter a production run need explicit confirmation", {
   expect_error(suppressWarnings(sim_run(st2, replications = 4, seed = 1, path = p, update = TRUE)), "production run")
   expect_s3_class(suppressWarnings(sim_run(st2, replications = 4, seed = 1, path = p, update = "production")), "adempr_run")
   expect_error(sim_run(st2, replications = 4, seed = 1, path = p, update = "yes"), "must be TRUE")
+})
+
+test_that("a takeover in progress excludes other contenders, and a dead one's is recovered", {
+  skip_on_os("windows")
+  p <- adempR:::run_paths(run_path())
+  dir.create(p$root)
+  host <- Sys.info()[["nodename"]]
+  dead <- list(pid = 999999L, host = host, time = "t0")
+  skip_if(isTRUE(adempR:::pid_alive(dead$pid)), "pid 999999 is in use")
+  dir.create(p$lock)
+  jsonlite::write_json(dead, file.path(p$lock, "owner.json"), auto_unbox = TRUE)
+  # another live contender holds the takeover lock: this one must back off
+  mutex <- paste0(p$lock, ".takeover")
+  dir.create(mutex)
+  jsonlite::write_json(list(pid = Sys.getpid(), host = host), file.path(mutex, "owner.json"),
+                       auto_unbox = TRUE)
+  expect_false(adempR:::take_over_stale_lock(p, dead))
+  expect_identical(adempR:::lock_owner(p)$pid, dead$pid)
+  # the contender died while holding it: its takeover lock is stale too
+  jsonlite::write_json(list(pid = 999999L, host = host), file.path(mutex, "owner.json"),
+                       auto_unbox = TRUE)
+  tok <- suppressMessages(adempR:::acquire_lock(p))
+  expect_identical(adempR:::lock_owner(p)$token, tok)
+  expect_false(dir.exists(mutex))
+  adempR:::release_lock(p, tok)
+})
+
+test_that("a batch committed before its inventory entry is added on the next resume", {
+  st <- normal_study(n = 10L, mu = 0)
+  path <- run_path()
+  run <- sim_run(st, replications = 4, seed = 1, path = path, chunk_size = 1L)
+  inv <- file.path(path, "batches", "INVENTORY")
+  listed <- readLines(inv)
+  # simulate a stop between the commit and the inventory append
+  writeLines(listed[-1], inv)
+  run2 <- sim_resume(path, replications = 4)
+  expect_setequal(readLines(inv), listed)
+  # the loss of that batch is now detected
+  b <- file.path(path, "batches", paste0(listed[1], c(".rds", ".md5")))
+  unlink(b)
+  expect_warning(sim_results(run2), "missing from the run directory")
 })
