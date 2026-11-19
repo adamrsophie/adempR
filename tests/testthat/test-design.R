@@ -76,6 +76,26 @@ test_that("completeness, freezing and amendments are recorded", {
   expect_true(am$amendments[[1]]$after_freeze)
   expect_false(identical(am$amendments[[1]]$fingerprint_before, am$amendments[[1]]$fingerprint_after))
   expect_error(sim_amend(st, alpha = 0.01), "reason")
+  # a frozen study edited directly is refused; an amended one runs
+  edited <- fr
+  edited$aims <- "Something else"
+  expect_error(sim_run(edited, replications = 2, seed = 1, path = run_path()),
+               "changed after it was frozen")
+  expect_s3_class(sim_run(am, replications = 2, seed = 1, path = run_path()), "adempr_run")
+})
+
+test_that("scenario weights are part of the study identity", {
+  mk <- function(w) sim_study("w", scenarios = sim_scenarios(n = c(10L, 20L), .weights = w),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(avg = function(data) sim_estimate("mean", mean(data))))
+  expect_false(identical(sim_fingerprint(mk(c(1, 3))), sim_fingerprint(mk(c(3, 1)))))
+  expect_identical(sim_fingerprint(mk(c(1, 3))), sim_fingerprint(mk(c(2, 6))))
+  p <- run_path()
+  sim_run(mk(c(1, 3)), replications = 2, seed = 1, path = p)
+  r <- sim_run(mk(c(3, 1)), replications = 2, seed = 1, path = p)
+  ch <- unlist(lapply(r$manifest$revisions, `[[`, "changes"))
+  expect_true(any(grepl("scenario design changed", ch)))
 })
 
 test_that("the smoke test reports failing methods without stopping", {

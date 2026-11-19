@@ -193,6 +193,7 @@ study_fingerprints <- function(study) {
   list(
     generator = generator_fingerprint(study$generator),
     scenarios = stats::setNames(study$scenarios$keys, study$scenarios$keys),
+    design = scenario_design_fingerprint(study$scenarios),
     methods = lapply(study$methods, method_fingerprint),
     truth = lapply(study$estimands, function(e) truth_fingerprint(e$truth)),
     estimands = lapply(study$estimands, function(e) {
@@ -206,6 +207,18 @@ study_fingerprints <- function(study) {
     # recorded so that a change is visible, never used to select results.
     execution = execution_settings(study)
   )
+}
+
+# Everything about the scenario set that is not a scenario's identity:
+# weights (keyed by scenario, so order does not matter), the sampling
+# distribution, the design description, constraints and exclusions.
+scenario_design_fingerprint <- function(sc) {
+  w <- sc$weights
+  if (!is.null(w)) {
+    w <- stats::setNames(w, sc$keys)
+    w <- w[order(names(w))]
+  }
+  fingerprint(w, sc$distribution, sc$design, sc$constraints, sc$excluded)
 }
 
 execution_settings <- function(study) {
@@ -447,8 +460,12 @@ sim_completeness <- function(study) {
 #' the specification; it does not prove that it was fixed before results
 #' were seen. `sim_amend()` changes components of a study and records the
 #' reason, the time and the fingerprints before and after, so deviations
-#' from the frozen protocol are reported. `sim_fingerprint()` returns the
-#' whole-study fingerprint.
+#' from the frozen protocol are reported. [sim_run()] refuses a frozen
+#' study whose fingerprint differs from the frozen (or last amended) hash,
+#' so every change after freezing goes through `sim_amend()`.
+#' `sim_fingerprint()` returns the whole-study fingerprint; it covers the
+#' scenario weights, sampling distribution, constraints and exclusions as
+#' well as the scenarios themselves.
 #'
 #' @param study A [sim_study()].
 #' @param label `"pilot"` or `"production"`.

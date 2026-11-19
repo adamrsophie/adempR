@@ -47,6 +47,10 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   }
   added_scen <- setdiff(names(new$scenarios), names(old$scenarios))
   if (length(added_scen)) changes <- c(changes, sprintf("added %d scenario(s)", length(added_scen)))
+  if (!identical(old$design, new$design)) {
+    changes <- c(changes,
+      "scenario design changed (weights, distribution, constraints or exclusions): re-evaluate")
+  }
   removed_scen <- setdiff(names(old$scenarios), names(new$scenarios))
   if (length(removed_scen)) {
     changes <- c(changes, sprintf(
@@ -119,6 +123,19 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
   man$study_fingerprint <- study_fp
   man$replications <- max(man$replications, as.integer(replications))
   man
+}
+
+# A frozen study may change only through sim_amend(), which records the new
+# hash. A study read back from a manifest is not rechecked: its fingerprint
+# recomputed in another session can differ for reasons unrelated to edits.
+check_frozen <- function(study) {
+  frozen <- study$status$frozen
+  if (is.null(frozen) || isTRUE(attr(study, "adempr_stored"))) return(invisible())
+  expected <- frozen$amended_hash %||% frozen$hash
+  if (!identical(sim_fingerprint(study), expected)) {
+    stopf("This study was changed after it was frozen without `sim_amend()`. Record the change with `sim_amend(study, ..., reason = )`, or freeze it again with `sim_freeze()` if no results were seen.")
+  }
+  invisible()
 }
 
 #' Run, extend or resume a simulation study
@@ -197,6 +214,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   }
   if (!is_count(chunk_size, 1)) stopf("`chunk_size` must be a positive whole number.")
   sim_validate(study, error = TRUE)
+  check_frozen(study)
   replications <- as.integer(replications)
   p <- run_paths(path)
   if (dir.exists(path) && !file.exists(p$manifest) &&

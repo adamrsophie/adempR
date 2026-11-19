@@ -31,8 +31,12 @@ records its fingerprint and time. A frozen hash proves the identity of
 the specification; it does not prove that it was fixed before results
 were seen. \code{sim_amend()} changes components of a study and records the
 reason, the time and the fingerprints before and after, so deviations
-from the frozen protocol are reported. \code{sim_fingerprint()} returns the
-whole-study fingerprint.
+from the frozen protocol are reported. \code{\link[=sim_run]{sim_run()}} refuses a frozen
+study whose fingerprint differs from the frozen (or last amended) hash,
+so every change after freezing goes through \code{sim_amend()}.
+\code{sim_fingerprint()} returns the whole-study fingerprint; it covers the
+scenario weights, sampling distribution, constraints and exclusions as
+well as the scenarios themselves.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = 20L),
