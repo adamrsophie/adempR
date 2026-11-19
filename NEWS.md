@@ -14,16 +14,22 @@ First release.
 * Reproducibility: an append only L'Ecuyer-CMRG stream registry keyed by
   stage, scenario and component, so results do not depend on scenario
   order, method order, chunk size or backend, and adding methods or
-  replications leaves existing streams unchanged. The caller's RNG is
-  restored.
+  replications leaves existing streams unchanged. Pilots and data
+  generating mechanism checks draw from their own stream families. The
+  caller's RNG is restored.
+* Provenance: frozen protocols with recorded amendments, study
+  fingerprints that cover scenario weights and designs, the computing
+  environment and git commit of every session, and a revision for every
+  change to a study.
 * Recoverable execution: atomic commits with checksums, one coordinator
   lock with stale lock recovery, quarantine of corrupt files, duplicate
   detection with conflict checks, selective invalidation and revision
-  records, a `future` backend, replay of single replications.
+  records, a `future` backend that resolves declared packages and helper
+  functions as the sequential backend does, replay of single replications.
 * Performance: 17 built in measures with Monte Carlo standard errors,
   exact intervals for proportions, Monte Carlo truth uncertainty, paired
   method comparisons, Pareto views, precision planning, pilots, sequential
-  stopping with error spending over looks and cells, and mergeable
-  accumulators.
+  stopping with error spending over looks and cells (stored with the run
+  and analyzed on the look prefix), and mergeable accumulators.
 * Diagnostics, plots, a self contained HTML report and reproducible export
   bundles.
