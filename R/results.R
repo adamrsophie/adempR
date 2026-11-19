@@ -31,6 +31,15 @@ dedup_table <- function(df, keys, scientific, what) {
   df[!dup, , drop = FALSE]
 }
 
+# Keep, for every task identified by `keys`, only the rows of its latest
+# retry round.
+latest_round <- function(df, keys) {
+  if (is.null(df) || !nrow(df)) return(df)
+  id <- do.call(paste, c(lapply(df[keys], col_text), sep = "\r"))
+  top <- tapply(df$round, id, max)
+  df[df$round == top[id], , drop = FALSE]
+}
+
 read_raw_results <- function(path, repair = FALSE) {
   p <- run_paths(path)
   if (!dir.exists(p$batches)) {
@@ -45,18 +54,29 @@ read_raw_results <- function(path, repair = FALSE) {
             SCHEMA_VERSION)
     }
   }
-  get <- function(nm) bind_rows(lapply(objs, `[[`, nm))
-  reps <- dedup_table(get("replications"), c("scenario_key", "replication", "generator_fp"),
-                      c("generation_status", "generation_message"), "generation")
-  att <- dedup_table(get("attempts"),
-                     c("scenario_key", "replication", "method", "method_fp", "attempt"),
-                     c("status", "failed_stage", "message", "n_warnings", "warnings"),
-                     "method attempt")
-  est <- dedup_table(get("estimates"),
-                     c("scenario_key", "replication", "method", "method_fp", "estimand"),
-                     c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning"), "estimate")
-  dtr <- dedup_table(get("dataset_truth"), c("scenario_key", "replication", "estimand"),
-                     "truth", "data set truth")
+  # Every row carries the retry round in which it was computed (0 for the
+  # first execution). Within a round, a repeated delivery must be identical;
+  # across rounds, the latest round supersedes earlier ones.
+  get <- function(nm) {
+    df <- bind_rows(lapply(objs, `[[`, nm))
+    if (!is.null(df) && nrow(df) && is.null(df$round)) df$round <- 0L
+    df
+  }
+  reps <- latest_round(dedup_table(get("replications"),
+                                   c("scenario_key", "replication", "generator_fp", "round"),
+                                   c("generation_status", "generation_message"), "generation"),
+                       c("scenario_key", "replication", "generator_fp"))
+  task_keys <- c("scenario_key", "replication", "method", "method_fp")
+  att <- latest_round(dedup_table(get("attempts"), c(task_keys, "attempt", "round"),
+                                  c("status", "failed_stage", "message", "n_warnings", "warnings"),
+                                  "method attempt"), task_keys)
+  est <- latest_round(dedup_table(get("estimates"), c(task_keys, "estimand", "round"),
+                                  c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning"),
+                                  "estimate"), task_keys)
+  dtr <- latest_round(dedup_table(get("dataset_truth"),
+                                  c("scenario_key", "replication", "estimand", "round"),
+                                  "truth", "data set truth"),
+                      c("scenario_key", "replication", "estimand"))
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,
        problems = rc$problems)
 }

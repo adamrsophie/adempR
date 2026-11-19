@@ -169,3 +169,30 @@ test_that("generation failures are recorded and never redrawn", {
   reps <- sim_results(run)$replications
   expect_identical(reps$generation_status[reps$replication == 4], "error")
 })
+
+test_that("failed generations are final until an explicit retry", {
+  flag <- tempfile()
+  file.create(flag)
+  gB <- local({ FLAG <- flag; function(scenario, context) {
+    if (file.exists(FLAG)) stop("resource unavailable")
+    rnorm(scenario$n) } })
+  st <- sim_study("b", scenarios = sim_scenarios(n = 5L), generate = gB,
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(avg = function(data) sim_estimate("mean", mean(data))),
+    measures = "bias")
+  p <- tempfile("adempR-retry-")
+  sim_run(st, 2, seed = 1, path = p, progress = FALSE)
+  n_batches <- function() length(list.files(file.path(p, "batches"), pattern = "[.]rds$"))
+  b1 <- n_batches()
+  expect_gt(b1, 0L)
+  unlink(flag)
+  r <- sim_run(st, 2, seed = 1, path = p, progress = FALSE)
+  expect_equal(n_batches(), b1)
+  expect_true(all(sim_results(r)$replications$generation_status == "error"))
+  r <- sim_run(st, 2, seed = 1, path = p, retry_failed = TRUE, progress = FALSE)
+  res <- sim_results(r)
+  expect_true(all(res$replications$generation_status == "ok"))
+  expect_equal(nrow(res$estimates), 2L)
+  expect_match(r$manifest$revisions[[length(r$manifest$revisions)]]$changes, "retry round 1")
+  expect_s3_class(sim_summarise(r), "data.frame")
+})

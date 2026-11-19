@@ -122,6 +122,12 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
 #' @param max_tasks Refuse to schedule more than this many tasks in one
 #'   call; a guard against unintentionally enormous designs.
 #' @param update Allow refitting methods whose definition changed.
+#' @param retry_failed Rerun replications whose data generation failed and
+#'   method fits that ended in an error or a timeout, with their original
+#'   random number streams. Use it after fixing a failure caused by the
+#'   computing environment (a missing file, package or license, memory).
+#'   The retry is recorded as a revision and its results supersede the
+#'   earlier ones; without it, failures are final and are never rerun.
 #' @param label Run label; defaults to the study status (`"draft"`,
 #'   `"pilot"` or `"production"`).
 #' @param progress Print progress messages.
@@ -140,7 +146,8 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
 #' @export
 sim_run <- function(study, replications, seed, path, backend = c("sequential", "future"),
                     chunk_size = 25L, workers = NULL, max_tasks = 1e6,
-                    update = FALSE, label = NULL, progress = interactive()) {
+                    update = FALSE, retry_failed = FALSE, label = NULL,
+                    progress = interactive()) {
   stopifnot(inherits(study, "adempr_study"))
   backend <- match.arg(backend)
   if (!is_count(replications, 1)) stopf("`replications` must be a positive whole number.")
@@ -171,7 +178,18 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
 
   p$method_fps <- unlist(man$fingerprints$methods)
   p$generator_fp <- man$fingerprints$generator
-  done <- committed_index(path, p$method_fps)
+  done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed)
+  retried <- attr(done, "retried")
+  p$round <- man$retry_round %||% 0L
+  if (sum(retried)) {
+    p$round <- p$round + 1L
+    man$retry_round <- p$round
+    man$revisions <- c(man$revisions, list(list(time = now_utc(),
+      changes = sprintf("retry round %d: rerun %d failed generation(s) and %d failed method fit(s) with their original random number streams",
+                        p$round, retried[["generation"]], retried[["method"]]),
+      fingerprint_before = man$study_fingerprint, fingerprint_after = man$study_fingerprint)))
+    write_manifest(p, man)
+  }
   todo <- plan_tasks(study, man$replications, done)
   if (nrow(todo) > max_tasks) {
     stopf("This call would run %s tasks (%d scenarios x up to %d replications), more than `max_tasks` = %s. Check the design or raise `max_tasks` deliberately.",
@@ -245,15 +263,45 @@ print.adempr_run <- function(x, ...) {
 
 # Which (scenario, replication, method) combinations are committed with the
 # current method fingerprints.
-committed_index <- function(path, fps) {
+# A replication whose generation failed counts as finished for every
+# method: it is not rerun unless a retry is requested.
+committed_index <- function(path, fps, gen_fp, retry = FALSE) {
   res <- read_raw_results(path, repair = TRUE)
   est <- res$estimates
-  if (is.null(est) || !nrow(est)) {
-    return(data.frame(scenario_key = character(), replication = integer(),
-                      method = character(), stringsAsFactors = FALSE))
+  att <- res$attempts
+  reps <- res$replications
+  empty <- data.frame(scenario_key = character(), replication = integer(),
+                      method = character(), stringsAsFactors = FALSE)
+  done <- empty
+  if (!is.null(est) && nrow(est)) {
+    cur <- est$method %in% names(fps) & est$method_fp == fps[est$method]
+    done <- unique(est[cur, c("scenario_key", "replication", "method")])
+    if (retry && !is.null(att) && nrow(att)) {
+      bad <- att[att$final & att$status %in% c("error", "timeout") &
+                   att$method %in% names(fps) & att$method_fp == fps[att$method], , drop = FALSE]
+      id_bad <- paste(bad$scenario_key, bad$replication, bad$method, sep = "\r")
+      done <- done[!(paste(done$scenario_key, done$replication, done$method, sep = "\r") %in%
+                       id_bad), , drop = FALSE]
+    }
   }
-  cur <- est$method %in% names(fps) & est$method_fp == fps[est$method]
-  unique(est[cur, c("scenario_key", "replication", "method")])
+  failed_gen <- 0L
+  failed_fit <- 0L
+  if (!is.null(reps) && nrow(reps)) {
+    gf <- unique(reps[reps$generator_fp == gen_fp & reps$generation_status != "ok",
+                      c("scenario_key", "replication")])
+    failed_gen <- nrow(gf)
+    if (nrow(gf) && !retry) {
+      done <- unique(rbind(done, merge(gf, data.frame(method = names(fps),
+                                                       stringsAsFactors = FALSE))))
+    }
+  }
+  if (retry && !is.null(att) && nrow(att)) {
+    failed_fit <- sum(att$final & att$status %in% c("error", "timeout") &
+                        att$method %in% names(fps) & att$method_fp == fps[att$method])
+  }
+  attr(done, "retried") <- c(generation = if (retry) failed_gen else 0L,
+                             method = failed_fit)
+  done
 }
 
 plan_tasks <- function(study, R, done) {
@@ -307,9 +355,13 @@ commit_chunk <- function(study, results, p) {
   if (!is.null(est)) est$method_fp <- unname(fps[est$method])
   att <- bind_rows(lapply(results, `[[`, "attempts"))
   if (!is.null(att)) att$method_fp <- unname(fps[att$method])
+  rnd <- function(df) {
+    if (!is.null(df) && nrow(df)) df$round <- as.integer(p$round)
+    df
+  }
   batch <- list(schema_version = SCHEMA_VERSION, created = now_utc(),
-                replications = bind_rows(reps), attempts = att, estimates = est,
-                dataset_truth = bind_rows(lapply(results, `[[`, "dataset_truth")))
+                replications = rnd(bind_rows(reps)), attempts = rnd(att), estimates = rnd(est),
+                dataset_truth = rnd(bind_rows(lapply(results, `[[`, "dataset_truth"))))
   atomic_save(batch, p$batches, paste0("b-", new_uuid()), p$tmp)
 }
 

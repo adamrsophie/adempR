@@ -15,6 +15,7 @@ sim_run(
   workers = NULL,
   max_tasks = 1e+06,
   update = FALSE,
+  retry_failed = FALSE,
   label = NULL,
   progress = interactive()
 )
@@ -41,6 +42,13 @@ sim_resume(path, ...)
 call; a guard against unintentionally enormous designs.}
 
 \item{update}{Allow refitting methods whose definition changed.}
+
+\item{retry_failed}{Rerun replications whose data generation failed and
+method fits that ended in an error or a timeout, with their original
+random number streams. Use it after fixing a failure caused by the
+computing environment (a missing file, package or license, memory).
+The retry is recorded as a revision and its results supersede the
+earlier ones; without it, failures are final and are never rerun.}
 
 \item{label}{Run label; defaults to the study status (\code{"draft"},
 \code{"pilot"} or \code{"production"}).}
