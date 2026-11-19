@@ -482,7 +482,7 @@ print.adempr_summary <- function(x, digits = "mcse", ...) {
                      stringsAsFactors = FALSE)
   print(show, row.names = FALSE, right = FALSE)
   sq <- attr(x, "sequential")
-  if (!is.null(sq)) {
+  if (!is.null(sq$analyzed)) {
     cat(sequential_note(sq), "\n", sep = "")
   }
   f <- attr(x, "failures")

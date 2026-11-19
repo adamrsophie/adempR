@@ -62,6 +62,7 @@ sim_calibrate_method <- function(study, method, grid, measure = "mse", estimand 
     if (is.null(m$estimands)) m$estimands <- names(study$estimands)
     m
   })
+  attr(cal, "adempr_derived") <- list(kind = "calibration", parent = derived_parent(study))
   run <- sim_run(cal, replications = replications, seed = seed, path = path,
                  label = "calibration", ...)
   r <- sim_rank(run, measure = measure, estimand = estimand, B = 10L, seed = 1L)

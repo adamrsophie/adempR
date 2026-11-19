@@ -56,6 +56,11 @@ sim_run_shard <- function(study, shard, n_shards, replications, seed, path, ...)
   sc$labels <- sc$labels[idx]
   if (!is.null(sc$weights)) sc$weights <- sc$weights[idx] / sum(sc$weights[idx])
   sub$scenarios <- sc
+  # a shard is a recorded derivation of the full study (which may be
+  # frozen): its own fingerprint differs, the parent's is checked
+  attr(sub, "adempr_derived") <- list(kind = "shard", shard = as.integer(shard),
+                                      n_shards = as.integer(n_shards),
+                                      parent = derived_parent(study))
   sim_run(sub, replications = replications, seed = seed, path = shard_path(path, shard),
           rng_registry = rng_registry(rng_keys(study)), ...)
 }
@@ -82,9 +87,22 @@ sim_collect_shards <- function(study, n_shards, replications, seed, path, into) 
   missing <- dirs[!file.exists(file.path(dirs, "manifest.rds"))]
   if (length(missing)) stopf("Shard(s) not run yet: %s.", paste(basename(missing), collapse = ", "))
   registry <- rng_registry(rng_keys(study))
-  for (d in dirs) {
-    m <- read_manifest(d)
-    if (!identical(m$seed, seed)) stopf("Shard %s used seed %s, not %s.", basename(d), m$seed, seed)
+  parent <- derived_parent(study)
+  mans <- lapply(dirs, read_manifest)
+  for (i in seq_along(dirs)) {
+    d <- dirs[i]
+    m <- mans[[i]]
+    if (!isTRUE(as.numeric(m$seed) == as.numeric(seed))) {
+      stopf("Shard %s used seed %s, not %s.", basename(d), m$seed, seed)
+    }
+    if (!identical(m$derived_from$parent, parent) || !identical(m$derived_from$shard, i) ||
+        !identical(m$derived_from$n_shards, as.integer(n_shards))) {
+      stopf("Shard %s was not run by sim_run_shard() as shard %d of %d of this study.",
+            basename(d), i, as.integer(n_shards))
+    }
+    if (!identical(m$status, "complete")) {
+      stopf("Shard %s did not finish (status %s); rerun its job, it resumes.", basename(d), m$status)
+    }
     if (!identical(m$fingerprints$generator, generator_fingerprint(study$generator)) ||
         !identical(unlist(m$fingerprints$methods), unlist(lapply(study$methods, method_fingerprint)))) {
       stopf("Shard %s was run with a different generator or methods.", basename(d))
@@ -93,28 +111,53 @@ sim_collect_shards <- function(study, n_shards, replications, seed, path, into) 
       stopf("Shard %s holds %d replications, fewer than %d.", basename(d), m$replications, replications)
     }
   }
+  labels <- unique(vapply(mans, function(m) m$label %||% "", character(1)))
+  domains <- unique(vapply(mans, function(m) m$rng_domain %||% "", character(1)))
+  if (length(labels) != 1L || length(domains) != 1L) {
+    stopf("The shards were run with different labels or random number domains (%s).",
+          paste(labels, collapse = ", "))
+  }
   p <- run_paths(into)
   ensure_dirs(p)
-  man <- new_manifest(study, seed, replications, "collected", registry)
+  # the collected run keeps the label and the stream domain of its shards
+  man <- new_manifest(study, seed, replications, labels, registry)
+  man$rng_domain <- if (nzchar(domains)) domains else NULL
   man$collected_from <- basename(dirs)
+  man$sessions <- unlist(lapply(mans, `[[`, "sessions"), recursive = FALSE)
+  sr <- unlist(lapply(mans, function(m) m$scenario_replications))
+  if (length(sr)) man$scenario_replications <- sr
   write_manifest(p, man)
   inv <- character()
   for (d in dirs) {
     rc <- read_committed(file.path(d, "batches"), file.path(d, "quarantine"))
     for (nm in names(rc$objects)) {
       b <- sub("\\.rds$", "", nm)
-      file.copy(file.path(d, "batches", c(nm, paste0(b, ".md5"))), p$batches)
+      ok <- file.copy(file.path(d, "batches", c(nm, paste0(b, ".md5"))), p$batches)
+      if (!all(ok)) stopf("Could not copy batch %s of shard %s.", b, basename(d))
       inv <- c(inv, b)
     }
     art <- file.path(d, "artifacts")
     if (dir.exists(art)) {
       dir.create(file.path(into, "artifacts"), showWarnings = FALSE)
-      file.copy(list.files(art, full.names = TRUE), file.path(into, "artifacts"))
+      ok <- file.copy(list.files(art, full.names = TRUE), file.path(into, "artifacts"))
+      if (!all(ok)) stopf("Could not copy the artifacts of shard %s.", basename(d))
     }
   }
   writeLines(inv, file.path(p$batches, "INVENTORY"))
-  # a final call computes truths, records the session and finds nothing to run
-  sim_run(study, replications = replications, seed = seed, path = into, progress = FALSE)
+  # a final call computes truths and records the session; it must find
+  # nothing to run, or the shards did not hold all the work
+  tryCatch(sim_run(study, replications = replications, seed = seed, path = into,
+                   progress = FALSE, max_tasks = 0),
+           adempr_too_many_tasks = function(e) {
+             stopf("The shards do not hold every task of the study (%s); rerun the incomplete shards.",
+                   conditionMessage(e))
+           })
+}
+
+# Identity of a study from which shards or calibrations are derived.
+derived_parent <- function(study) {
+  check_frozen(study)
+  study$status$frozen$amended_hash %||% study$status$frozen$hash %||% sim_fingerprint(study)
 }
 
 shard_path <- function(path, shard) file.path(path, sprintf("shard-%03d", as.integer(shard)))

@@ -59,12 +59,13 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   scenario <- study$scenarios$values[[idx]]
   gctx <- list(replication = rep, scenario_key = key, stage = dgp_stage)
   if (isTRUE(study$generator$antithetic)) gctx$antithetic <- rep %% 2L == 0L
-  gen <- with_rng_state(task$seeds$data, run_captured(function() {
+  gpk <- study$generator$packages
+  gen <- with_rng_state(task$seeds$data, run_captured(function() with_packages(gpk, {
     out <- study$generator$fun(scenario, gctx)
     check_generated(out)
     if (inherits(out, "adempr_data")) check_generated(out$data)
     out
-  }))
+  })))
   repl <- data.frame(scenario_key = key, replication = rep,
                      generation_status = if (is.null(gen$error)) "ok" else "error",
                      generation_message = if (is.null(gen$error)) NA_character_ else
@@ -105,7 +106,8 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   records <- NULL
   if (!is.null(study$generator$record)) {
     rc <- with_rng_state(task$seeds$data, run_captured(function() {
-      call_flexible(study$generator$record, list(data = isolate_data(data), meta = meta))
+      with_packages(gpk, call_flexible(study$generator$record,
+                                       list(data = isolate_data(data), meta = meta)))
     }))
     records <- callback_rows(rc, ".record_error",
                              data.frame(scenario_key = key, replication = rep,
@@ -149,12 +151,13 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
       # generator.
       both <- with_rng_state(seed, {
         fit <- run_captured(function() {
-          call_flexible(m$fun, list(data = mdata, scenario = pub_scenario, context = mctx))
+          with_packages(m$packages,
+            call_flexible(m$fun, list(data = mdata, scenario = pub_scenario, context = mctx)))
         }, m$timeout)
         ext <- if (is.null(fit$error)) run_captured(function() {
-          out <- if (is.null(m$extract)) fit$value else
+          out <- if (is.null(m$extract)) fit$value else with_packages(m$packages,
             call_flexible(m$extract, list(fit = fit$value, data = mdata,
-                                          scenario = pub_scenario, context = mctx))
+                                          scenario = pub_scenario, context = mctx)))
           outputs_to_rows(out, m$estimands)
         }) else NULL
         list(fit = fit, ext = ext)
@@ -198,8 +201,9 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
     used_fallback <- FALSE
     if (status != "ok" && !is.null(m$fallback)) {
       fb <- with_rng_state(seed, run_captured(function() {
-        out <- call_flexible(m$fallback, list(data = isolate_data(data), scenario = pub_scenario,
-                                              context = mctx))
+        out <- with_packages(m$packages,
+          call_flexible(m$fallback, list(data = isolate_data(data), scenario = pub_scenario,
+                                         context = mctx)))
         outputs_to_rows(out, m$estimands)
       }, m$timeout))
       # the fallback is recorded as an attempt of its own: its outcome,
@@ -224,7 +228,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
     }
     if (status == "ok" && !is.null(m$diagnostics)) {
       dg <- with_rng_state(seed, run_captured(function() {
-        call_flexible(m$diagnostics, list(fit = fit$value, data = mdata))
+        with_packages(m$packages, call_flexible(m$diagnostics, list(fit = fit$value, data = mdata)))
       }))
       if (!is.null(dg$error) || length(unlist(dg$value))) {
         diagnostics[[length(diagnostics) + 1L]] <- callback_rows(dg, ".diagnostics_error",

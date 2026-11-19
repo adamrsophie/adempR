@@ -70,9 +70,9 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
   idx <- scenario_index(study$scenarios, key)
   scenario_full <- study$scenarios$values[[idx]]
   # generation runs once, through the same captured path as the run
-  out <- with_packages(study_packages(study), execute_task_seeded(study,
+  out <- execute_task_seeded(study,
     list(scenario_key = key, replication = replication, seeds = seeds, methods = methods),
-    keep_data = TRUE))
+    keep_data = TRUE)
   data <- out$data
   meta <- out$meta
   raw <- read_raw_results(run$path)

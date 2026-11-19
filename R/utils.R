@@ -1,7 +1,9 @@
 # Internal helpers shared by all modules.
 
-stopf <- function(..., call. = FALSE) {
-  stop(sprintf(...), call. = call.)
+stopf <- function(..., class = NULL, call. = FALSE) {
+  if (is.null(class)) stop(sprintf(...), call. = call.)
+  stop(structure(class = c(class, "error", "condition"),
+                 list(message = sprintf(...), call = NULL)))
 }
 
 warnf <- function(..., call. = FALSE) {

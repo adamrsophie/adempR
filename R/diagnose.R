@@ -281,31 +281,35 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
   stopifnot(inherits(study, "adempr_study"))
   check_function(summaries, "summaries")
   check_function(targets, "targets", "scenario")
-  restore <- local_packages(study_packages(study))
-  on.exit(restore(), add = TRUE)
-  keys <- data.frame(stage = "dgp_check", scenario_key = study$scenarios$keys,
-                     component = "data", stringsAsFactors = FALSE)
-  reg <- rng_registry(keys)
-  base <- rng_base_seed(seed, "dgp_check")
-  cache <- new.env(parent = emptyenv())
+  # the same stream layout as a run (common random number groups and
+  # antithetic pairs included), in a domain of its own
+  ctx <- list(seed = seed, domain = "dgp_check",
+              registry = rng_registry(rng_keys(study, "dgp_check", "dgp_check_method")),
+              cache = new.env(parent = emptyenv()), dgp_stage = "dgp_check",
+              method_stage = "dgp_check_method")
+  anti <- isTRUE(study$generator$antithetic)
   out <- list()
   for (i in seq_along(study$scenarios$values)) {
     sc <- study$scenarios$values[[i]]
     key <- study$scenarios$keys[i]
-    k <- rng_lookup(reg, "dgp_check", key, "data")
-    seeds <- rng_substreams(rng_stream_seeds(base, k, cache)[[1]], seq_len(n))
+    seeds <- task_seeds(ctx, key, seq_len(n), study, character())
     vals <- lapply(seq_len(n), function(r) {
-      g <- with_rng_state(seeds[[r]], study$generator$fun(sc, list(
-        replication = r, scenario_key = key, stage = "dgp_check")))
+      gctx <- list(replication = r, scenario_key = key, stage = "dgp_check")
+      if (anti) gctx$antithetic <- r %% 2L == 0L
+      g <- with_rng_state(seeds[[r]]$data, with_packages(study$generator$packages,
+                                                           study$generator$fun(sc, gctx)))
       d <- if (inherits(g, "adempr_data")) g$data else g
-      summaries(d)
+      # user summaries never touch the caller's random numbers
+      with_preserved_rng(summaries(d))
     })
     m <- do.call(rbind, vals)
-    tg <- targets(sc)
+    tg <- with_preserved_rng(targets(sc))
     for (nm in names(tg)) {
       if (!(nm %in% colnames(m))) stopf("Summary `%s` is not returned by `summaries`.", nm)
       x <- m[, nm]
-      se <- stats::sd(x) / sqrt(length(x))
+      # antithetic pairs are dependent: the independent unit is the pair
+      u <- if (anti) as.numeric(tapply(x, (seq_along(x) + 1L) %/% 2L, mean)) else x
+      se <- stats::sd(u) / sqrt(length(u))
       zval <- if (se > 0) (mean(x) - tg[[nm]]) / se else if (mean(x) == tg[[nm]]) 0 else Inf
       out[[length(out) + 1L]] <- data.frame(
         scenario_id = study$scenarios$labels[i], summary = nm, target = tg[[nm]],

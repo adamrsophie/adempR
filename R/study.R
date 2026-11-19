@@ -328,8 +328,9 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
   if (!is.null(study$generator$check)) {
     for (i in seq_along(study$scenarios$values)) {
       msg <- tryCatch({
-        deterministic_call("The generator check", study$generator$check,
-                           study$scenarios$values[[i]])
+        with_packages(study$generator$packages,
+          deterministic_call("The generator check", study$generator$check,
+                             study$scenarios$values[[i]]))
         NULL
       }, error = function(e) conditionMessage(e))
       if (!is.null(msg)) {
@@ -357,7 +358,7 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
     }
   }
   if (smoke) {
-    smk <- tryCatch(with_packages(study_packages(study), smoke_test(study, seed)), error = function(e) {
+    smk <- tryCatch(smoke_test(study, seed), error = function(e) {
       data.frame(check = "smoke", status = "error", message = conditionMessage(e),
                  stringsAsFactors = FALSE)
     })
@@ -367,8 +368,7 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
     if (!is.list(large_n) || is.null(names(large_n)) || !all(nzchar(names(large_n)))) {
       stopf("`large_n` must be a named list of scenario fields, for example list(n = 1e5).")
     }
-    out[[length(out) + 1L]] <- with_packages(study_packages(study),
-                                             large_n_check(study, seed, large_n))
+    out[[length(out) + 1L]] <- large_n_check(study, seed, large_n)
   }
   res <- bind_rows(out) %||% data.frame(check = character(), status = character(),
                                          message = character(), stringsAsFactors = FALSE)
@@ -390,11 +390,10 @@ large_n_check <- function(study, seed, overrides) {
     v[names(overrides)] <- overrides
     v
   })
-  keys <- data.frame(stage = "large_n", scenario_key = study$scenarios$keys,
-                     component = "data", stringsAsFactors = FALSE)
-  mkeys <- expand.grid(stage = "large_n_method", scenario_key = study$scenarios$keys,
-                       component = method_stream_components(study), stringsAsFactors = FALSE)
-  ctx <- list(seed = seed, registry = rng_registry(rbind(keys, mkeys)),
+  # the same stream layout as a run (common random number groups
+  # included), in a domain of its own, never the production streams
+  ctx <- list(seed = seed, domain = "large_n",
+              registry = rng_registry(rng_keys(study, "large_n", "large_n_method")),
               cache = new.env(parent = emptyenv()), dgp_stage = "large_n",
               method_stage = "large_n_method")
   rows <- list()
@@ -427,13 +426,9 @@ large_n_check <- function(study, seed, overrides) {
 }
 
 smoke_test <- function(study, seed) {
-  keys <- data.frame(stage = "validation", scenario_key = study$scenarios$keys,
-                     component = "data", stringsAsFactors = FALSE)
-  mkeys <- expand.grid(stage = "validation_method", scenario_key = study$scenarios$keys,
-                       component = method_stream_components(study),
-                       stringsAsFactors = FALSE)
-  reg <- rng_registry(rbind(keys, mkeys))
-  ctx <- list(seed = seed, registry = reg, cache = new.env(parent = emptyenv()),
+  reg <- rng_registry(rng_keys(study, "validation", "validation_method"))
+  ctx <- list(seed = seed, domain = "validation", registry = reg,
+              cache = new.env(parent = emptyenv()),
               dgp_stage = "validation", method_stage = "validation_method")
   rows <- list()
   for (i in seq_along(study$scenarios$values)) {

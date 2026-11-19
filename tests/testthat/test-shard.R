@@ -47,3 +47,40 @@ test_that("shards run as batchtools array jobs and collect", {
   one <- sim_run(st, replications = 5, seed = 3, path = run_path())
   expect_identical(est_signature(run), est_signature(one))
 })
+
+test_that("a frozen study can be sharded and calibrated as recorded derivations", {
+  st <- sim_freeze(normal_study(n = c(5L, 10L), mu = 0))
+  parent <- tempfile("adempR-shards-")
+  for (k in 1:2) sim_run_shard(st, k, 2, replications = 3, seed = 1, path = parent)
+  run <- sim_collect_shards(st, 2, replications = 3, seed = 1, path = parent,
+                            into = tempfile("adempR-run-"))
+  expect_equal(nrow(sim_results(run)$estimates), 6L)
+  expect_equal(read_manifest(file.path(parent, "shard-001"))$derived_from$kind, "shard")
+  cal <- sim_calibrate_method(st, function(k) function(data) sim_estimate("mean", mean(data$y) * k),
+                              grid = list(k = c(1, 2)), replications = 3, seed = 1)
+  expect_equal(cal$run$manifest$derived_from$kind, "calibration")
+  # an edited frozen study still cannot be sharded
+  st2 <- st
+  st2$aims <- "edited"
+  expect_error(sim_run_shard(st2, 1, 2, replications = 3, seed = 1, path = tempfile()),
+               "changed after it was frozen")
+})
+
+test_that("collection keeps the label and domain, compares seeds numerically and refuses gaps", {
+  st <- normal_study(n = c(5L, 10L), mu = 0)
+  parent <- tempfile("adempR-shards-")
+  for (k in 1:2) sim_run_shard(st, k, 2, replications = 3, seed = 11L, path = parent,
+                               label = "pilot")
+  run <- sim_collect_shards(st, 2, replications = 3, seed = 11, path = parent,
+                            into = tempfile("adempR-run-"))
+  expect_equal(run$manifest$label, "pilot")
+  expect_equal(run$manifest$rng_domain, "pilot")
+  expect_true(sim_replay(run, scenario = 1, replication = 1)$matches)
+  # a shard missing a batch: collection refuses to compute the gap itself
+  b <- list.files(file.path(parent, "shard-002", "batches"), pattern = "^b-.*\\.rds$",
+                  full.names = TRUE)
+  unlink(c(b, sub("rds$", "md5", b)))
+  writeLines(character(), file.path(parent, "shard-002", "batches", "INVENTORY"))
+  expect_error(sim_collect_shards(st, 2, replications = 3, seed = 11, path = parent,
+                                  into = tempfile("adempR-run-")), "do not hold every task")
+})

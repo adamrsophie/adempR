@@ -120,3 +120,16 @@ test_that("diagnostics of an earlier round do not survive a retry that produced 
   expect_equal(res$estimates$attempt_status, "ok")
   expect_equal(NROW(res$diagnostics), 0L)
 })
+
+test_that("a method's declared packages do not mask functions for other methods", {
+  skip_if_not_installed("dplyr")
+  ms <- list(
+    uses_stats = function(data) sim_estimate("mean", sum(filter(1:3, 1))),
+    declares_dplyr = sim_method(function(data) sim_estimate("mean", nrow(dplyr::tibble(a = 1))),
+                                packages = "dplyr"))
+  st <- normal_study(n = 5L, mu = 0, methods = ms)
+  r <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  e <- sim_results(r)$estimates
+  expect_equal(e$estimate[e$method == "uses_stats"], c(6, 6))
+  expect_false("package:dplyr" %in% search())
+})

@@ -88,6 +88,9 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
       any(measures %in% c("coverage", "noncoverage_lower", "noncoverage_upper", "usable_coverage"))) {
     stopf("Sequential stopping with Monte Carlo truth is not supported: the truth's uncertainty is not part of the guarantee.")
   }
+  if (isTRUE(study$generator$antithetic)) {
+    stopf("Sequential stopping needs independent replications; antithetic pairs are dependent, so the binomial intervals at the looks would not hold.")
+  }
   if (!is_scalar_number(half_width) || half_width <= 0 || half_width >= 0.5) {
     stopf("`half_width` must be in (0, 0.5).")
   }
@@ -106,9 +109,18 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
     stopf("The target half width %g cannot be reached even at the last look (%d replications): the narrowest interval there has half width %.4f. Add later looks or relax the target.",
           half_width, looks[K], best)
   }
+  # the monitored cells are part of the design: the same count of other
+  # cells would be a different design
+  cell_ids <- sort(unlist(lapply(names(study$methods), function(mn) {
+    outer(study$scenarios$keys, study$methods[[mn]]$estimands, paste, mn, sep = "|")
+  })))
   design <- list(looks = looks, half_width = half_width, measures = measures,
-                 alpha = alpha, cells = cells, conf_level_per_interval = conf)
+                 alpha = alpha, cells = cells, conf_level_per_interval = conf,
+                 cell_ids = cell_ids)
   check_sequential_directory(path, design)
+  # the design is stored before the first replication runs, so a run
+  # interrupted during its first look resumes as itself
+  attr(study, "adempr_sequential") <- design
   tab <- list()
   stopped <- NA_integer_
   run <- NULL
@@ -121,7 +133,9 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
     kk <- round(s$value * s$n_eligible)
     ci <- cp_interval(kk, s$n_eligible, conf)
     hw <- pmax(s$value - ci[, "lower"], ci[, "upper"] - s$value)
-    hw[s$n_eligible == 0] <- Inf
+    # an empty or indeterminate cell (for example usable coverage with
+    # missing data set truths) is not yet precise
+    hw[s$n_eligible == 0 | is.na(hw)] <- Inf
     tab[[k]] <- data.frame(look = k, replications = looks[k], scenario_id = s$scenario_id,
                            method = s$method, estimand = s$estimand, measure = s$measure,
                            value = s$value, n_eligible = s$n_eligible,

@@ -118,3 +118,51 @@ test_that("the sequential runner splits alpha over looks and cells on prefix cou
     expect_equal(c(lk$lower[i], lk$upper[i]), as.numeric(bt), tolerance = 1e-10)
   }
 })
+
+test_that("a sequential run interrupted in its first look resumes as itself", {
+  flag <- tempfile(); writeLines("x", flag)
+  m <- list(t_interval = sim_method(function(data) {
+    if (file.exists(flag) && data$y[1] > 1.5) stop(structure(class = c("interrupt", "condition"),
+                                                         list(message = "stop", call = NULL)))
+    fit <- t.test(data$y)
+    sim_estimate("mean", mean(data$y), lower = fit$conf.int[1], upper = fit$conf.int[2],
+                 level = 0.95)
+  }))
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = "coverage")
+  path <- run_path()
+  res <- tryCatch(sim_run_sequential(st, looks = c(40, 80), half_width = 0.2, seed = 3,
+                                     path = path, measures = "coverage", chunk_size = 5),
+                  interrupt = function(e) "interrupted")
+  expect_identical(res, "interrupted")
+  expect_true(file.exists(file.path(path, "manifest.rds")))
+  unlink(flag)
+  out <- sim_run_sequential(st, looks = c(40, 80), half_width = 0.2, seed = 3, path = path,
+                            measures = "coverage", chunk_size = 5)
+  expect_s3_class(out, "adempr_sequential")
+})
+
+test_that("sequential stopping refuses antithetic pairs", {
+  st <- normal_study(n = 10L, mu = 0, measures = "coverage")
+  st$generator$antithetic <- TRUE
+  expect_error(sim_run_sequential(st, looks = c(40, 80), half_width = 0.2, seed = 3,
+                                  path = run_path(), measures = "coverage"), "antithetic")
+})
+
+test_that("an indeterminate usable coverage cell does not stop a look with an error", {
+  st <- sim_study("ds", scenarios = sim_scenarios(n = 10L),
+    generate = function(scenario, context) {
+      y <- rnorm(scenario$n)
+      if (context$replication %% 3L == 0L) return(sim_data(data.frame(y = y)))
+      sim_data(data.frame(y = y), truth = list(mean = 0))
+    },
+    estimands = list(sim_estimand("mean", sim_truth_dataset())),
+    methods = list(t = function(data) {
+      fit <- t.test(data$y)
+      sim_estimate("mean", mean(data$y), lower = fit$conf.int[1], upper = fit$conf.int[2],
+                   level = 0.95)
+    }), measures = "usable_coverage")
+  out <- sim_run_sequential(st, looks = c(30, 60), half_width = 0.3, seed = 2,
+                            path = run_path(), measures = "usable_coverage")
+  expect_true(any(is.na(out$looks$value)))
+  expect_true(all(is.infinite(out$looks$half_width[is.na(out$looks$value)])))
+})

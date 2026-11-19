@@ -275,6 +275,7 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
       sprintf("With this number the Monte Carlo standard error of a proportion is at most %.4f (at 0.5), and of coverage near 0.95 about %.4f.",
               0.5 / sqrt(man$replications), sqrt(0.95 * 0.05 / man$replications)), "</p>")
   sq <- man$sequential
+  if (is.null(sq$looks)) sq <- NULL
   if (!is.null(sq)) {
     lk <- sq$looks
     last <- lk[lk$look == max(lk$look), c("scenario_id", "method", "estimand", "measure", "value",
