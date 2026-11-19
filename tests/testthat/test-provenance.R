@@ -83,3 +83,26 @@ test_that("runs record package sources and write a lockfile that the check reads
   expect_warning(chk <- sim_check_environment(lock), "jsonlite 0.0.1 recorded")
   expect_false(chk$match[chk$package == "jsonlite"])
 })
+
+test_that("system requirements reach the Dockerfile and environment.txt", {
+  recs <- list(xml = list(Package = "xmlish", Version = "1.0", Source = "Repository",
+                          Repository = "CRAN", SystemRequirements = "libxml2 (>= 2.9)"),
+               gh = list(Package = "ghpkg", Version = "0.2", Source = "GitHub",
+                         RemoteUsername = "someone", RemoteRepo = "ghpkg",
+                         RemoteSha = "0123456789abcdef0123"))
+  txt <- adempR:::dockerfile_text(list(r_number = "4.4.1", package_sources = recs))
+  expect_true("FROM rocker/r-ver:4.4.1" %in% txt)
+  expect_true("#   xmlish: libxml2 (>= 2.9)" %in% txt)
+  expect_false(any(grepl("ghpkg", txt)))
+  et <- adempR:::environment_text(list(r_version = "R version 4.4.1", rng_kind = RNG_KIND,
+                                       package_sources = recs))
+  expect_match(et, "^xmlish\\s+1\\.0\\s+CRAN\\s+libxml2", all = FALSE)
+  expect_match(et, "^ghpkg\\s+0\\.2\\s+GitHub someone/ghpkg@0123456789ab", all = FALSE)
+  # an installed package that declares system requirements keeps them
+  with_req <- Filter(function(r) !is.null(r$SystemRequirements),
+                     adempR:::package_records(c("curl", "xml2", "openssl", "Rcpp")))
+  skip_if(!length(with_req), "no installed package declares system requirements")
+  r <- with_req[[1]]
+  expect_identical(r$SystemRequirements,
+                   gsub("\\s+", " ", utils::packageDescription(r$Package)$SystemRequirements))
+})

@@ -140,6 +140,8 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Plots (zip plot with Monte Carlo band and power version, Bland-Altman agreement, intervals by true value) | implemented; caller state and eligibility tested | test-report-plots.R |
 | HTML report: self contained, escaped, all protocol fields, code, comparisons | verified | test-bundle.R |
 | Export bundle, checksums, import in a clean process | verified | test-bundle.R |
+| Software environment record: package versions, sources and system requirements, repositories, BLAS, LAPACK, threads, RNG kinds, locale, time zone, renv state | verified | test-provenance.R |
+| renv lockfile from a run (`sim_lockfile()`) and environment check (`sim_check_environment()`), in the bundle with `environment.txt` and a Rocker `Dockerfile` | verified | test-provenance.R, test-bundle.R |
 | Generator helpers (multivariate normal, calibration, Weibull PH, missingness, clustering) | verified | test-generators.R |
 
 ## Performance claims

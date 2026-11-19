@@ -247,6 +247,17 @@ test_that("the bundle's regeneration script reproduces per scenario counts, and 
   expect_true(file.exists(file.path(dir, "renv.lock")))
   expect_match(readLines(file.path(dir, "CHECKSUMS.md5")), "renv.lock", all = FALSE)
   expect_match(readLines(file.path(dir, "regenerate.R")), "sim_check_environment", all = FALSE)
+  # a plain text environment record and a Dockerfile for the recorded R
+  # version, both covered by the checksums
+  et <- readLines(file.path(dir, "environment.txt"))
+  expect_true(any(startsWith(et, "R:") & grepl(R.version.string, et, fixed = TRUE)))
+  expect_match(et, "^random number generator:\\s+L'Ecuyer-CMRG", all = FALSE)
+  expect_match(et, "^adempR\\s", all = FALSE)
+  df <- readLines(file.path(dir, "Dockerfile"))
+  expect_true(paste0("FROM rocker/r-ver:", R.version$major, ".", R.version$minor) %in% df)
+  expect_match(df, "renv::restore(lockfile = \"renv.lock\"", fixed = TRUE, all = FALSE)
+  expect_match(readLines(file.path(dir, "CHECKSUMS.md5")), "  Dockerfile$", all = FALSE)
+  expect_match(readLines(file.path(dir, "CHECKSUMS.md5")), "  environment.txt$", all = FALSE)
   # run the published recipe from the bundle directory
   old <- setwd(dir)
   on.exit(setwd(old), add = TRUE)

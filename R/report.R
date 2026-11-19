@@ -333,31 +333,7 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
         html_table(last))
   }
   env <- man$environment
-  g <- env$git
-  git_rows <- if (is.null(g)) {
-    data.frame(item = "git", value = "not a git repository, or git not installed")
-  } else {
-    data.frame(item = c("git commit", "git branch", "uncommitted changes to tracked files",
-                        "untracked files (not identified by the commit)", "git remote"),
-               value = c(g$commit, g$branch %||% "", if (isTRUE(g$dirty)) "yes" else "no",
-                         if (is.null(g$untracked)) "not recorded" else as.character(g$untracked),
-                         g$remote %||% ""))
-  }
-  add(html_table(rbind(
-    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", "collation locale", "time zone",
-                        "renv project", "packages in the dependency closure",
-                        names(env$threads), names(env$packages)),
-               value = c(env$r_version, env$platform, env$os, env$blas %||% "",
-                         env$lapack %||% "", env$locale %||% "not recorded",
-                         env$timezone %||% "not recorded",
-                         if (is.null(env$renv)) "not recorded" else if (isTRUE(env$renv$active))
-                           paste("active, lockfile md5", env$renv$lockfile_md5) else "not active",
-                         if (is.null(env$package_sources)) "not recorded" else
-                           paste(length(env$package_sources), "(versions and sources: sim_lockfile())"),
-                         vapply(env$threads, function(v) if (is.null(v) || is.na(v)) "unset" else as.character(v), ""),
-                         unlist(env$packages)),
-               stringsAsFactors = FALSE),
-    git_rows)))
+  add(html_table(environment_rows(env)))
   sess <- man$sessions %||% list()
   if (length(sess)) {
     sig0 <- environment_signature(env)
@@ -504,8 +480,11 @@ csv_neutralize <- function(x) {
 #' specification (including code), all result tables as CSV files and as an
 #' R object, truth values, the random number registry, the environment,
 #' the manifest with revisions, an HTML report, a README explaining
-#' regeneration and reanalysis, a reanalysis script, and md5 checksums of
-#' every file. Paths inside the bundle are relative, numerical library
+#' regeneration and reanalysis, reanalysis and regeneration scripts, an
+#' renv lockfile of the packages of the session that created the run, a
+#' plain text record of its software environment (`environment.txt`), a
+#' `Dockerfile` that recreates the recorded R version on a Rocker image and
+#' restores the lockfile, and md5 checksums of every file. Paths inside the bundle are relative, numerical library
 #' names are recorded without their directories, and source references
 #' (which hold the paths of sourced files) are removed from stored
 #' functions. The git remote URL, when recorded, names the repository and
@@ -668,6 +647,8 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     "- `report.html`: self-contained report (if exported).",
     "- `reanalyse.R`, `regenerate.R`: scripts that reanalyze the results and rerun the study.",
     "- `renv.lock`: versions and sources of the packages of the session that created the run, in the format of the renv package.",
+    "- `environment.txt`: the same software environment in plain text (R version, platform, numerical libraries, locale, time zone, random number generator, git state, packages with their system requirements).",
+    "- `Dockerfile`: recreates the recorded R version on a Rocker image and restores the packages from `renv.lock`.",
     "- `CHECKSUMS.md5`: md5 checksums of every file.", "",
     "## Reanalysis", "",
     "```r", "library(adempR)", "res <- sim_import(\".\")   # verifies the checksums",
@@ -688,11 +669,18 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     "libraries (see `manifest.json`). Restore the recorded package versions first with",
     "`renv::restore(lockfile = \"renv.lock\")`; `regenerate.R` checks them with",
     "`sim_check_environment()`. A package lockfile does not recreate the R version or",
-    "system libraries; a container image (for example from the Rocker project) does."), file.path(dir, "README.md"))
+    "system libraries; the `Dockerfile` does, on the Rocker image for the recorded",
+    "R version:", "",
+    "```sh", "docker build -t adempr-rerun .", "docker run --rm adempr-rerun", "```", "",
+    "Results computed in the container can still differ in the last digits when the",
+    "numerical libraries or the processor differ; `sim_verify()` compares two runs",
+    "and reports every difference."), file.path(dir, "README.md"))
   writeLines(c("library(adempR)", "res <- sim_import(\".\")", "print(sim_summarise(res))"),
              file.path(dir, "reanalyse.R"))
   writeLines(regen_code(), file.path(dir, "regenerate.R"))
   write_lockfile(man$environment, file.path(dir, "renv.lock"))
+  writeLines(environment_text(man$environment), file.path(dir, "environment.txt"), useBytes = TRUE)
+  writeLines(dockerfile_text(man$environment), file.path(dir, "Dockerfile"))
   files <- list.files(dir, recursive = TRUE, all.files = TRUE)
   files <- setdiff(files, "CHECKSUMS.md5")
   sums <- tools::md5sum(file.path(dir, files))
@@ -711,6 +699,84 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   }
   if (!is.null(old)) unlink(old, recursive = TRUE)
   invisible(final)
+}
+
+# The recorded software environment as item and value rows, shared by the
+# report and the environment.txt file of a bundle.
+environment_rows <- function(env) {
+  g <- env$git
+  git_rows <- if (is.null(g)) {
+    data.frame(item = "git", value = "not a git repository, or git not installed")
+  } else {
+    data.frame(item = c("git commit", "git branch", "uncommitted changes to tracked files",
+                        "untracked files (not identified by the commit)", "git remote"),
+               value = c(g$commit, g$branch %||% "", if (isTRUE(g$dirty)) "yes" else "no",
+                         if (is.null(g$untracked)) "not recorded" else as.character(g$untracked),
+                         g$remote %||% ""))
+  }
+  rbind(
+    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", "random number generator",
+                        "collation locale", "time zone", "renv project",
+                        "packages in the dependency closure", names(env$threads), names(env$packages)),
+               value = c(env$r_version %||% "not recorded", env$platform %||% "not recorded",
+                         env$os %||% "not recorded", env$blas %||% "",
+                         env$lapack %||% "", paste(unlist(env$rng_kind), collapse = ", "),
+                         env$locale %||% "not recorded", env$timezone %||% "not recorded",
+                         if (is.null(env$renv)) "not recorded" else if (isTRUE(env$renv$active))
+                           paste("active, lockfile md5", env$renv$lockfile_md5) else "not active",
+                         if (is.null(env$package_sources)) "not recorded" else
+                           paste(length(env$package_sources), "(versions and sources: sim_lockfile())"),
+                         vapply(env$threads, function(v) if (is.null(v) || is.na(v)) "unset" else as.character(v), ""),
+                         unlist(env$packages)),
+               stringsAsFactors = FALSE),
+    git_rows)
+}
+
+# Plain text record of the environment that created a run: the settings,
+# then every package with its version, source and declared system
+# requirements.
+environment_text <- function(env) {
+  rows <- environment_rows(env)
+  out <- c("Software environment of the session that created the run", "",
+           sprintf("%-48s %s", paste0(rows$item, ":"), rows$value))
+  recs <- env$package_sources
+  if (length(recs)) {
+    out <- c(out, "", "Packages (name, version, source, system requirements)", "",
+             vapply(recs, function(r) {
+               src <- r$Source %||% "unknown"
+               if (identical(src, "GitHub") && !is.null(r$RemoteSha))
+                 src <- paste0(src, " ", r$RemoteUsername %||% "", "/", r$RemoteRepo %||% "", "@", substr(r$RemoteSha, 1, 12))
+               if (identical(src, "Repository") && !is.null(r$Repository)) src <- r$Repository
+               trimws(sprintf("%-24s %-14s %-20s %s", r$Package, r$Version %||% "NA", src,
+                              r$SystemRequirements %||% ""))
+             }, character(1)))
+  }
+  out
+}
+
+# A Dockerfile that recreates the R version of a run on the Rocker image
+# for that version and restores the recorded package versions with renv.
+dockerfile_text <- function(env) {
+  r <- env$r_number %||% sub("^R version ([0-9.]+).*$", "\\1", env$r_version)
+  sys <- Filter(Negate(is.null), lapply(env$package_sources, function(p) {
+    if (!is.null(p$SystemRequirements)) paste0("#   ", p$Package, ": ", p$SystemRequirements)
+  }))
+  c(paste0("# Recreates R ", r, " and the package versions recorded in renv.lock."),
+    "# The Rocker image fixes the R version and the operating system; renv",
+    "# installs the recorded package versions. Numerical libraries (BLAS,",
+    "# LAPACK) and the processor can still differ from the original machine,",
+    "# which the manifest records.",
+    if (length(sys)) c("#", "# System libraries declared by the packages (install them with apt-get",
+                       "# before the restore if a package fails to build; pak::pkg_sysreqs()",
+                       "# lists the exact Ubuntu packages):", unlist(sys)),
+    "#",
+    "# Build and run: docker build -t adempr-rerun . && docker run --rm adempr-rerun",
+    paste0("FROM rocker/r-ver:", r),
+    "WORKDIR /bundle",
+    "COPY . /bundle",
+    "RUN Rscript -e 'install.packages(\"renv\")' \\",
+    " && Rscript -e 'renv::restore(lockfile = \"renv.lock\", library = .libPaths()[1], prompt = FALSE)'",
+    "CMD [\"Rscript\", \"regenerate.R\"]")
 }
 
 # The regeneration recipe written into a bundle. It reads every setting

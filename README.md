@@ -139,6 +139,11 @@ sim_report(run, file.path(tempdir(), "normal-mean.html"))
 sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
 ```
 
+The bundle holds the results, the code, an renv lockfile of the packages
+that produced them, a plain text record of the software environment and a
+Dockerfile that recreates the R version, so the study can be rerun on
+another machine.
+
 ## Workflow
 
 | Step | Functions |

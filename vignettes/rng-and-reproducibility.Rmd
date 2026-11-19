@@ -130,3 +130,100 @@ sim_method(boot_bca, coupling = "bootstrap")
 Some packages call `set.seed()` internally or keep their own generator.
 Their results are still recorded, but replays and extensions may not be
 identical; `sim_replay()` reports this with `matches = FALSE`.
+
+## The software environment
+
+The guarantees above hold for one software environment. The same study,
+seed and replication can give different numbers on a different one:
+
+* **R version.** The default algorithm of `sample()` changed in R 3.6.0
+  (`sample.kind = "Rejection"` replaced `"Rounding"`), so the same seed
+  draws different samples before and after it. adempR sets all three
+  generator kinds explicitly and records them, so a run never depends on
+  the caller's settings; `set.seed()` alone, in contrast, is not stable
+  across R versions.
+* **Package versions.** A method that calls a package gives what that
+  version of the package computes. Defaults, tie breaking and convergence
+  tolerances change between versions.
+* **Numerical libraries and hardware.** BLAS and LAPACK builds, their
+  thread counts, compilers and processors change the last digits of
+  floating point results, and sometimes more (an iterative fit that stops
+  one step earlier).
+* **Locale and time zone.** The collation locale changes the order of
+  sorted strings, and the time zone changes date arithmetic.
+
+Every session that works on a run records its R version, platform,
+operating system, BLAS and LAPACK, thread settings, generator kinds,
+collation locale, time zone, git commit and state, whether an renv project
+was active, and the version, source and declared system requirements of
+every package in the dependency closure of adempR and of the packages the
+study uses. `sim_run()` warns when a session that extends a run has a
+different environment. This record replaces pasting `sessionInfo()` into a
+report: it is written by the run itself, for every session, and the report
+shows it.
+
+### Package versions with renv
+
+The renv package gives a project its own library and a lockfile
+(`renv.lock`) that lists the exact version and source of every package.
+The usual workflow for a simulation project is:
+
+```{r, eval = FALSE}
+renv::init()      # project library and renv.lock
+# ... install packages, write the study ...
+renv::snapshot()  # record the versions in renv.lock
+renv::status()    # check that the library and the lockfile agree
+```
+
+Commit `renv.lock`, `.Rprofile`, `renv/activate.R` and `renv/settings.json`
+to version control, but not `renv/library`. A collaborator, a reviewer or
+you in two years run `renv::restore()` to install the recorded versions.
+Open the project as an RStudio project, or build paths with
+`here::here()`, so that no script depends on `setwd()` or on a path on one
+machine.
+
+A run directory can also produce a lockfile itself, from the session that
+created it, whether or not renv was used then:
+
+```{r, eval = FALSE}
+sim_lockfile(run, "renv.lock")
+renv::restore(lockfile = "renv.lock")
+sim_check_environment("renv.lock")   # reports every package that differs
+```
+
+### Beyond packages
+
+A lockfile pins R packages only. To pin the R version, the operating
+system and the system libraries as well:
+
+* **Containers.** `sim_export()` writes a `Dockerfile` into the bundle.
+  It starts from the Rocker image for the recorded R version
+  (`rocker/r-ver`), restores `renv.lock` and runs `regenerate.R`. The
+  comments list the system libraries the packages declare;
+  `pak::pkg_sysreqs()` gives the matching system packages for a Linux
+  distribution. Tools such as containerit, dockerfiler and liftr write
+  Dockerfiles from a session or a document, and r4r traces an actual run
+  to find every file and system library it used.
+* **Nix.** The rix package describes R, its packages and the system
+  libraries in one Nix expression, which rebuilds the same environment on
+  any machine with Nix.
+* **Date based installation.** When only the date of an analysis is
+  known, groundhog, rang and dateback install the package versions that
+  were current on that date. A lockfile is more precise when one exists.
+
+Even in a container, results can differ in the last digits when the
+processor or the numerical libraries differ. Check what matters with a
+rerun: run the study twice on the original machine, then once in the
+restored environment, and compare with `sim_verify()`. The `tolerance`
+argument separates rounding noise from real differences.
+
+### Caching and pipelines
+
+Pipeline and caching tools (targets, `reproducible::Cache()`, R.cache,
+archivist) rerun a step only when its code or inputs change. A run
+directory already does this for simulations: every chunk is stored with a
+checksum, a run resumes after a crash, and extending it reuses the stored
+replications only when the fingerprints of the generator, methods and
+truth match. Inside a pipeline, give `sim_run()` a fixed `path` and let the
+run directory decide what to recompute, rather than caching its result
+under a key that sees only the code of the calling script.

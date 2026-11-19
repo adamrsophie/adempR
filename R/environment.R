@@ -21,7 +21,8 @@ package_records <- function(pk) {
   key <- paste(c(pk, .libPaths()), collapse = "\r")
   if (!is.null(package_cache[[key]])) return(package_cache[[key]])
   fields <- c("Package", "Version", "Depends", "Imports", "LinkingTo", "Repository", "RemoteType",
-              "RemoteHost", "RemoteUsername", "RemoteRepo", "RemoteRef", "RemoteSha", "RemoteUrl")
+              "RemoteHost", "RemoteUsername", "RemoteRepo", "RemoteRef", "RemoteSha", "RemoteUrl",
+              "SystemRequirements")
   seen <- list()
   todo <- pk
   while (length(todo)) {
@@ -45,7 +46,10 @@ package_records <- function(pk) {
     } else if (!is.null(d$Repository)) "Repository" else "unknown"
     rec <- c(list(Package = p, Version = d$Version, Source = src),
              d[intersect(c("Repository", "RemoteType", "RemoteHost", "RemoteUsername",
-                           "RemoteRepo", "RemoteRef", "RemoteSha", "RemoteUrl"), names(d))])
+                           "RemoteRepo", "RemoteRef", "RemoteSha", "RemoteUrl",
+                           "SystemRequirements"), names(d))])
+    # system libraries a package needs to build (free text, as declared)
+    if (!is.null(rec$SystemRequirements)) rec$SystemRequirements <- gsub("\\s+", " ", rec$SystemRequirements)
     # a local path can contain the user name; keep its last component only
     if (!is.null(rec$RemoteUrl) && identical(src, "Local")) rec$RemoteUrl <- basename(rec$RemoteUrl)
     seen[[p]] <- rec
@@ -79,7 +83,8 @@ renv_status <- function() {
 #' Every session that works on a run records its R version, platform,
 #' numerical libraries, thread settings, collation locale and time zone,
 #' whether an renv project was active (with the checksum of its lockfile),
-#' and the version and source (repository, GitHub commit, local build) of
+#' and the version, source (repository, GitHub commit, local build) and
+#' declared system requirements of
 #' every package in the dependency closure of adempR and of the packages
 #' the study uses. `sim_lockfile()` writes that record as a lockfile in the
 #' format of the renv package, so the package versions can be restored
@@ -90,8 +95,9 @@ renv_status <- function() {
 #'
 #' A lockfile pins R packages only. The R version, system libraries (BLAS,
 #' LAPACK, compilers) and thread settings also affect numerical results;
-#' they are recorded in the manifest, and a container image (for example
-#' from the Rocker project) pins them.
+#' they are recorded in the manifest, and a container image pins them: the
+#' bundle written by [sim_export()] includes a `Dockerfile` based on the
+#' Rocker image for the recorded R version.
 #'
 #' @param run A run, results, a run directory, or (for
 #'   `sim_check_environment()`) the path of a lockfile.

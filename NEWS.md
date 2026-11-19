@@ -21,6 +21,15 @@ First release.
   fingerprints that cover scenario weights and designs, the computing
   environment and git commit of every session, and a revision for every
   change to a study.
+* Software environment: every session records the version, source and
+  system requirements of each package in the dependency closure, the
+  repositories, numerical libraries, thread settings, generator kinds,
+  collation locale, time zone and renv state. `sim_lockfile()` writes an
+  renv lockfile from a run and `sim_check_environment()` compares the
+  installed packages with it. Export bundles carry the lockfile, a plain
+  text environment record and a Dockerfile on the Rocker image for the
+  recorded R version, and the regeneration script checks the environment
+  first.
 * Recoverable execution: atomic commits with checksums, a checksummed
   manifest with a backup, an inventory that detects lost batches, one
   coordinator lock with stale lock recovery, quarantine of corrupt files,

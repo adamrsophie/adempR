@@ -28,7 +28,8 @@ recorded and current R versions; a warning lists differences.
 Every session that works on a run records its R version, platform,
 numerical libraries, thread settings, collation locale and time zone,
 whether an renv project was active (with the checksum of its lockfile),
-and the version and source (repository, GitHub commit, local build) of
+and the version, source (repository, GitHub commit, local build) and
+declared system requirements of
 every package in the dependency closure of adempR and of the packages
 the study uses. \code{sim_lockfile()} writes that record as a lockfile in the
 format of the renv package, so the package versions can be restored
@@ -40,8 +41,9 @@ lockfile in the bundle, and its \code{regenerate.R} runs this check first.
 \details{
 A lockfile pins R packages only. The R version, system libraries (BLAS,
 LAPACK, compilers) and thread settings also affect numerical results;
-they are recorded in the manifest, and a container image (for example
-from the Rocker project) pins them.
+they are recorded in the manifest, and a container image pins them: the
+bundle written by \code{\link[=sim_export]{sim_export()}} includes a \code{Dockerfile} based on the
+Rocker image for the recorded R version.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = 10L),

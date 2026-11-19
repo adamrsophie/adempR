@@ -29,8 +29,11 @@ an object of class \code{adempr_results}.
 specification (including code), all result tables as CSV files and as an
 R object, truth values, the random number registry, the environment,
 the manifest with revisions, an HTML report, a README explaining
-regeneration and reanalysis, a reanalysis script, and md5 checksums of
-every file. Paths inside the bundle are relative, numerical library
+regeneration and reanalysis, reanalysis and regeneration scripts, an
+renv lockfile of the packages of the session that created the run, a
+plain text record of its software environment (\code{environment.txt}), a
+\code{Dockerfile} that recreates the recorded R version on a Rocker image and
+restores the lockfile, and md5 checksums of every file. Paths inside the bundle are relative, numerical library
 names are recorded without their directories, and source references
 (which hold the paths of sourced files) are removed from stored
 functions. The git remote URL, when recorded, names the repository and
