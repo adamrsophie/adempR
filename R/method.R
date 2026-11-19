@@ -259,8 +259,11 @@ isolate_data <- function(x) {
 #'   Shown in reports.
 #' @param reference Optional named numeric vector of known performance, for
 #'   example `c(bias = 0, coverage = 0.95)` for a method whose behavior is
-#'   known exactly. [sim_diagnose()] flags cells where the estimated
-#'   measure is more than 3 Monte Carlo standard errors from it: either
+#'   known exactly, applied to every scenario and estimand; or a data frame
+#'   with columns `measure`, `value` and optionally `estimand` and
+#'   `scenario_id` that applies each value only where it is known.
+#'   [sim_check_reference()], run by [sim_diagnose()], flags cells where the
+#'   estimated measure disagrees with it beyond Monte Carlo error: either
 #'   Monte Carlo noise or a bug in the generator or the evaluation.
 #' @param settings_source Where the tuning settings of the method come from
 #'   (for example "package defaults", "the authors' recommendations",
@@ -295,9 +298,18 @@ sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
   if (!is.null(fallback)) check_function(fallback, "fallback")
   if (!is.null(diagnostics)) check_function(diagnostics, "diagnostics")
   if (!is.null(reference)) {
-    if (!is.numeric(reference) || is.null(names(reference)) ||
-        !all(names(reference) %in% MEASURE_INFO$measure) || anyNA(reference)) {
-      stopf("`reference` must be a named numeric vector of built in measures, for example c(bias = 0, coverage = 0.95).")
+    ok <- if (is.data.frame(reference)) {
+      all(c("measure", "value") %in% names(reference)) && nrow(reference) > 0 &&
+        all(names(reference) %in% c("measure", "value", "estimand", "scenario_id")) &&
+        all(reference$measure %in% MEASURE_INFO$measure) && is.numeric(reference$value) &&
+        !anyNA(reference$value) && all(is.finite(reference$value))
+    } else {
+      is.numeric(reference) && !is.null(names(reference)) &&
+        all(names(reference) %in% MEASURE_INFO$measure) && !anyNA(reference) &&
+        all(is.finite(reference)) && !anyDuplicated(names(reference))
+    }
+    if (!ok) {
+      stopf("`reference` must be a named numeric vector of built in measures, for example c(bias = 0, coverage = 0.95), or a data frame with columns measure, value and optionally estimand and scenario_id.")
     }
   }
   check_function(fun, "fun")

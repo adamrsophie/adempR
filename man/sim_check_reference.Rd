@@ -12,15 +12,28 @@ sim_check_reference(run, threshold = 3)
 \item{threshold}{Absolute z above which a cell is flagged.}
 }
 \value{
-A data frame with one row per scenario, reference method and
-declared measure: \code{value}, \code{mcse}, \code{reference}, \code{z} and \code{flag}; \code{NULL}
-when no method declares a reference.
+A data frame with one row per scenario, reference method,
+estimand and declared measure: \code{value}, \code{mcse} (the one used),
+\code{reference}, \code{z}, the exact interval \code{lower} and \code{upper} for
+proportions, \code{check} and \code{flag}; \code{NULL} when no method declares a
+reference.
 }
 \description{
-A method declared with \code{sim_method(reference = list(bias = 0, coverage = 0.95))} has performance known from theory (for example the sample mean
+A method declared with \code{sim_method(reference = c(bias = 0, coverage = 0.95))} has performance known from theory (for example the sample mean
 under a normal model). Its estimated performance must agree with the
 declared value within Monte Carlo error; a miss beyond \code{threshold} MCSE
 points to Monte Carlo noise larger than reported, or to a bug in the
 generator, the truth or the evaluation. \code{sim_diagnose()} runs this
 check.
+}
+\details{
+A proportion (coverage, rejection and the like) is checked against its
+exact (Clopper and Pearson) interval at the confidence level that
+corresponds to \code{threshold}, so a proportion of 0 or 1, whose plug-in
+MCSE is 0, is still checked. Other measures use \code{mcse_total} when the
+truth is uncertain and \code{mcse} otherwise. An MCSE of 0 is a pass when the
+value equals the reference and a flag otherwise. A cell without an MCSE
+gives \code{flag = NA} (insufficient evidence). A reference given as a data
+frame with columns \code{measure}, \code{value} and optionally \code{estimand} and
+\code{scenario_id} applies only to the rows it names.
 }

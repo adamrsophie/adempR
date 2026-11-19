@@ -224,9 +224,9 @@ print.adempr_diagnosis <- function(x, ...) {
     cat("\nRealized properties of the generated data sets:\n")
     print(x$records, row.names = FALSE)
   }
-  if (NROW(x$reference_check) && any(x$reference_check$flag)) {
+  if (NROW(x$reference_check) && !all(x$reference_check$flag %in% FALSE)) {
     cat("\nMethods with known performance that miss it by more than 3 MCSE (Monte Carlo noise or a bug):\n")
-    print(x$reference_check[x$reference_check$flag, ], row.names = FALSE)
+    print(x$reference_check[!x$reference_check$flag %in% FALSE, ], row.names = FALSE)
   }
   if (NROW(x$repeated_data)) {
     cat("\nScenarios where data sets repeat across replications (fixed rather than redrawn data?):\n")
@@ -554,7 +554,7 @@ record_summary <- function(res, lab) {
 
 #' Check methods with known performance against Monte Carlo error
 #'
-#' A method declared with `sim_method(reference = list(bias = 0, coverage =
+#' A method declared with `sim_method(reference = c(bias = 0, coverage =
 #' 0.95))` has performance known from theory (for example the sample mean
 #' under a normal model). Its estimated performance must agree with the
 #' declared value within Monte Carlo error; a miss beyond `threshold` MCSE
@@ -562,33 +562,89 @@ record_summary <- function(res, lab) {
 #' generator, the truth or the evaluation. `sim_diagnose()` runs this
 #' check.
 #'
+#' A proportion (coverage, rejection and the like) is checked against its
+#' exact (Clopper and Pearson) interval at the confidence level that
+#' corresponds to `threshold`, so a proportion of 0 or 1, whose plug-in
+#' MCSE is 0, is still checked. Other measures use `mcse_total` when the
+#' truth is uncertain and `mcse` otherwise. An MCSE of 0 is a pass when the
+#' value equals the reference and a flag otherwise. A cell without an MCSE
+#' gives `flag = NA` (insufficient evidence). A reference given as a data
+#' frame with columns `measure`, `value` and optionally `estimand` and
+#' `scenario_id` applies only to the rows it names.
+#'
 #' @param run A run or results.
 #' @param threshold Absolute z above which a cell is flagged.
-#' @return A data frame with one row per scenario, reference method and
-#'   declared measure: `value`, `mcse`, `reference`, `z` and `flag`; `NULL`
-#'   when no method declares a reference.
+#' @return A data frame with one row per scenario, reference method,
+#'   estimand and declared measure: `value`, `mcse` (the one used),
+#'   `reference`, `z`, the exact interval `lower` and `upper` for
+#'   proportions, `check` and `flag`; `NULL` when no method declares a
+#'   reference.
 #' @export
 sim_check_reference <- function(run, threshold = 3) {
+  if (!is_scalar_number(threshold) || threshold <= 0) stopf("`threshold` must be a positive number.")
   res <- sim_results(run)
   study <- res$manifest$study
   refm <- Filter(function(m) !is.null(m$reference), study$methods)
   if (!length(refm)) return(NULL)
-  ms <- unique(unlist(lapply(refm, function(m) names(m$reference))))
+  refs <- lapply(refm, function(m) reference_table(m$reference))
+  ms <- unique(unlist(lapply(refs, `[[`, "measure")))
   s <- as.data.frame(sim_summarise(res, measures = ms))
+  alpha <- 2 * stats::pnorm(-threshold)
   rows <- list()
   for (mn in names(refm)) {
-    ref <- refm[[mn]]$reference
-    r <- s[s$method == mn & s$measure %in% names(ref), , drop = FALSE]
-    if (!nrow(r)) next
-    r$reference <- unname(unlist(ref)[r$measure])
-    r$z <- (r$value - r$reference) / r$mcse
-    rows[[length(rows) + 1L]] <- r[c("scenario_id", "method", "estimand", "measure", "value",
-                                     "mcse", "reference", "z")]
+    ref <- refs[[mn]]
+    bad_e <- setdiff(stats::na.omit(ref$estimand), names(study$estimands))
+    bad_s <- setdiff(stats::na.omit(ref$scenario_id), study$scenarios$labels)
+    if (length(bad_e) || length(bad_s)) {
+      stopf("The reference of method `%s` names unknown estimand(s) or scenario(s): %s.", mn,
+            paste(c(bad_e, bad_s), collapse = ", "))
+    }
+    for (k in seq_len(nrow(ref))) {
+      r <- s[s$method == mn & s$measure == ref$measure[k], , drop = FALSE]
+      if (!is.na(ref$estimand[k])) r <- r[r$estimand == ref$estimand[k], , drop = FALSE]
+      if (!is.na(ref$scenario_id[k])) r <- r[r$scenario_id == ref$scenario_id[k], , drop = FALSE]
+      if (!nrow(r)) next
+      r$reference <- ref$value[k]
+      rows[[length(rows) + 1L]] <- r
+    }
   }
   out <- bind_rows(rows)
-  if (!is.null(out)) {
-    out$flag <- is.finite(out$z) & abs(out$z) > threshold
-    rownames(out) <- NULL
+  if (is.null(out)) return(NULL)
+  se <- if (is.null(out$mcse_total)) out$mcse else ifelse(is.na(out$mcse_total), out$mcse, out$mcse_total)
+  d <- out$value - out$reference
+  z <- ifelse(se > 0, d / se, ifelse(abs(d) <= 1e-12 * pmax(1, abs(out$reference)), 0, sign(d) * Inf))
+  flag <- !is.na(z) & abs(z) > threshold
+  flag[is.na(z) | is.na(out$value)] <- NA
+  check <- ifelse(is.na(flag), "insufficient evidence", ifelse(se %in% 0, "zero MCSE", "normal"))
+  lo <- up <- rep(NA_real_, nrow(out))
+  prop <- out$measure %in% PROPORTION_MEASURES & !is.na(out$value) & out$n_eligible > 0
+  if (any(prop)) {
+    n <- out$n_eligible[prop]
+    x <- round(out$value[prop] * n)
+    lo[prop] <- ifelse(x == 0, 0, stats::qbeta(alpha / 2, x, n - x + 1))
+    up[prop] <- ifelse(x == n, 1, stats::qbeta(1 - alpha / 2, x + 1, n - x))
+    flag[prop] <- out$reference[prop] < lo[prop] | out$reference[prop] > up[prop]
+    check[prop] <- "exact interval"
   }
+  out <- data.frame(out[c("scenario_id", "method", "estimand", "measure", "value")],
+                    mcse = se, reference = out$reference, z = z, lower = lo, upper = up,
+                    check = check, flag = flag, stringsAsFactors = FALSE)
+  rownames(out) <- NULL
   out
+}
+
+# A method's reference as a table: a named vector applies to every
+# scenario and estimand; a data frame may restrict rows to an estimand
+# and a scenario label.
+reference_table <- function(ref) {
+  if (is.list(ref) && all(c("measure", "value") %in% names(ref)) && !is.list(ref$measure)) {
+    data.frame(measure = as.character(ref$measure), value = as.numeric(ref$value),
+               estimand = if (is.null(ref$estimand)) NA_character_ else as.character(ref$estimand),
+               scenario_id = if (is.null(ref$scenario_id)) NA_character_ else as.character(ref$scenario_id),
+               stringsAsFactors = FALSE)
+  } else {
+    ref <- unlist(ref)
+    data.frame(measure = names(ref), value = unname(as.numeric(ref)), estimand = NA_character_,
+               scenario_id = NA_character_, stringsAsFactors = FALSE)
+  }
 }

@@ -84,8 +84,11 @@ Shown in reports.}
 
 \item{reference}{Optional named numeric vector of known performance, for
 example \code{c(bias = 0, coverage = 0.95)} for a method whose behavior is
-known exactly. \code{\link[=sim_diagnose]{sim_diagnose()}} flags cells where the estimated
-measure is more than 3 Monte Carlo standard errors from it: either
+known exactly, applied to every scenario and estimand; or a data frame
+with columns \code{measure}, \code{value} and optionally \code{estimand} and
+\code{scenario_id} that applies each value only where it is known.
+\code{\link[=sim_check_reference]{sim_check_reference()}}, run by \code{\link[=sim_diagnose]{sim_diagnose()}}, flags cells where the
+estimated measure disagrees with it beyond Monte Carlo error: either
 Monte Carlo noise or a bug in the generator or the evaluation.}
 
 \item{settings_source}{Where the tuning settings of the method come from
