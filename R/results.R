@@ -123,7 +123,7 @@ sim_truth <- function(run) {
             identical(file_md5(f), readLines(sidecar, warn = FALSE)[1])) {
           row <- readRDS(f)
         } else {
-          if (is.null(base)) base <- rng_base_seed(man$seed)
+          if (is.null(base)) base <- rng_base_seed(man$seed, man$rng_domain)
           k <- rng_lookup(man$rng_registry, "truth", key, en)
           seed <- rng_substreams(rng_stream_seeds(base, k, cache)[[1]], 1L)[[1]]
           t0 <- proc.time()[["elapsed"]]

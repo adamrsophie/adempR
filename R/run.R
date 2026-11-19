@@ -7,6 +7,8 @@ new_manifest <- function(study, seed, replications, label) {
        study_fingerprint = sim_fingerprint(study),
        rng_registry = rng_registry(rng_keys(study)),
        revisions = list(), environment = environment_info(study_packages(study)),
+       # Pilot directories draw from their own stream family (fixed at creation).
+       rng_domain = if (identical(label, "pilot")) "pilot" else NULL,
        status = "created")
 }
 
@@ -282,7 +284,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
           format(nrow(todo), big.mark = ","), length(study$scenarios), man$replications,
           format(max_tasks, big.mark = ","))
   }
-  ctx <- list(seed = seed, registry = man$rng_registry,
+  ctx <- list(seed = seed, domain = man$rng_domain, registry = man$rng_registry,
               cache = new.env(parent = emptyenv()),
               dgp_stage = "dgp", method_stage = "method")
   if (nrow(todo)) {

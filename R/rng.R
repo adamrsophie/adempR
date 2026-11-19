@@ -70,7 +70,7 @@ deterministic_call <- function(what, fun, ...) {
   out
 }
 
-rng_base_seed <- function(seed) {
+rng_base_seed <- function(seed, domain = NULL) {
   if (!is_count(seed)) {
     stopf("`seed` must be a single nonnegative whole number.")
   }
@@ -78,7 +78,26 @@ rng_base_seed <- function(seed) {
   on.exit(rng_restore(state), add = TRUE)
   set.seed(seed, kind = RNG_KIND[1], normal.kind = RNG_KIND[2],
            sample.kind = RNG_KIND[3])
-  get(".Random.seed", envir = globalenv())
+  base <- get(".Random.seed", envir = globalenv())
+  if (!is.null(domain)) base[2:7] <- domain_state(seed, domain)
+  base
+}
+
+# Work outside the production run (pilots, DGP checks) uses a separate
+# family of streams: the same seed then gives independent random numbers,
+# because stream indices restart at 1 in every registry. The L'Ecuyer-CMRG
+# state of the family is taken from an md5 hash of the seed and the domain
+# name (192 bits, reduced to the valid ranges of the two components).
+domain_state <- function(seed, domain) {
+  h1 <- md5_string(paste0("adempR rng domain\r", domain, "\r", seed))
+  h <- paste0(h1, md5_string(paste0(h1, "\r2")))
+  words <- vapply(0:5, function(i) {
+    hx <- substr(h, 8 * i + 1, 8 * i + 8)
+    strtoi(substr(hx, 1, 4), 16L) * 65536 + strtoi(substr(hx, 5, 8), 16L)
+  }, numeric(1))
+  m <- c(rep(4294967087, 3), rep(4294944443, 3))
+  x <- words %% (m - 1) + 1
+  as.integer(ifelse(x >= 2^31, x - 2^32, x))
 }
 
 #' Random number stream registry

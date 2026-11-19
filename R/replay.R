@@ -52,7 +52,7 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
   if (!is_count(replication, 1)) stopf("`replication` must be a positive whole number.")
   methods <- methods %||% names(study$methods)
   if (!all(methods %in% names(study$methods))) stopf("Unknown method(s).")
-  ctx <- list(seed = man$seed, registry = man$rng_registry,
+  ctx <- list(seed = man$seed, domain = man$rng_domain, registry = man$rng_registry,
               cache = new.env(parent = emptyenv()), dgp_stage = "dgp",
               method_stage = "method")
   seeds <- task_seeds(ctx, key, replication, study, methods)[[1]]

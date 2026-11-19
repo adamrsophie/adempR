@@ -115,6 +115,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   add("<h1>Simulation study report: ", html_escape(study$name), "</h1>")
   add("<p class=\"note\">Generated ", now_utc(), " by adempR ",
       as.character(utils::packageVersion("adempR")), ". Run label: ", html_escape(man$label),
+      if (identical(man$rng_domain, "pilot")) " (pilot random number streams, independent of any production run with the same seed)" else
+        " (pilot runs use separate random number streams, so no pilot data are part of these results)",
       ". Study fingerprint: <code>", html_escape(man$study_fingerprint), "</code>.</p>")
   frozen <- study$status$frozen
   add("<p>", if (is.null(frozen)) "The protocol was not frozen before this run." else

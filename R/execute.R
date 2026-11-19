@@ -179,7 +179,7 @@ execute_task <- function(study, ctx, key, rep, methods) {
 # Seeds for a set of replications of one scenario. Returns a list (one per
 # replication) of lists with `data` and one entry per method component.
 task_seeds <- function(ctx, key, reps, study, methods) {
-  base <- rng_base_seed(ctx$seed)
+  base <- rng_base_seed(ctx$seed, ctx$domain)
   comps <- unique(vapply(methods, function(mn) method_component(study$methods[[mn]], mn),
                          character(1)))
   k_data <- rng_lookup(ctx$registry, ctx$dgp_stage, key, "data")

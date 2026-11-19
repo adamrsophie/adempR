@@ -160,7 +160,7 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
   keys <- data.frame(stage = "dgp_check", scenario_key = study$scenarios$keys,
                      component = "data", stringsAsFactors = FALSE)
   reg <- rng_registry(keys)
-  base <- rng_base_seed(seed)
+  base <- rng_base_seed(seed, "dgp_check")
   cache <- new.env(parent = emptyenv())
   out <- list()
   for (i in seq_along(study$scenarios$values)) {

@@ -47,9 +47,13 @@ happens to observe 0 or 100 percent cannot claim that almost no
 replications are needed.
 }
 \details{
-Pilot results are not reused in the production run. Use a different
-seed (or directory) for production; reusing pilot data would make the
-production sample depend on what the pilot showed.
+Pilot results are not reused in the production run. A pilot directory
+draws from its own family of random number streams, so a production run
+with the same seed is independent of the pilot; reusing pilot data would
+make the production sample depend on what the pilot showed. Every
+measure named in \code{targets} is summarized; an unknown measure is an
+error, and a target for which no requirement can be computed gives a
+warning.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),

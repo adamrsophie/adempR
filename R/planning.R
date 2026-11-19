@@ -68,9 +68,13 @@ conservative_pq <- function(k, n, level = 0.95) {
 #' happens to observe 0 or 100 percent cannot claim that almost no
 #' replications are needed.
 #'
-#' Pilot results are not reused in the production run. Use a different
-#' seed (or directory) for production; reusing pilot data would make the
-#' production sample depend on what the pilot showed.
+#' Pilot results are not reused in the production run. A pilot directory
+#' draws from its own family of random number streams, so a production run
+#' with the same seed is independent of the pilot; reusing pilot data would
+#' make the production sample depend on what the pilot showed. Every
+#' measure named in `targets` is summarized; an unknown measure is an
+#' error, and a target for which no requirement can be computed gives a
+#' warning.
 #'
 #' @param study A [sim_study()].
 #' @param replications Pilot replications per scenario.
@@ -102,10 +106,12 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
   stopifnot(inherits(study, "adempr_study"))
   run <- sim_run(study, replications = replications, seed = seed, path = path,
                  label = "pilot", ...)
-  summ <- sim_summarise(run, measures = sim_measures("bias", "empse", "coverage",
-                                                     "rejection", "usable"))
-  res <- sim_results(run)
   targets <- targets %||% study$protocol$precision_targets
+  # Summarize with every measure that has a target; an unknown measure name
+  # is an error from sim_measures().
+  summ <- sim_summarise(run, measures = do.call(sim_measures, as.list(unique(c(
+    "bias", "empse", "coverage", "rejection", "usable", names(targets))))))
+  res <- sim_results(run)
   att <- res$attempts
   reps <- res$replications
   # cost per task: generation plus all methods
@@ -149,6 +155,12 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
       }
     }
     prec <- bind_rows(rows)
+    unplanned <- setdiff(names(targets),
+                         prec$measure[!is.na(prec$required_replications)])
+    if (length(unplanned)) {
+      warnf("No replication requirement could be computed for target(s) %s: the pilot gave no eligible results or no Monte Carlo standard error for them.",
+            paste(unplanned, collapse = ", "))
+    }
   }
   if (is.null(planned)) {
     planned <- if (!is.null(prec) && any(!is.na(prec$required_replications))) {

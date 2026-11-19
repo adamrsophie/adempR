@@ -119,3 +119,33 @@ test_that("pilots project cost and keep conservative precision requirements", {
   expect_equal(pl$projection$planned_replications, max(req))
   expect_identical(pl$run$manifest$label, "pilot")
 })
+
+test_that("pilots and DGP checks draw random numbers independent of production", {
+  st <- normal_study(n = 10L, mu = 0)
+  pl <- suppressWarnings(sim_pilot(st, replications = 4, seed = 3,
+                                   targets = c(coverage = 0.05, mse = 0.01)))
+  prod <- sim_run(st, replications = 4, seed = 3, path = run_path())
+  a <- sim_results(pl$run)$estimates$estimate
+  b <- sim_results(prod)$estimates$estimate
+  expect_false(any(a == b))
+  expect_true("mse" %in% pl$precision$measure)
+  expect_error(sim_pilot(st, replications = 4, seed = 3, targets = c(nope = 0.1)))
+  # the pilot directory replays with its own streams
+  expect_true(sim_replay(pl$run, scenario = 1, replication = 2)$matches)
+  # the DGP check uses its own streams too
+  first <- NULL
+  invisible(sim_check_dgp(st, summaries = function(d) {
+    if (is.null(first)) first <<- d$y[1]
+    c(m = mean(d$y))
+  }, targets = function(scenario) c(m = 0), n = 2, seed = 3))
+  prod_y <- NULL
+  st2 <- st
+  st2$generator$fun <- function(scenario, context) {
+    d <- data.frame(y = rnorm(scenario$n, scenario$mu, scenario$sigma))
+    if (context$replication == 1) prod_y <<- d$y[1]
+    d
+  }
+  sim_run(st2, replications = 1, seed = 3, path = run_path())
+  expect_false(is.null(prod_y) || is.null(first))
+  expect_false(identical(first, prod_y))
+})
