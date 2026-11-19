@@ -128,6 +128,36 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
   )
 }
 
+# Smallest and largest value of a measure while the common truth moves over
+# [truth - 2 SE, truth + 2 SE]. Coverage changes only where the truth
+# crosses an interval endpoint, so every crossing is evaluated (by counting
+# with sorted endpoints). For other measures the range is evaluated on a
+# grid of 41 points plus the shifts where bias is zero and where the
+# absolute error is smallest; this is exact for bias, MSE, RMSE and MAE.
+truth_sensitivity <- function(m, rows, study, estimand, tse) {
+  lim <- 2 * tse
+  if (identical(m, "coverage")) {
+    usable_int <- rows$estimate_status %in% USABLE_FOR_INTERVAL &
+      rows$interval_status == "valid" & !is.na(rows$truth)
+    t <- rows$truth[usable_int]
+    if (!length(t)) return(c(NA_real_, NA_real_))
+    l <- sort(rows$lower[usable_int] - t)
+    u <- sort(rows$upper[usable_int] - t)
+    eps <- 1e-9 * max(1, abs(c(l, u)[is.finite(c(l, u))]))
+    s <- c(-lim, lim, l, l - eps, u, u + eps)
+    s <- s[is.finite(s) & s >= -lim & s <= lim]
+    covered <- findInterval(s, l) - findInterval(s, u, left.open = TRUE)
+    return(range(covered) / length(t))
+  }
+  e <- rows$estimate - rows$truth
+  ok <- rows$valid & is.finite(e)
+  extra <- if (any(ok)) c(-mean(e[ok]), -stats::median(e[ok])) else numeric()
+  s <- c(seq(-lim, lim, length.out = 41L), extra[abs(extra) <= lim])
+  v <- vapply(s, function(sh) measure_cell(m, rows, study, estimand, shift = sh)$value,
+              numeric(1))
+  if (all(is.na(v))) c(NA_real_, NA_real_) else range(v, na.rm = TRUE)
+}
+
 measure_needs_truth <- function(m) {
   if (inherits(m, "adempr_measure")) return("truth" %in% m$requires)
   MEASURE_INFO$needs_truth[MEASURE_INFO$measure == m]
@@ -154,9 +184,14 @@ measure_needs_truth <- function(m) {
 #' approximation. The output then also gives `mcse_total` for bias (outer
 #' and truth uncertainty combined, which is valid because the truth stage
 #' uses an independent random number stream) and, for every measure that
-#' depends on the truth, a sensitivity range obtained by moving the truth
-#' by plus and minus two standard errors. Nonlinear measures do not get a
-#' combined standard error.
+#' depends on the truth, a sensitivity range: the smallest and largest value
+#' of the measure while the truth moves over plus and minus two standard
+#' errors. For coverage every point where the truth crosses an interval
+#' endpoint is evaluated; for bias, MSE, RMSE and MAE the range is exact;
+#' for other measures it is evaluated on a grid of 41 points. The range is
+#' a sensitivity analysis, not a confidence interval, and the point value
+#' and MCSE are conditional on the approximate truth. Nonlinear measures do
+#' not get a combined standard error.
 #'
 #' @param run A run, or results from [sim_results()].
 #' @param measures Measures to compute; defaults to the study's measures.
@@ -224,10 +259,9 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
           sens_lo <- sens_hi <- mcse_total <- NA_real_
           if (needs_truth && !is.na(tse) && tse > 0 && tkind == "mc" &&
               r$status %in% c("ok", "boundary")) {
-            a <- measure_cell(m, rows, study, estimand, shift = -2 * tse)$value
-            b <- measure_cell(m, rows, study, estimand, shift = 2 * tse)$value
-            sens_lo <- min(a, b)
-            sens_hi <- max(a, b)
+            rg <- truth_sensitivity(m, rows, study, estimand, tse)
+            sens_lo <- rg[1]
+            sens_hi <- rg[2]
             if (identical(m, "bias")) mcse_total <- sqrt(r$mcse^2 + tse^2)
           }
           out[[length(out) + 1L]] <- data.frame(

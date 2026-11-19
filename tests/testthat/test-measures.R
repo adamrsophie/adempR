@@ -134,3 +134,12 @@ test_that("rejection uses p <= alpha, validated metadata and the eligible rows",
   rows <- data.frame(truth = 0.01, truth_se = 0.2, null = 0, alternative = "two.sided")
   expect_identical(adempR:::rejection_label(rows, list(null = 0)), "rejection")
 })
+
+test_that("truth sensitivity ranges include interior extrema", {
+  rows <- data.frame(estimate = c(0, 0), truth = c(0, 0), lower = c(-0.5, -0.5),
+                     upper = c(0.5, 0.5), valid = TRUE, estimate_status = "valid",
+                     interval_status = "valid")
+  expect_equal(adempR:::truth_sensitivity("coverage", rows, list(level = 0.95), NULL, 1), c(0, 1))
+  st <- list(level = 0.95)
+  expect_equal(adempR:::truth_sensitivity("mse", rows, st, NULL, 1), c(0, 4))
+})

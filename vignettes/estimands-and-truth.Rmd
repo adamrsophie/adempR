@@ -107,8 +107,9 @@ s[s$measure == "bias", c("method", "estimand", "value", "mcse", "mcse_total")]
 estimates. More outer replications reduce `mcse` but not `truth_se`; only a
 larger truth sample (`n` in `sim_truth_mc()`) does. For measures that
 compare each estimate with the truth (for example coverage), the summary
-also reports a sensitivity range obtained by shifting the truth by two of
-its standard errors.
+also reports a sensitivity range: the smallest and largest value of the
+measure while the truth moves over two of its standard errors in either
+direction, including points inside that range where coverage changes.
 
 Had we evaluated the unadjusted estimates against $\beta_A = 1$ the bias
 would be

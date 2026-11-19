@@ -44,9 +44,14 @@ When a common truth is a Monte Carlo approximation with standard error
 approximation. The output then also gives \code{mcse_total} for bias (outer
 and truth uncertainty combined, which is valid because the truth stage
 uses an independent random number stream) and, for every measure that
-depends on the truth, a sensitivity range obtained by moving the truth
-by plus and minus two standard errors. Nonlinear measures do not get a
-combined standard error.
+depends on the truth, a sensitivity range: the smallest and largest value
+of the measure while the truth moves over plus and minus two standard
+errors. For coverage every point where the truth crosses an interval
+endpoint is evaluated; for bias, MSE, RMSE and MAE the range is exact;
+for other measures it is evaluated on a grid of 41 points. The range is
+a sensitivity analysis, not a confidence interval, and the point value
+and MCSE are conditional on the approximate truth. Nonlinear measures do
+not get a combined standard error.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
