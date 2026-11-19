@@ -43,7 +43,26 @@ test_that("the report is self-contained and escapes text", {
   h <- paste(readLines(f), collapse = "\n")
   expect_match(h, "&lt;b&gt;escaping&lt;/b&gt; &amp; ampersands", fixed = TRUE)
   expect_match(h, "doi.org/10.1002/sim.8086", fixed = TRUE)
+  # self-contained: no external scripts, stylesheets or images
+  expect_false(grepl("<script[^>]*src=|<link[^>]*href=|<img[^>]*src=\"http", h))
   expect_error(sim_report(run, f), "exists")
+})
+
+test_that("the report shows every protocol field, code and comparisons", {
+  m <- stochastic_methods()
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = c("bias", "empse"),
+                     protocol = sim_protocol(users = c("statisticians", "trialists"),
+                                             precision_targets = c(bias = 0.01),
+                                             phase = "II"))
+  run <- sim_run(st, replications = 6, seed = 2, path = run_path())
+  f <- tempfile(fileext = ".html")
+  sim_report(run, f, plots = FALSE)
+  h <- paste(readLines(f), collapse = "\n")
+  expect_match(h, "statisticians; trialists", fixed = TRUE)
+  expect_match(h, "bias = 0.01", fixed = TRUE)
+  expect_match(h, ">phase<", fixed = TRUE)
+  expect_match(h, "Paired comparisons with the first method", fixed = TRUE)
+  expect_match(h, "Truth code of mean", fixed = TRUE)
 })
 
 test_that("bundles carry no source paths, stale files, formula cells or foreign schemas", {
@@ -93,4 +112,24 @@ test_that("bundles carry no source paths, stale files, formula cells or foreign 
 test_that("text cells that spreadsheets read as formulas are neutralized", {
   x <- adempR:::csv_neutralize(c("=HYPERLINK(1)", "+a", "-1.5", "@x", "ok", NA, "-text"))
   expect_identical(x, c("'=HYPERLINK(1)", "'+a", "-1.5", "'@x", "ok", NA, "'-text"))
+})
+
+test_that("regeneration with the recorded registry reproduces an extended run", {
+  m <- stochastic_methods()
+  path <- run_path()
+  st1 <- normal_study(n = 10L, mu = 0, methods = m["jitter_a"])
+  sim_run(st1, replications = 3, seed = 4, path = path)
+  st2 <- normal_study(n = 10L, mu = 0, methods = m)
+  run <- sim_run(st2, replications = 3, seed = 4, path = path)
+  res <- sim_results(run)
+  re <- sim_run(res$manifest$study, replications = 3, seed = 4, path = run_path(),
+                label = res$manifest$label, rng_registry = res$manifest$rng_registry)
+  expect_equal(est_signature(re), est_signature(run))
+  fresh <- sim_run(res$manifest$study, replications = 3, seed = 4, path = run_path())
+  expect_false(isTRUE(all.equal(est_signature(fresh), est_signature(run))))
+  dir <- tempfile()
+  sim_export(run, dir, report = FALSE)
+  expect_match(paste(readLines(file.path(dir, "README.md")), collapse = "\n"),
+               "rng_registry = res$manifest$rng_registry", fixed = TRUE)
+  expect_false(dir.exists(file.path(dir, "artifacts")))
 })

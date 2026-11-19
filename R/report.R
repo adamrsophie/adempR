@@ -27,11 +27,15 @@ html_plot <- function(fun, width = 900, height = 500) {
   if (!isTRUE(capabilities("png"))) return("<p><em>PNG device unavailable.</em></p>")
   f <- tempfile(fileext = ".png")
   on.exit(unlink(f), add = TRUE)
+  dev <- NULL
   ok <- tryCatch({
     grDevices::png(f, width = width, height = height, res = 110)
+    dev <- grDevices::dev.cur()
     fun()
     TRUE
-  }, error = function(e) conditionMessage(e), finally = grDevices::dev.off())
+  }, error = function(e) conditionMessage(e),
+  # close only the device opened here, never one of the caller's
+  finally = if (!is.null(dev)) grDevices::dev.off(dev))
   if (!isTRUE(ok)) return(paste0("<p><em>Plot unavailable: ", html_escape(ok), "</em></p>"))
   b64 <- jsonlite::base64_enc(readBin(f, "raw", file.info(f)$size))
   paste0("<img alt=\"plot\" src=\"data:image/png;base64,", b64, "\">")
@@ -129,13 +133,23 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
     "</p>")
   add("<h2>1. Aims and protocol</h2><p>", html_escape(study$aims %||% "No aims stated."), "</p>")
   p <- study$protocol
-  prot <- data.frame(field = c("purpose", "scope", "intended users", "DGM rationale",
-                               "estimand rationale", "method rationale", "measure rationale",
-                               "replication rationale", "failure handling", "retention", "reporting"),
-                     value = c(p$purpose, p$scope %||% "", p$users %||% "", p$dgm_rationale %||% "",
-                               p$estimand_rationale %||% "", p$method_rationale %||% "",
-                               p$measure_rationale %||% "", p$replication_rationale %||% "",
-                               p$failure_handling %||% "", p$retention %||% "", p$reporting %||% ""),
+  # every field is collapsed to one cell: fields may hold several values
+  one <- function(x) {
+    if (is.null(x)) return("")
+    v <- unlist(x)
+    if (!is.null(names(v)) && any(nzchar(names(v)))) v <- paste0(names(v), " = ", v)
+    paste(v, collapse = "; ")
+  }
+  fields <- c(purpose = "purpose", scope = "scope", users = "intended users",
+              dgm_rationale = "DGM rationale", estimand_rationale = "estimand rationale",
+              method_rationale = "method rationale", measure_rationale = "measure rationale",
+              replication_rationale = "replication rationale",
+              precision_targets = "precision targets", failure_handling = "failure handling",
+              retention = "retention", reporting = "reporting")
+  extra <- p$extra %||% list()
+  prot <- data.frame(field = c(unname(fields), names(extra)),
+                     value = c(vapply(names(fields), function(f) one(p[[f]]), character(1)),
+                               vapply(extra, one, character(1))),
                      stringsAsFactors = FALSE)
   add(html_table(prot))
   add("<h3>Documentation completeness</h3>", html_table(sim_completeness(study)))
@@ -154,6 +168,14 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   }
   add("<details><summary>Generator code</summary><pre>",
       html_escape(fun_source(study$generator$fun)), "</pre></details>")
+  if (!is.null(study$generator$check)) {
+    add("<details><summary>Generator check</summary><pre>",
+        html_escape(fun_source(study$generator$check)), "</pre></details>")
+  }
+  for (con in study$scenarios$constraints) {
+    add("<details><summary>Constraint (", html_escape(con$type), "): ", html_escape(con$reason),
+        "</summary><pre>", html_escape(fun_source(con$when)), "</pre></details>")
+  }
   add("<h2>3. Estimands and truth</h2>")
   ed <- do.call(rbind, lapply(study$estimands, function(e) {
     data.frame(id = e$id, quantity = e$quantity, population = e$population %||% "",
@@ -165,6 +187,12 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   tr$scenario <- study$scenarios$labels[match(tr$scenario_key, study$scenarios$keys)]
   add(html_table(tr[c("scenario", "estimand", "truth_kind", "truth", "truth_se", "truth_error",
                       "truth_n", "truth_method")]))
+  for (e in study$estimands) {
+    if (!is.null(e$truth$fun)) {
+      add("<details><summary>Truth code of ", html_escape(e$id), "</summary><pre>",
+          html_escape(fun_source(e$truth$fun)), "</pre></details>")
+    }
+  }
   add("<h2>4. Methods</h2>")
   md <- do.call(rbind, lapply(names(study$methods), function(mn) {
     m <- study$methods[[mn]]
@@ -177,12 +205,31 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   }))
   add(html_table(md))
   for (mn in names(study$methods)) {
+    m <- study$methods[[mn]]
     add("<details><summary>Code of ", html_escape(mn), "</summary><pre>",
-        html_escape(fun_source(study$methods[[mn]]$fun)), "</pre></details>")
+        html_escape(fun_source(m$fun)),
+        if (!is.null(m$extract)) paste0("\n\n# extract\n", html_escape(fun_source(m$extract))),
+        "</pre></details>")
   }
   add("<h2>5. Performance measures and failure handling</h2>")
   mi <- MEASURE_INFO[MEASURE_INFO$measure %in% unique(s$measure), , drop = FALSE]
   add(html_table(mi[c("measure", "eligibility", "direction", "mcse_method")]))
+  custom <- Filter(function(m) inherits(m, "adempr_measure"), unclass(study$measures))
+  if (length(custom)) {
+    add("<h3>Custom measures</h3>", html_table(do.call(rbind, lapply(custom, function(m) {
+      data.frame(measure = m$id, requires = paste(m$requires, collapse = ", "),
+                 aggregate = if (is.function(m$aggregate)) "user function (user supplied MCSE)" else
+                   "mean (MCSE sd / sqrt(n))",
+                 direction = m$direction %||% "", description = m$description %||% "",
+                 stringsAsFactors = FALSE)
+    }))))
+    for (m in custom) {
+      add("<details><summary>Code of measure ", html_escape(m$id), "</summary><pre>",
+          html_escape(fun_source(m$contribution)),
+          if (is.function(m$aggregate)) paste0("\n\n# aggregate\n", html_escape(fun_source(m$aggregate))),
+          "</pre></details>")
+    }
+  }
   f <- lapply(unclass(study$failure), html_escape)
   add("<p>Failure policy: nonconverged estimates are ", f$nonconverged,
       "; outputs with warnings are ", if (f$warnings == "record") "kept (warnings recorded)" else "invalid",
@@ -192,7 +239,13 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
       " Performance is reported conditional on each measure's eligibility rule, next to the probability of a usable result.</p>")
   add("<h2>6. Execution</h2><p>Replications planned per scenario: ", html_escape(man$replications),
       ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
-      nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>")
+      nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>",
+      # the replication justification is always stated, given or not
+      "<p>Number of replications: ", html_escape(man$replications), " per scenario. ",
+      if (is.null(study$protocol$replication_rationale)) "No justification was given in the protocol. " else
+        paste0("Justification: ", html_escape(paste(unlist(study$protocol$replication_rationale), collapse = "; ")), ". "),
+      sprintf("With this number the Monte Carlo standard error of a proportion is at most %.4f (at 0.5), and of coverage near 0.95 about %.4f.",
+              0.5 / sqrt(man$replications), sqrt(0.95 * 0.05 / man$replications)), "</p>")
   sq <- man$sequential
   if (!is.null(sq)) {
     lk <- sq$looks
@@ -230,7 +283,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
         if (length(commits)) html_escape(paste(substr(commits, 1, 12), collapse = ", ")) else "none recorded",
         ".</p>")
   }
-  add("<h2>7. Failures and validity</h2>", html_table(attr(summ, "failures")[
+  add("<h2>7. Failures and validity</h2><h3>Flow of replications</h3><p>Every planned replication is accounted for: planned = generation failed + not generated + not run + fit failed + excluded + usable.</p>",
+      html_table(sim_flow(res)), "<h3>Validity by output</h3>", html_table(attr(summ, "failures")[
     c("scenario_id", "method", "estimand", "generated", "generation_failed", "attempted",
       "usable", "statuses", "se_valid", "interval_valid", "test_valid", "with_warnings")]))
   if (!is.null(diag$messages)) add("<h3>Most frequent errors and warnings</h3>", html_table(diag$messages))
@@ -242,12 +296,47 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
   if (!is.null(rt)) {
     rt$scenario_id <- study$scenarios$labels[match(rt$scenario_key, study$scenarios$keys)]
     add("<h3>Computational cost (all attempts, including failures)</h3>",
-        html_table(rt[c("scenario_id", "method", "attempts", "failed", "timeouts", "total_seconds",
+        html_table(rt[c("scenario_id", "method", "attempts", "failed", "timeouts", "overruns", "total_seconds",
                         "mean_seconds", "median_seconds", "p90_seconds", "max_seconds",
                         "mean_seconds_successful")]))
   }
+  # Paired comparisons of every method with the first one, per estimand,
+  # on the linear measures of the study.
+  cm <- intersect(c(vapply(study$measures, function(m) if (is.character(m)) m else "", character(1)),
+                    "usable"), COMPARE_LINEAR)
+  cmp <- list()
+  for (en in names(study$estimands)) {
+    ms <- names(study$methods)[vapply(study$methods, function(m) en %in% m$estimands, logical(1))]
+    if (length(ms) >= 2L) cmp[[en]] <- as.data.frame(sim_compare(res, ms, estimand = en, measures = cm))
+  }
+  if (length(cmp)) {
+    cmp <- bind_rows(cmp)
+    add("<h3>Paired comparisons with the first method</h3><p>Differences (method minus reference) on the same data sets, with paired MCSE. Status boundary means every paired difference was equal, which is not evidence of equivalence.</p>",
+        html_table(cmp[c("scenario_id", "estimand", "method", "reference", "measure", "value",
+                         "mcse", "lower", "upper", "n_common", "status", "note")]))
+  }
+  add("<h2>9. Diagnostics</h2>")
+  for (nm in c("repeated_data", "test_interval_disagreement", "degenerate")) {
+    x <- diag[[nm]]
+    if (NROW(x)) {
+      add("<h3>", c(repeated_data = "Data sets repeated across replications",
+                    test_interval_disagreement = "Tests and intervals that disagree",
+                    degenerate = "Degenerate estimates")[[nm]], "</h3>", html_table(x))
+    }
+  }
+  pr <- res$problems
+  if (!is.null(pr) && NROW(pr)) {
+    add("<h3>Storage problems found when reading results</h3>", html_table(data.frame(problem = as.character(unlist(pr)))))
+  }
+  reps <- res$replications
+  gf <- if (is.null(reps)) NULL else reps[reps$generation_status != "ok", , drop = FALSE]
+  if (!is.null(gf) && nrow(gf)) {
+    gf$scenario_id <- study$scenarios$labels[match(gf$scenario_key, study$scenarios$keys)]
+    add("<h3>Generation failures</h3>",
+        html_table(gf[intersect(c("scenario_id", "replication", "generation_status",
+                                  "generation_message"), names(gf))]))
+  }
   if (plots) {
-    add("<h2>9. Diagnostics</h2>")
     for (i in seq_along(study$scenarios$keys)) {
       add("<h3>", html_escape(study$scenarios$labels[i]), "</h3>")
       add(html_plot(function() sim_plot(res, "estimates", scenario = i)))
@@ -380,7 +469,14 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   tabs <- list(scenarios = res$scenarios, replications = res$replications,
                attempts = res$attempts, estimates = res$estimates, truth = res$truth,
                summary = as.data.frame(summ), failures = attr(summ, "failures"),
-               runtime = attr(summ, "runtime"), rng_registry = man$rng_registry,
+               runtime = attr(summ, "runtime"), flow = sim_flow(res),
+               estimands = bind_rows(lapply(study$estimands, function(e) {
+                 data.frame(estimand = e$id, population = e$population %||% NA_character_,
+                            effect = e$effect %||% NA_character_, scale = e$scale %||% NA_character_,
+                            conditioning = paste(e$conditioning %||% character(), collapse = "; "),
+                            truth_kind = e$truth$kind, stringsAsFactors = FALSE)
+               })),
+               rng_registry = man$rng_registry,
                excluded_scenarios = study$scenarios$excluded)
   for (nm in names(tabs)) {
     utils::write.csv(csv_safe(tabs[[nm]]), file.path(dir, "tables", paste0(nm, ".csv")),
@@ -406,12 +502,14 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   exported$path <- NULL
   exported$manifest$study <- strip_sources(exported$manifest$study)
   if (!is.null(exported$replications)) exported$replications$artifact <- NA_character_
+  exported$artifacts <- NULL
   if (include_data && !is.null(res$path)) {
     src <- file.path(res$path, "artifacts")
     if (dir.exists(src)) {
       dir.create(file.path(dir, "artifacts"), showWarnings = FALSE)
       file.copy(list.files(src, full.names = TRUE), file.path(dir, "artifacts"))
       exported$replications$artifact <- res$replications$artifact
+      exported$artifacts <- res$artifacts
     }
   }
   saveRDS(exported, file.path(dir, "results.rds"))
@@ -431,7 +529,7 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     paste0("Exported ", now_utc(), " with adempR ", utils::packageVersion("adempR"), "."), "",
     "## Contents", "",
     "- `results.rds`: results object (study specification with code, all tables, manifest).",
-    "- `tables/`: the same tables as CSV files (estimates with validity statuses, attempts, replications, truth, summary, failures, runtime, RNG registry).",
+    "- `tables/`: the same tables as CSV files (estimates with validity statuses, attempts, replications, truth, estimand definitions, summary, flow of replications, failures, runtime, RNG registry).",
     "- `code/`: source of the generator, methods and truth functions.",
     "- `manifest.json`: seed, fingerprints, protocol, revisions, amendments, environment.",
     "- `report.html`: self-contained report (if exported).",
@@ -440,10 +538,14 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     "```r", "library(adempR)", "res <- sim_import(\".\")   # verifies the checksums",
     "sim_summarise(res)", "```", "",
     "## Regeneration", "",
-    "The study can be rerun from `res$manifest$study` with the recorded seed:", "",
+    "The study can be rerun from `res$manifest$study` with the recorded seed, label",
+    "(a pilot label selects the pilot streams) and stream registry, so that every",
+    "scenario, method and truth draws from the stream it used originally:", "",
     "```r",
     paste0("run <- sim_run(res$manifest$study, replications = ", man$replications,
-           ", seed = ", man$seed, ", path = \"rerun\")"), "```", "",
+           ", seed = ", man$seed, ", path = \"rerun\", label = \"", man$label %||% "draft",
+           "\", rng_registry = res$manifest$rng_registry)"),
+    "```", "",
     "Exact regeneration requires the same R version, package versions and numerical",
     "libraries (see `manifest.json`). A package lockfile does not recreate missing",
     "system libraries."), file.path(dir, "README.md"))
