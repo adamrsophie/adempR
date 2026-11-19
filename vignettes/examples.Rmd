@@ -195,3 +195,55 @@ m2[m2$measure == "coverage", c("scenario_id", "method", "value", "mcse")]
 REML can fail to converge with few studies; such failures are recorded
 with their messages and appear in the failure table rather than
 disappearing from the results.
+
+## Noncompliance: intention to treat and the complier average causal effect
+
+In a randomized trial with one-sided noncompliance, the intention to treat
+(ITT) effect and the complier average causal effect (CACE) are different
+estimands. With a constant treatment effect `delta` among those treated and
+a proportion `pc` of compliers, the ITT effect is `pc * delta` and the CACE
+is `delta`. Here compliance depends on an unmeasured prognostic variable `u`,
+so an as-treated comparison confounds treatment with prognosis. Each method
+declares the estimand it targets, and bias is computed against that
+estimand only; comparing the bias of the ITT analysis with that of the
+instrumental variable estimator would compare answers to different
+questions.
+
+```{r}
+cace_study <- sim_study("noncompliance",
+  scenarios = sim_scenarios(n = 400L, pc = c(0.5, 0.8), delta = 1),
+  generate = function(scenario, context) {
+    z <- rbinom(scenario$n, 1, 0.5)
+    u <- rnorm(scenario$n)
+    complier <- u > qnorm(1 - scenario$pc)
+    d <- z * complier
+    y <- 1 + u + scenario$delta * d + rnorm(scenario$n)
+    data.frame(z, d, y)
+  },
+  estimands = list(
+    sim_estimand("itt", effect = "marginal", population = "randomized",
+                 truth = sim_truth_exact(function(scenario) scenario$pc * scenario$delta)),
+    sim_estimand("cace", effect = "marginal", population = "compliers",
+                 truth = sim_truth_exact(function(scenario) scenario$delta))),
+  methods = list(
+    itt = sim_method(function(data) {
+      sim_estimate("itt", mean(data$y[data$z == 1]) - mean(data$y[data$z == 0]))
+    }, estimands = "itt"),
+    iv = sim_method(function(data) {
+      itt_y <- mean(data$y[data$z == 1]) - mean(data$y[data$z == 0])
+      itt_d <- mean(data$d[data$z == 1]) - mean(data$d[data$z == 0])
+      sim_estimate("cace", itt_y / itt_d)
+    }, estimands = "cace"),
+    as_treated = sim_method(function(data) {
+      sim_estimate("cace", mean(data$y[data$d == 1]) - mean(data$y[data$d == 0]))
+    }, estimands = "cace")),
+  measures = c("bias", "empse"))
+crun <- sim_run(cace_study, replications = 200, seed = 21,
+                path = file.path(tempdir(), "cace"))
+cs <- as.data.frame(sim_summarise(crun))
+cs[cs$measure == "bias", c("scenario_id", "method", "estimand", "value", "mcse")]
+```
+
+The ITT and instrumental variable estimators are unbiased for their own
+estimands; the as-treated comparison is biased for the CACE because the
+treated group holds only compliers, who have higher `u`.
