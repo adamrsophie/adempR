@@ -266,16 +266,37 @@ k_se_ratio <- function(est, se, level = 0.95) {
                          note = "nonfinite estimates or SEs"))
   }
   if (n < 4L) return(kernel_result(n = n, status = "insufficient", note = "needs at least 4 replications"))
-  emp <- stats::sd(est)
-  mod <- sqrt(mean(se^2))
+  # Work on a common scale so that squares cannot overflow or underflow.
+  x <- est - mean(est)
+  s <- max(abs(x), se)
+  if (s == 0) return(kernel_result(n = n, status = "degenerate", note = "all estimates and SEs are equal to 0"))
+  x <- x / s
+  v <- (se / s)^2
+  emp <- stats::sd(x)
+  mod <- sqrt(mean(v))
   if (emp == 0) {
     return(kernel_result(n = n, status = "degenerate", note = "empirical SE is 0"))
   }
+  if (mod == 0) {
+    return(kernel_result(value = -100, n = n, status = "degenerate",
+                         note = "every model SE is 0"))
+  }
   val <- 100 * (mod / emp - 1)
-  mc <- 100 * (mod / emp) * sqrt(stats::var(se^2) / (4 * n * mod^4) + 1 / (2 * (n - 1)))
+  # Jackknife MCSE: leave-one-out values from running sums, so the
+  # covariance between reported variances and the empirical variance is
+  # included without assuming normal estimates.
+  sx <- sum(x)
+  sxx <- sum(x^2)
+  sv <- sum(v)
+  emp_i <- sqrt(((sxx - x^2) - (sx - x)^2 / (n - 1)) / (n - 2))
+  mod_i <- sqrt((sv - v) / (n - 1))
+  th <- 100 * (mod_i / emp_i - 1)
+  mc <- if (all(is.finite(th))) sqrt((n - 1) / n * sum((th - mean(th))^2)) else NA_real_
+  normal <- 100 * (mod / emp) * sqrt(stats::var(v) / (4 * n * mod^4) + 1 / (2 * (n - 1)))
   z <- stats::qnorm(1 - (1 - level) / 2)
   kernel_result(value = val, mcse = mc, lower = val - z * mc, upper = val + z * mc, n = n,
-                note = "MCSE assumes approximately normal estimates (Morris et al. 2019)")
+                note = sprintf("jackknife MCSE; the normal theory MCSE of Morris et al. (2019), which ignores the covariance of SEs and estimates, is %s",
+                               format(signif(normal, 3))))
 }
 
 # Proportion with plug-in MCSE and an exact Clopper-Pearson interval, which

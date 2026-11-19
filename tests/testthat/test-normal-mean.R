@@ -42,5 +42,7 @@ test_that("results agree with rsimsum where definitions align", {
   expect_equal(s$value[s$measure == "empse"], pick("empse")$est, tolerance = 1e-10)
   expect_equal(s$value[s$measure == "mse"], pick("mse")$est, tolerance = 1e-10)
   expect_equal(s$value[s$measure == "se_ratio"], pick("relerror")$est, tolerance = 1e-8)
-  expect_equal(s$mcse[s$measure == "se_ratio"], pick("relerror")$mcse, tolerance = 1e-8)
+  # adempR reports a jackknife MCSE; the normal theory value is in the note
+  expect_match(s$note[s$measure == "se_ratio"], format(signif(pick("relerror")$mcse, 3)),
+               fixed = TRUE)
 })

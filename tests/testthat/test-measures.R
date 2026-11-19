@@ -35,7 +35,15 @@ test_that("relative error in model SE follows Morris et al. Table 6", {
   v_se2 <- var(c(1, 1, 4, 4, 9))
   r <- adempR:::k_se_ratio(est, se)
   expect_equal(r$value, 100 * (mod / emp - 1))
-  expect_equal(r$mcse, 100 * (mod / emp) * sqrt(v_se2 / (4 * 5 * mod^4) + 1 / (2 * 4)))
+  normal <- 100 * (mod / emp) * sqrt(v_se2 / (4 * 5 * mod^4) + 1 / (2 * 4))
+  expect_match(r$note, format(signif(normal, 3)), fixed = TRUE)
+  # the MCSE is the jackknife over replications
+  th <- vapply(1:5, function(i) 100 * (sqrt(mean(se[-i]^2)) / sd(est[-i]) - 1), numeric(1))
+  expect_equal(r$mcse, sqrt(4 / 5 * sum((th - mean(th))^2)))
+  # zero model SEs and huge values do not give NaN with status ok
+  expect_identical(adempR:::k_se_ratio(1:4, rep(0, 4))$status, "degenerate")
+  big <- adempR:::k_se_ratio(c(1, 2, 3, 4, 10) * 1e200, se * 1e200)
+  expect_equal(big$value, r$value)
 })
 
 test_that("RMVAR differs from mean SE and uses the delta method", {

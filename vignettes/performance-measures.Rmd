@@ -64,12 +64,16 @@ makes the two comparable. Its MCSE is the delta method
 $s_{\widehat{SE}^2}/(2\sqrt n\,\text{RMVAR})$.
 
 **Relative error in model SE** is
-$100\,(\text{RMVAR} / \text{EmpSE} - 1)$ with the MCSE of Morris, White
-and Crowther (2019, Table 6),
+$100\,(\text{RMVAR} / \text{EmpSE} - 1)$. Morris, White and Crowther
+(2019, Table 6) give the MCSE
 
-$$100\,\frac{\text{RMVAR}}{\text{EmpSE}}\sqrt{\frac{\widehat{\operatorname{Var}}(\widehat{SE}^2)}{4 n\,\text{RMVAR}^4} + \frac{1}{2(n-1)}}.$$
+$$100\,\frac{\text{RMVAR}}{\text{EmpSE}}\sqrt{\frac{\widehat{\operatorname{Var}}(\widehat{SE}^2)}{4 n\,\text{RMVAR}^4} + \frac{1}{2(n-1)}},$$
 
-The test suite checks that this agrees with `rsimsum`.
+which assumes approximately normal estimates and ignores the covariance
+between the reported variances and the empirical variance. adempR reports
+a jackknife MCSE over replications, which includes that covariance, and
+gives the Table 6 value in the note. The test suite checks the point value
+and the Table 6 value against `rsimsum`.
 
 ## Proportions
 
