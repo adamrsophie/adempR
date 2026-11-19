@@ -73,9 +73,11 @@ The test suite checks each of these by comparing estimates bit for bit:
   the replication is a single positive whole number; pass
   `domain = run$manifest$rng_domain` for a pilot run.
 * Two runs can be compared with `sim_verify()`: with the same seed it
-  checks that every estimate is reproduced; with different seeds it is a
-  seed sensitivity check, comparing each measure in units of the combined
-  Monte Carlo error.
+  checks that every stored outcome (estimates, tests, statuses, truths and
+  data checksums) is reproduced on the complete set of rows; with
+  different seeds it is a seed sensitivity check, comparing each measure
+  in units of the combined Monte Carlo error and reporting cells that
+  cannot be compared.
 
 Package code is identified by the package name and version recorded in the
 fingerprints. A package loaded from source with `pkgload::load_all()`, or

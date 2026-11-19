@@ -19,23 +19,31 @@ identical in the reproduction mode.}
 }
 \value{
 A list of class \code{adempr_verify} with \code{mode} (\code{"reproduce"} or
-\code{"seed_sensitivity"}), \code{table} and \code{ok}.
+\code{"seed_sensitivity"}), \code{table} and \code{ok} (\code{TRUE}, \code{FALSE} or, for an
+indeterminate seed comparison, \code{NA}).
 }
 \description{
-With two runs that used the same seed, \code{sim_verify()} checks that every
-stored estimate is reproduced: rows are matched on scenario, estimand,
-replication and method, and the result reports how many are identical
-and the largest absolute difference. This is the check for a rerun on
+With two runs that used the same seed (1 and 1L are the same seed),
+\code{sim_verify()} checks that every stored outcome is reproduced: estimate
+rows are matched on scenario, estimand, replication and method, and
+every estimate column (point, SE, interval, test, flags), the attempt
+status, the warning flag, the truth and the validity status must agree;
+generated data sets must have the same outcome and checksum. Missing
+values equal missing values and equal infinities are equal. Rows present
+in one run only make the check fail. This is the check for a rerun on
 another machine or with another backend.
 }
 \details{
 With two runs that used different seeds, it is a seed sensitivity check:
 each performance measure is compared between the runs with
-\code{z = (a - b) / sqrt(mcse_a^2 + mcse_b^2)}. The runs are independent, so
-about 5\% of cells exceed \verb{|z| > 1.96} by chance; cells beyond
-\code{threshold} suggest that the conclusions depend on the seed (too few
-replications, a heavy tailed estimator, or a generator that does not use
-the stream it was given).
+\code{z = (a - b) / sqrt(mcse_a^2 + mcse_b^2)}, using \code{mcse_total} when the
+truth is uncertain and, for proportions, the pooled binomial variance
+with one pseudo event each way, so a proportion of 0 or 1 is not treated
+as certain. The runs are independent, so about 5\% of cells exceed \verb{|z| > 1.96} by chance (the result gives the expected number of flags); cells
+beyond \code{threshold} suggest that the conclusions depend on the seed (too
+few replications, a heavy tailed estimator, or a generator that does
+not use the stream it was given). Cells that cannot be compared make
+\code{ok} \code{NA} (indeterminate) when no other cell is flagged.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = 20L),
