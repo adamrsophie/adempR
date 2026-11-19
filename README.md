@@ -8,8 +8,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 <!-- DOI badge: Zenodo mints a concept DOI on the first GitHub release; replace XXXXXXXX and uncomment. -->
 <!-- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXXX) -->
-<!-- Software Heritage archives public repositories only; uncomment once the repository is public. -->
-<!-- [![Archived on Software Heritage](https://archive.softwareheritage.org/badge/origin/https://github.com/adamrsophie/adempR/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/adamrsophie/adempR) -->
+[![Archived on Software Heritage](https://archive.softwareheritage.org/badge/origin/https://github.com/adamrsophie/adempR/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/adamrsophie/adempR)
 <!-- badges: end -->
 
 adempR runs statistical simulation studies as reproducible experiments.
