@@ -25,7 +25,10 @@
 #'   sets, constants, helper functions), part of the fingerprint. Closure
 #'   variables are fingerprinted automatically, but code in files, options
 #'   and package implementations are not; declare what matters here.
-#' @param packages Packages the mechanism needs on parallel workers.
+#' @param packages Packages the mechanism uses. They are checked by
+#'   [sim_validate()] and attached before study code runs, in the main
+#'   process for the sequential backend and on every worker for the future
+#'   backend, so unqualified calls resolve the same way in both.
 #' @param description Free text for the protocol.
 #' @return An object of class `adempr_generator`.
 #' @examples
@@ -139,7 +142,8 @@ isolate_data <- function(x) {
 #' @param version Optional version label; part of the fingerprint.
 #' @param depends Optional list of objects the method depends on; part of
 #'   the fingerprint.
-#' @param packages Packages needed on parallel workers.
+#' @param packages Packages the method uses; checked by [sim_validate()]
+#'   and attached in both backends (see [sim_generator()]).
 #' @param timeout Optional elapsed time limit in seconds. Enforced with
 #'   [setTimeLimit()], which is cooperative: it interrupts R code at safe
 #'   points but may not interrupt long running compiled code. This is a best

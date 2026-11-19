@@ -30,7 +30,10 @@ sets, constants, helper functions), part of the fingerprint. Closure
 variables are fingerprinted automatically, but code in files, options
 and package implementations are not; declare what matters here.}
 
-\item{packages}{Packages the mechanism needs on parallel workers.}
+\item{packages}{Packages the mechanism uses. They are checked by
+\code{\link[=sim_validate]{sim_validate()}} and attached before study code runs, in the main
+process for the sequential backend and on every worker for the future
+backend, so unqualified calls resolve the same way in both.}
 
 \item{description}{Free text for the protocol.}
 }

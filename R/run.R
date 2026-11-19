@@ -450,8 +450,65 @@ commit_chunk <- function(study, results, p) {
   atomic_save(batch, p$batches, paste0("b-", new_uuid()), p$tmp)
 }
 
+# Declared packages are attached before any study function runs, in the
+# coordinator for the sequential backend and on every worker for the future
+# backend, so an unqualified call resolves the same way in both.
+attach_packages <- function(pkgs) {
+  for (pkg in pkgs) {
+    suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+  }
+  invisible(pkgs)
+}
+
+# Functions defined at top level refer to helpers in the global environment,
+# which a separate worker process does not have. Every study function whose
+# environment is the global environment, and every global function it calls
+# in turn, is given a private environment holding copies of the global
+# objects it uses. Values and fingerprints are unchanged.
+localize_globals <- function(study) {
+  shared <- new.env(parent = globalenv())
+  todo <- list()
+  collect <- function(f) {
+    if (!is.function(f) || is.primitive(f) || !identical(environment(f), globalenv())) return()
+    vars <- tryCatch(codetools::findGlobals(f), error = function(e) character())
+    for (v in setdiff(vars, ls(shared, all.names = TRUE))) {
+      if (!exists(v, envir = globalenv(), inherits = FALSE)) next
+      val <- get(v, envir = globalenv(), inherits = FALSE)
+      assign(v, val, envir = shared)
+      collect(val)
+    }
+  }
+  rebind <- function(x) {
+    if (is.function(x) && !is.primitive(x) && identical(environment(x), globalenv())) {
+      environment(x) <- shared
+      return(x)
+    }
+    if (is.list(x) && !is.data.frame(x) && length(x)) {
+      a <- attributes(x)
+      x <- lapply(x, rebind)
+      attributes(x) <- a
+    }
+    x
+  }
+  walk <- function(x) {
+    if (is.function(x)) collect(x)
+    else if (is.list(x) && !is.data.frame(x)) for (el in x) walk(el)
+  }
+  walk(unclass(study))
+  for (v in ls(shared, all.names = TRUE)) assign(v, rebind(get(v, envir = shared)), envir = shared)
+  rebind(study)
+}
+
+# The worker function lives in a minimal environment so that a future
+# carries only its own chunk and the study, not the coordinator's frame.
+chunk_worker <- local(function(chunk, study, packages) {
+  attach_packages(packages)
+  run_chunk(study, chunk)
+}, envir = new.env(parent = asNamespace("adempR")))
+
 run_chunks <- function(study, chunks, p, backend, workers, progress) {
   if (backend == "sequential") {
+    attach_packages(study_packages(study))
     for (i in seq_along(chunks)) {
       commit_chunk(study, run_chunk(study, chunks[[i]]), p)
       if (progress) message(sprintf("  batch %d/%d committed", i, length(chunks)))
@@ -471,12 +528,13 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
   nw <- future::nbrOfWorkers()
   wave <- max(1L, as.integer(if (is.finite(nw)) nw else 1L)) * 2L
   pkgs <- study_packages(study)
+  shipped <- localize_globals(study)
   starts <- seq(1L, length(chunks), by = wave)
   for (s in starts) {
     idx <- s:min(s + wave - 1L, length(chunks))
-    res <- future.apply::future_lapply(chunks[idx], function(chunk) {
-      run_chunk(study, chunk)
-    }, future.seed = FALSE, future.packages = c("adempR", pkgs))
+    res <- future.apply::future_lapply(chunks[idx], chunk_worker, study = shipped,
+                                       packages = pkgs, future.seed = FALSE,
+                                       future.packages = "adempR", future.globals = FALSE)
     for (r in res) commit_chunk(study, r, p)
     if (progress) message(sprintf("  batches %d to %d of %d committed", min(idx), max(idx),
                                   length(chunks)))

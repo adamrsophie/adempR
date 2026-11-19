@@ -42,7 +42,8 @@ protected metadata of \code{\link[=sim_data]{sim_data()}} in \code{context$meta}
 \item{depends}{Optional list of objects the method depends on; part of
 the fingerprint.}
 
-\item{packages}{Packages needed on parallel workers.}
+\item{packages}{Packages the method uses; checked by \code{\link[=sim_validate]{sim_validate()}}
+and attached in both backends (see \code{\link[=sim_generator]{sim_generator()}}).}
 
 \item{timeout}{Optional elapsed time limit in seconds. Enforced with
 \code{\link[=setTimeLimit]{setTimeLimit()}}, which is cooperative: it interrupts R code at safe

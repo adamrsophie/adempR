@@ -114,3 +114,33 @@ test_that("sim_data(NULL) is recorded as a generation failure", {
   run <- sim_run(st, 2, seed = 1, path = tempfile("adempR-n-"), progress = FALSE)
   expect_true(all(sim_results(run)$replications$generation_status == "error"))
 })
+
+test_that("both backends resolve global helpers and declared packages the same way", {
+  skip_on_cran()
+  skip_if_not_installed("future")
+  skip_if_not_installed("future.apply")
+  skip_if_dev_namespace()
+  # top-level helpers, as in a user script
+  assign("adempr_test_scale", 2, envir = globalenv())
+  assign("adempr_test_helper", eval(quote(function(y) mean(y) * adempr_test_scale), globalenv()),
+         envir = globalenv())
+  on.exit(rm(list = c("adempr_test_scale", "adempr_test_helper"), envir = globalenv()), add = TRUE)
+  m <- list(
+    helper = eval(quote(function(data) sim_estimate("mean", adempr_test_helper(data$y))),
+                  globalenv()),
+    pkg = sim_method(eval(quote(function(data) {
+      sim_estimate("mean", mean(data$y) + nchar(file_path_sans_ext("a.txt")))
+    }), globalenv()), estimands = "mean", packages = "tools"))
+  st <- normal_study(n = 10L, mu = 0, methods = m)
+  s <- sim_run(st, replications = 4, seed = 3, path = run_path())
+  f <- sim_run(st, replications = 4, seed = 3, path = run_path(), backend = "future", workers = 2)
+  expect_true(all(sim_results(s)$estimates$estimate_status == "valid"))
+  expect_identical(est_signature(s), est_signature(f))
+})
+
+test_that("a missing declared package fails validation", {
+  st <- normal_study(n = 10L, mu = 0, methods = list(m = sim_method(
+    function(data) sim_estimate("mean", 1), estimands = "mean", packages = "notAPackageXYZ")))
+  v <- sim_validate(st, error = FALSE)
+  expect_true(any(v$check == "package:notAPackageXYZ" & v$status == "error"))
+})

@@ -63,7 +63,7 @@ Windows. Nothing has been run on a real cluster scheduler or a GPU.
 | Invariance to scenario order, method order and chunk size | verified | test-rng.R |
 | Extending replications and adding methods leave existing results unchanged | verified | test-rng.R |
 | Caller's RNG kind and state restored | verified | test-rng.R |
-| `future` backend identical to sequential | verified locally with multisession, two workers | test-rng.R |
+| `future` backend identical to sequential, including top-level helper functions and declared packages | verified locally with multisession, two workers | test-rng.R |
 | Data isolation between methods, including `data.table` | verified | test-isolation.R |
 | Atomic commits; crash at each commit stage and resume | verified on Linux and macOS | test-recovery.R (SIGKILL in a child process) |
 | Stale lock recovery on the same host | verified | test-recovery.R |
@@ -131,6 +131,11 @@ benchmark scripts are planned for a later release.
 * Function fingerprints use deparsed code and the values of referenced
   free variables. Objects reached through other routes (for example a
   global option, or a file read at run time) must be declared in `depends`.
+* For the `future` backend, global objects used by study functions defined
+  at top level are copied to the workers. A function created inside another
+  function carries its own enclosing environment; global objects it reaches
+  only through the search path are not copied and must be passed in or
+  declared.
 * A lock held by a process on another host, or any stale lock on Windows,
   cannot be checked and must be released with `sim_unlock()`.
 * Export bundles contain R code; their checksums detect corruption, not

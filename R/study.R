@@ -269,6 +269,11 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE) {
   }
   est_ids <- names(study$estimands)
   scen_fields <- unique(unlist(lapply(study$scenarios$values, names)))
+  for (pkg in study_packages(study)) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      add(paste0("package:", pkg), "error", "declared package is not installed")
+    }
+  }
   for (mn in names(study$methods)) {
     m <- study$methods[[mn]]
     unknown <- setdiff(m$estimands, est_ids)
