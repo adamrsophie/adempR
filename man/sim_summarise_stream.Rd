@@ -14,15 +14,21 @@ sim_summarise_stream(run, measures = c("bias", "mse", "empse", "coverage"))
 }
 \value{
 A data frame with \code{scenario_key}, \code{scenario_id}, \code{method},
-\code{estimand}, \code{measure}, \code{value}, \code{mcse} and \code{n}.
+\code{estimand}, \code{measure}, \code{value}, \code{mcse}, \code{lower}, \code{upper}, \code{n},
+\code{status} and \code{note}.
 }
 \description{
 \code{\link[=sim_summarise]{sim_summarise()}} reads every committed estimate into memory. For runs
 too large for that, \code{sim_summarise_stream()} reads one committed batch
-at a time, applies the same selection (stored fingerprints, the latest
-retry round, deduplication of repeated deliveries) and validity rules,
-and adds each usable row to mergeable accumulators (\code{\link[=sim_accumulator]{sim_accumulator()}}).
-Memory then grows with the number of tasks (one short key per task, to
-resolve superseded rows) and the number of cells, not with the size of
-the stored results. Values agree with \code{\link[=sim_summarise]{sim_summarise()}} up to rounding.
+at a time and applies the same selection (stored fingerprints, the latest
+retry round, deduplication of repeated deliveries with the same conflict
+check, data set truths of the selected generation) and the same
+eligibility rules, and adds each eligible contribution to mergeable
+accumulators (\code{\link[=sim_accumulator]{sim_accumulator()}}) that carry the moments each kernel
+needs. The values, MCSEs, intervals and statuses come from the same
+kernels as in \code{\link[=sim_summarise]{sim_summarise()}}, so they agree up to rounding, and every
+planned cell is returned, with status \code{"no_eligible"} when nothing
+could be used. Memory grows with the number of tasks (short keys to
+resolve superseded and duplicated rows, and the data set truths) and the
+number of cells, not with the size of the stored results.
 }

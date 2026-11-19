@@ -171,20 +171,29 @@ kernel_result <- function(value = NA_real_, mcse = NA_real_, lower = NA_real_,
 
 # Mean of independent contributions (bias, MAE, MSE, mean SE, width).
 k_mean <- function(x, level = 0.95) {
-  n <- length(x)
+  fin <- is.finite(x)
+  k_mean_moments(n = length(x), mean = if (all(fin)) mean(x) else mean(x[fin]),
+                 var = if (sum(fin) > 1) stats::var(x[fin]) else NA_real_,
+                 pos_inf = sum(x == Inf, na.rm = TRUE), neg_inf = sum(x == -Inf, na.rm = TRUE),
+                 level = level)
+}
+
+# The mean kernel from moments of the finite contributions and counts of
+# infinite ones, so batch by batch accumulation gives the same result.
+k_mean_moments <- function(n, mean, var, pos_inf = 0, neg_inf = 0, level = 0.95) {
   if (n == 0L) return(kernel_result(status = "no_eligible", note = "no eligible replications"))
-  if (any(is.infinite(x))) {
-    return(kernel_result(value = mean(x), n = n, status = "infinite",
-                         note = sprintf("%d infinite contribution(s)", sum(is.infinite(x)))))
+  if (pos_inf + neg_inf > 0) {
+    v <- if (pos_inf && neg_inf) NaN else if (pos_inf) Inf else -Inf
+    return(kernel_result(value = v, n = n, status = "infinite",
+                         note = sprintf("%d infinite contribution(s)", pos_inf + neg_inf)))
   }
-  m <- mean(x)
   if (n == 1L) {
-    return(kernel_result(value = m, n = n, status = "insufficient",
+    return(kernel_result(value = mean, n = n, status = "insufficient",
                          note = "MCSE needs at least 2 replications"))
   }
-  s <- stats::sd(x) / sqrt(n)
+  s <- sqrt(var / n)
   z <- stats::qnorm(1 - (1 - level) / 2)
-  kernel_result(value = m, mcse = s, lower = m - z * s, upper = m + z * s, n = n)
+  kernel_result(value = mean, mcse = s, lower = mean - z * s, upper = mean + z * s, n = n)
 }
 
 k_rmse <- function(e, level = 0.95) {
@@ -221,14 +230,23 @@ k_root_mean_square <- function(x, level, what) {
 # delta method gives MCSE(s) = sqrt(Var(s^2)) / (2 s). Under normality this
 # reduces approximately to s / sqrt(2 (n - 1)).
 k_empse <- function(x, level = 0.95) {
-  n <- length(x)
+  fin <- is.finite(x)
+  xf <- x[fin]
+  k_empse_moments(n = length(x), var = if (length(xf) > 1) stats::var(xf) else NA_real_,
+                  m4 = if (length(xf)) mean((xf - mean(xf))^4) else NA_real_,
+                  nonfinite = sum(!fin), level = level)
+}
+
+# The empirical SE kernel from the variance and the fourth central moment
+# (mean of (x - mean)^4) of the contributions.
+k_empse_moments <- function(n, var, m4, nonfinite = 0, level = 0.95) {
   if (n == 0L) return(kernel_result(status = "no_eligible", note = "no eligible replications"))
-  if (any(!is.finite(x))) {
+  if (nonfinite > 0) {
     return(kernel_result(value = NaN, n = n, status = "infinite",
                          note = "nonfinite estimates; the empirical SE is undefined"))
   }
   if (n < 2L) return(kernel_result(n = n, status = "insufficient", note = "needs at least 2 replications"))
-  s <- stats::sd(x)
+  s <- sqrt(var)
   if (n < 4L) {
     return(kernel_result(value = s, n = n, status = "insufficient",
                          note = "MCSE needs at least 4 replications"))
@@ -237,7 +255,6 @@ k_empse <- function(x, level = 0.95) {
     return(kernel_result(value = 0, n = n, status = "degenerate",
                          note = "all estimates equal; MCSE undefined"))
   }
-  m4 <- mean((x - mean(x))^4)
   v_s2 <- (m4 - s^4 * (n - 3) / (n - 1)) / n
   note <- NA_character_
   if (!is.finite(v_s2) || v_s2 <= 0) {
@@ -301,9 +318,12 @@ k_se_ratio <- function(est, se, level = 0.95) {
 # stays informative when 0 or all events are observed.
 k_prop <- function(x, level = 0.95) {
   x <- as.logical(x)
-  n <- length(x)
+  k_prop_counts(sum(x), length(x), level)
+}
+
+# The proportion kernel from the number of events and of replications.
+k_prop_counts <- function(k, n, level = 0.95) {
   if (n == 0L) return(kernel_result(status = "no_eligible", note = "no eligible replications"))
-  k <- sum(x)
   p <- k / n
   a <- 1 - level
   lo <- if (k == 0) 0 else stats::qbeta(a / 2, k, n - k + 1)

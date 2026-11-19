@@ -9,7 +9,8 @@
 #' `sim_accumulator()` creates an accumulator for one or two numeric
 #' streams; `sim_accumulate()` adds values; `sim_merge()` combines two
 #' accumulators exactly; `sim_accumulated()` returns the count, means,
-#' variances, covariance and the Monte Carlo standard error of the mean.
+#' variances, covariance, the fourth central moment and the Monte Carlo
+#' standard error of the mean.
 #' The updates use the numerically stable pairwise formulas of Chan, Golub
 #' and LeVeque, so batch order does not matter beyond rounding.
 #'
@@ -27,7 +28,7 @@
 #' @export
 sim_accumulator <- function() {
   structure(list(n = 0, mx = 0, my = 0, m2x = 0, m2y = 0, cxy = 0, md = 0, m2d = 0,
-                 paired = NA),
+                 m3x = 0, m4x = 0, paired = NA),
             class = "adempr_accumulator")
 }
 
@@ -45,6 +46,8 @@ sim_accumulate <- function(acc, x, y = NULL) {
   b$n <- as.double(length(x))
   b$mx <- mean(x)
   b$m2x <- sum((x - b$mx)^2)
+  b$m3x <- sum((x - b$mx)^3)
+  b$m4x <- sum((x - b$mx)^4)
   b$paired <- !is.null(y)
   if (!is.null(y)) {
     b$my <- mean(y)
@@ -74,6 +77,14 @@ sim_merge <- function(a, b) {
   out$mx <- a$mx + dx * b$n / n
   out$my <- a$my + dy * b$n / n
   out$m2x <- a$m2x + b$m2x + dx^2 * a$n * b$n / n
+  # higher central moments (Pebay 2008)
+  a3 <- a$m3x %||% 0
+  b3 <- b$m3x %||% 0
+  out$m3x <- a3 + b3 + dx^3 * a$n * b$n * (a$n - b$n) / n^2 +
+    3 * dx * (a$n * b$m2x - b$n * a$m2x) / n
+  out$m4x <- (a$m4x %||% 0) + (b$m4x %||% 0) +
+    dx^4 * a$n * b$n * (a$n^2 - a$n * b$n + b$n^2) / n^3 +
+    6 * dx^2 * (a$n^2 * b$m2x + b$n^2 * a$m2x) / n^2 + 4 * dx * (a$n * b3 - b$n * a3) / n
   out$m2y <- a$m2y + b$m2y + dy^2 * a$n * b$n / n
   out$cxy <- a$cxy + b$cxy + dx * dy * a$n * b$n / n
   dd <- b$md - a$md
@@ -89,7 +100,8 @@ sim_accumulated <- function(acc) {
   n <- acc$n
   vx <- if (n > 1) acc$m2x / (n - 1) else NA_real_
   out <- list(n = n, mean_x = if (n) acc$mx else NA_real_, var_x = vx,
-              mcse_mean_x = if (n > 1) sqrt(vx / n) else NA_real_)
+              mcse_mean_x = if (n > 1) sqrt(vx / n) else NA_real_,
+              m4_x = if (n) (acc$m4x %||% NA_real_) / n else NA_real_)
   if (isTRUE(acc$paired)) {
     out$mean_y <- acc$my
     out$var_y <- if (n > 1) acc$m2y / (n - 1) else NA_real_

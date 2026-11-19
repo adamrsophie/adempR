@@ -29,7 +29,8 @@ An accumulator (class \code{adempr_accumulator}) or, for
 \code{sim_accumulator()} creates an accumulator for one or two numeric
 streams; \code{sim_accumulate()} adds values; \code{sim_merge()} combines two
 accumulators exactly; \code{sim_accumulated()} returns the count, means,
-variances, covariance and the Monte Carlo standard error of the mean.
+variances, covariance, the fourth central moment and the Monte Carlo
+standard error of the mean.
 The updates use the numerically stable pairwise formulas of Chan, Golub
 and LeVeque, so batch order does not matter beyond rounding.
 }

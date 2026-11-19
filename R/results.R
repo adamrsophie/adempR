@@ -37,6 +37,35 @@ dedup_table <- function(df, keys, scientific, what) {
   df[!dup, , drop = FALSE]
 }
 
+# The selected generation of every data set: repeated deliveries checked
+# for conflicts, then the latest retry round.
+select_generations <- function(reps) {
+  latest_round(dedup_table(reps, c("scenario_key", "replication", "generator_fp", "round"),
+                           c("generation_status", "generation_message", "data_md5"),
+                           "generation"),
+               c("scenario_key", "replication", "generator_fp"))
+}
+
+# Data set truths of the selected generations.
+select_dataset_truth <- function(dtr, reps) {
+  dtr <- latest_round(dedup_table(dtr, c("scenario_key", "replication", "estimand", "round"),
+                                  "truth", "data set truth"),
+                      c("scenario_key", "replication", "estimand"))
+  same_round(dtr, reps, c("scenario_key", "replication"))
+}
+
+# Rows that belong to a data set (truths, records) or to a fit
+# (diagnostics) are kept only from the round of the selected generation or
+# fit, so a retry that produced none does not leave the earlier ones in
+# place next to the new result.
+same_round <- function(df, ref, keys) {
+  if (is.null(df) || !nrow(df) || is.null(ref) || !nrow(ref)) return(df)
+  id_d <- do.call(paste, c(lapply(df[keys], col_text), sep = "\r"))
+  id_r <- do.call(paste, c(lapply(ref[keys], col_text), sep = "\r"))
+  rr <- tapply(ref$round, id_r, max)
+  df[!is.na(rr[id_d]) & df$round == rr[id_d], , drop = FALSE]
+}
+
 # Keep, for every task identified by `keys`, only the rows of its latest
 # retry round.
 latest_round <- function(df, keys) {
@@ -79,11 +108,7 @@ read_raw_results <- function(path, repair = FALSE) {
       names(all_reps)), drop = FALSE]
     rownames(arts) <- NULL
   }
-  reps <- latest_round(dedup_table(get("replications"),
-                                   c("scenario_key", "replication", "generator_fp", "round"),
-                                   c("generation_status", "generation_message", "data_md5"),
-                                   "generation"),
-                       c("scenario_key", "replication", "generator_fp"))
+  reps <- select_generations(get("replications"))
   task_keys <- c("scenario_key", "replication", "method", "method_fp")
   att_all <- dedup_table(get("attempts"), c(task_keys, "attempt", "round"),
                          c("status", "failed_stage", "message", "n_warnings", "warnings"),
@@ -93,27 +118,12 @@ read_raw_results <- function(path, repair = FALSE) {
                                   c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning",
                                     "fallback"),
                                   "estimate"), task_keys)
-  dtr <- latest_round(dedup_table(get("dataset_truth"),
-                                  c("scenario_key", "replication", "estimand", "round"),
-                                  "truth", "data set truth"),
-                      c("scenario_key", "replication", "estimand"))
+  dtr <- select_dataset_truth(get("dataset_truth"), reps)
   dgn <- latest_round(dedup_table(get("diagnostics"), c(task_keys, "name", "round"), "value",
                                   "fit diagnostic"), task_keys)
   rcd <- latest_round(dedup_table(get("records"), c("scenario_key", "replication", "name", "round"),
                                   "value", "data set record"),
                       c("scenario_key", "replication", "name"))
-  # Rows that belong to a data set (truths, records) or to a fit
-  # (diagnostics) are kept only from the round of the selected generation or
-  # fit, so a retry that produced none does not leave the earlier ones in
-  # place next to the new result.
-  same_round <- function(df, ref, keys) {
-    if (is.null(df) || !nrow(df) || is.null(ref) || !nrow(ref)) return(df)
-    id_d <- do.call(paste, c(lapply(df[keys], col_text), sep = "\r"))
-    id_r <- do.call(paste, c(lapply(ref[keys], col_text), sep = "\r"))
-    rr <- tapply(ref$round, id_r, max)
-    df[!is.na(rr[id_d]) & df$round == rr[id_d], , drop = FALSE]
-  }
-  dtr <- same_round(dtr, reps, c("scenario_key", "replication"))
   rcd <- same_round(rcd, reps, c("scenario_key", "replication"))
   dgn <- same_round(dgn, est, task_keys)
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,

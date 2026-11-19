@@ -89,7 +89,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Retention: artifacts indexed by method version; capability report from what was actually retained | verified | test-replay-invalidation.R |
 | Regeneration from an export bundle with the recorded stream registry | verified | test-bundle.R |
 | Sharded runs for scheduler array jobs (`sim_run_shard()`, `sim_collect_shards()`) | verified on one machine | test-shard.R (separate R processes and batchtools jobs give results identical to one run); not run on a real scheduler |
-| Batch by batch summaries for runs larger than memory (`sim_summarise_stream()`) | verified | test-stream.R (agrees with `sim_summarise()`); memory still grows with the number of tasks |
+| Batch by batch summaries for runs larger than memory (`sim_summarise_stream()`) | verified | test-stream.R (values, MCSEs, statuses and cells agree with `sim_summarise()` for bias, MSE, EmpSE, mean SE and coverage, including data set truths, boundaries and conflicting duplicates); memory still grows with the number of tasks |
 | A substream for resampling inside a method (`context$inner_seeds`) | verified | test-rng.R |
 | Warning for code that resets the seed and for packages loaded from source or traced | verified | test-methods-extra.R, test-rng.R |
 | Reproduction and seed sensitivity checks between two runs (`sim_verify()`) | verified | test-verify.R |
