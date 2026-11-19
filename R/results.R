@@ -154,8 +154,10 @@ sim_results <- function(run) {
   raw <- read_raw_results(run$path)
   keys <- study$scenarios$keys
   R <- man$replications
-  fps <- vapply(study$methods, method_fingerprint, character(1))
-  gen_fp <- generator_fingerprint(study$generator)
+  # Results are selected by the fingerprints stored when they were run, never
+  # by fingerprints recomputed in the current session.
+  fps <- unlist(man$fingerprints$methods)
+  gen_fp <- man$fingerprints$generator
   keep_rep <- function(df) {
     if (is.null(df)) return(df)
     df[df$scenario_key %in% keys & df$replication <= R, , drop = FALSE]

@@ -127,3 +127,21 @@ test_that("a changed formula in a method factory requires an update", {
   expect_error(sim_run(mkst(y ~ x + z), 3, seed = 1, path = p, progress = FALSE),
                "changed")
 })
+
+test_that("results are read by stored fingerprints, not by the current session", {
+  assign("adempr_test_helper", function(x) mean(x), envir = globalenv())
+  on.exit(if (exists("adempr_test_helper", envir = globalenv()))
+    rm("adempr_test_helper", envir = globalenv()), add = TRUE)
+  st <- sim_study("g", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(glob = function(data) sim_estimate("mean", adempr_test_helper(data))),
+    measures = "bias")
+  p <- tempfile("adempR-glob-")
+  sim_run(st, 4, seed = 1, path = p, progress = FALSE)
+  rm("adempr_test_helper", envir = globalenv())
+  res <- sim_results(sim_open(p))
+  expect_equal(nrow(res$estimates), 4L)
+  expect_equal(nrow(res$replications), 4L)
+  expect_silent(sim_resume(p, progress = FALSE))
+})

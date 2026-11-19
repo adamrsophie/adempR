@@ -65,7 +65,7 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
   out <- execute_task_seeded(study, list(scenario_key = key, replication = replication,
                                          seeds = seeds, methods = methods))
   raw <- read_raw_results(run$path)
-  fps <- vapply(study$methods, method_fingerprint, character(1))
+  fps <- unlist(man$fingerprints$methods)
   committed <- raw$estimates
   if (!is.null(committed)) {
     committed <- committed[committed$scenario_key == key &

@@ -168,7 +168,7 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
                visible_scenario_fields = paste(m$scenario_fields, collapse = ", "),
                oracle = m$oracle, version = m$version %||% "",
                timeout = m$timeout %||% NA_real_, coupling = m$coupling %||% "",
-               fingerprint = short_hash(method_fingerprint(m)),
+               fingerprint = short_hash(res$manifest$fingerprints$methods[[mn]] %||% ""),
                description = m$description %||% "", stringsAsFactors = FALSE)
   }))
   add(html_table(md))
