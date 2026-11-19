@@ -123,7 +123,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Bias decomposition against a secondary reference value | verified | test-decompose.R |
 | Algebraic identity checks between estimands on truths and estimates | verified | test-decompose.R |
 | Descriptive meta-model of factor influence (`sim_factor_influence()`) | implemented | test-metamodel.R (attribution to the driving factor, shares sum to one); descriptive only |
-| Simulation-based calibration of Bayesian methods (`sim_method_sbc()`, `sim_sbc()`) | verified | test-sbc.R (exact posterior accepted, overconfident posterior rejected) |
+| Simulation-based calibration of Bayesian methods (`sim_method_sbc()`, `sim_sbc()`) | verified | test-sbc.R (exact posterior accepted, overconfident posterior rejected, point mass ties and exact discrete bin probabilities) |
 | Acceptability against a range, with the Monte Carlo interval (`sim_acceptable()`) | verified | test-flow.R |
 | Mergeable accumulators | verified | test-measures.R |
 

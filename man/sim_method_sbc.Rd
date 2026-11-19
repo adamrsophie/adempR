@@ -5,7 +5,7 @@
 \alias{sim_sbc}
 \title{Simulation-based calibration of a Bayesian method}
 \usage{
-sim_method_sbc(fun, estimand, level = 0.95, n_quantiles = 99L, ...)
+sim_method_sbc(fun, estimand, level = 0.95, n_draws = 100L, ...)
 
 sim_sbc(run, method, estimand = NULL, bins = 20L)
 }
@@ -17,8 +17,9 @@ returning a numeric vector of posterior draws.}
 
 \item{level}{Level of the reported central interval.}
 
-\item{n_quantiles}{Number of stored posterior quantiles; the resolution
-of the rank.}
+\item{n_draws}{Number of stored posterior draws (equally spaced over the
+returned draws); the rank takes \code{n_draws + 1} values. The method must
+return at least this many draws.}
 
 \item{...}{Passed to \code{\link[=sim_method]{sim_method()}}.}
 
@@ -26,12 +27,13 @@ of the rank.}
 
 \item{method}{Method wrapped with \code{sim_method_sbc()}.}
 
-\item{bins}{Number of rank bins.}
+\item{bins}{Number of rank bins; at most \code{n_draws + 1}.}
 }
 \value{
 \code{sim_method_sbc()}: a method. \code{sim_sbc()}: an object of class
-\code{adempr_sbc} with \code{ranks} (one per fit), \code{bins} (counts per scenario)
-and \code{tests} (chi-squared statistic and p value per scenario).
+\code{adempr_sbc} with \code{ranks} (one per fit), \code{bins} (counts and exact
+expected counts per scenario) and \code{tests} (chi-squared statistic, p
+value and number of excluded fits per scenario).
 }
 \description{
 Simulation-based calibration (Talts et al. 2018) checks a Bayesian
@@ -42,9 +44,18 @@ draws the parameter and returns it as a data set specific truth
 (\code{sim_data(truth = )} with \code{\link[=sim_truth_dataset]{sim_truth_dataset()}}); the method is wrapped
 with \code{sim_method_sbc()}, which turns a function returning posterior draws
 into estimates (posterior mean, SD and central interval) and stores
-\code{n_quantiles} posterior quantiles per fit as diagnostics. \code{sim_sbc()}
-computes the normalized rank of each truth among those quantiles, bins
-them, and tests uniformity (chi-squared over bins) per scenario.
+\code{n_draws} equally spaced posterior draws per fit as diagnostics.
+\code{sim_sbc()} ranks each truth among those draws (the number of draws
+below it, 0 to \code{n_draws}), breaking ties at random with a draw fixed by
+the scenario, replication and method, so a point mass posterior still
+gives uniform ranks. Under a correct posterior and a generator that
+draws the parameter from the prior, the rank is uniform on its
+\code{n_draws + 1} values when the stored draws are independent; thin
+correlated (MCMC) draws before returning them. The ranks are binned and
+uniformity is tested per scenario with a chi-squared test whose expected
+counts are the exact probabilities of the discrete rank in each bin.
+Fits without stored draws (failed fits) or without a truth are counted
+as excluded.
 }
 \examples{
 # conjugate normal model: exact posterior draws are calibrated
@@ -64,5 +75,8 @@ sim_sbc(run, "exact")
 \references{
 Talts S, Betancourt M, Simpson D, Vehtari A, Gelman A
 (2018). Validating Bayesian inference algorithms with simulation-based
-calibration. arXiv:1804.06788.
+calibration. arXiv:1804.06788. Modrak M, Moon AH, Kim S, Burkner P,
+Huurre N, Faltejskova K, Gelman A, Vehtari A (2023). Simulation-based
+calibration checking for Bayesian computation: the choice of test
+quantities shapes sensitivity. Bayesian Analysis.
 }
