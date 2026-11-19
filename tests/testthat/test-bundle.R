@@ -32,6 +32,15 @@ test_that("a clean process can reanalyse a bundle with only adempR", {
     as.data.frame(adempR::sim_summarise(res))$value
   }, list(dir))
   expect_equal(out, as.data.frame(sim_summarise(run))$value)
+  # the regeneration script also runs in a clean process
+  regen <- callr::r(function(dir) {
+    setwd(dir)
+    source("regenerate.R", local = TRUE)
+    e <- adempR::sim_results(run)$estimates
+    e[order(e$scenario_key, e$replication, e$method), "estimate"]
+  }, list(dir))
+  e <- sim_results(run)$estimates
+  expect_equal(regen, e[order(e$scenario_key, e$replication, e$method), "estimate"])
 })
 
 test_that("the report is self-contained and escapes text", {
@@ -133,7 +142,7 @@ test_that("regeneration with the recorded registry reproduces an extended run", 
   dir <- tempfile()
   sim_export(run, dir, report = FALSE)
   expect_match(paste(readLines(file.path(dir, "README.md")), collapse = "\n"),
-               "rng_registry = res$manifest$rng_registry", fixed = TRUE)
+               "rng_registry = m$rng_registry", fixed = TRUE)
   expect_false(dir.exists(file.path(dir, "artifacts")))
 })
 
@@ -215,4 +224,30 @@ test_that("include_data copies only the artifacts of the current replications", 
   expect_setequal(copied, used)
   expect_true(length(on_disk) >= length(used))
   expect_s3_class(sim_import(dir), "adempr_results")
+})
+
+test_that("the bundle's regeneration script reproduces per scenario counts, and the record shows them", {
+  st <- normal_study(n = 10L, mu = c(0, 1))
+  path <- run_path()
+  k2 <- st$scenarios$keys[2]
+  run <- sim_run(st, replications = 3, seed = 4, path = path, label = "pilot",
+                 scenario_replications = stats::setNames(6L, k2))
+  dir <- tempfile("bundle-")
+  suppressMessages(sim_export(run, dir, report = TRUE))
+  j <- jsonlite::read_json(file.path(dir, "manifest.json"))
+  expect_identical(j$rng_domain, "pilot")
+  expect_equal(j$scenario_replications[[k2]], 6)
+  expect_equal(unname(unlist(j$analyzed_replications)), c(3, 6))
+  h <- paste(readLines(file.path(dir, "report.html")), collapse = "\n")
+  expect_match(h, "from 3 to 6 per scenario", fixed = TRUE)
+  expect_match(h, "Random number domain: pilot", fixed = TRUE)
+  expect_match(h, "With 3 replications (the smallest", fixed = TRUE)
+  # run the published recipe from the bundle directory
+  old <- setwd(dir)
+  on.exit(setwd(old), add = TRUE)
+  env <- new.env(parent = globalenv())
+  suppressMessages(sys.source("regenerate.R", envir = env))
+  setwd(old)
+  expect_equal(est_signature(env$run), est_signature(run))
+  expect_equal(table(sim_results(env$run)$replications$scenario_key)[[k2]], 6L)
 })

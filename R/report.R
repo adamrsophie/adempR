@@ -151,8 +151,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   add("<h1>Simulation study report: ", html_escape(study$name), "</h1>")
   add("<p class=\"note\">Generated ", now_utc(), " by adempR ",
       as.character(utils::packageVersion("adempR")), ". Run label: ", html_escape(man$label),
-      if (identical(man$rng_domain, "pilot")) " (pilot random number streams, independent of any production run with the same seed)" else
-        " (pilot runs use separate random number streams, so no pilot data are part of these results)",
+      if (!is.null(man$rng_domain)) sprintf(" (%s random number streams, independent of any production run with the same seed)", html_escape(man$rng_domain)) else
+        " (pilot and calibration runs use separate random number streams, so none of their data are part of these results)",
       ". Study fingerprint: <code>", html_escape(man$study_fingerprint), "</code>.</p>")
   frozen <- study$status$frozen
   add("<p>", if (is.null(frozen)) "The protocol was not frozen before this run." else
@@ -291,15 +291,33 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
       }),
       ". Data sets are never redrawn after a method fails.",
       " Performance is reported conditional on each measure's eligibility rule, next to the probability of a usable result.</p>")
-  add("<h2>6. Execution</h2><p>Replications planned per scenario: ", html_escape(man$replications),
-      ". Base seed: ", html_escape(man$seed), ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
+  # the counts actually analyzed, per scenario: raised by adaptive
+  # allocation, cut at the stopping look of a sequential design
+  Rs <- planned_replications(man, study$scenarios$keys)
+  r_text <- if (length(unique(Rs)) <= 1L) sprintf("%s per scenario", Rs[1]) else
+    sprintf("from %d to %d per scenario (base count %s; see the table below)", min(Rs), max(Rs),
+            man$replications)
+  add("<h2>6. Execution</h2><p>Replications analyzed: ", html_escape(r_text),
+      ". Base seed: ", html_escape(man$seed), ". Random number domain: ",
+      html_escape(man$rng_domain %||% "production"),
+      ". Random numbers: L'Ecuyer-CMRG streams (normal kind Inversion, sample kind Rejection) from an append-only registry of ",
       nrow(man$rng_registry), " streams keyed by stage, scenario and component; replication r uses substream r.</p>",
       # the replication justification is always stated, given or not
-      "<p>Number of replications: ", html_escape(man$replications), " per scenario. ",
-      if (is.null(study$protocol$replication_rationale)) "No justification was given in the protocol. " else
-        paste0("Justification: ", html_escape(paste(unlist(study$protocol$replication_rationale), collapse = "; ")), ". "),
-      sprintf("With this number the Monte Carlo standard error of a proportion is at most %.4f (at 0.5), and of coverage near 0.95 about %.4f.",
-              0.5 / sqrt(man$replications), sqrt(0.95 * 0.05 / man$replications)), "</p>")
+      "<p>",
+      if (is.null(study$protocol$replication_rationale)) "No justification of the number of replications was given in the protocol. " else
+        paste0("Justification of the number of replications: ", html_escape(paste(unlist(study$protocol$replication_rationale), collapse = "; ")), ". "),
+      sprintf("With %s replications (the smallest count analyzed in any scenario) the Monte Carlo standard error of a proportion is at most %.4f (at 0.5), and of coverage near 0.95 about %.4f.",
+              min(Rs), 0.5 / sqrt(min(Rs)), sqrt(0.95 * 0.05 / min(Rs))), "</p>")
+  if (length(unique(Rs)) > 1L) {
+    add(html_table(data.frame(scenario_id = study$scenarios$labels[match(names(Rs), study$scenarios$keys)],
+                              replications = unname(Rs), stringsAsFactors = FALSE)))
+  }
+  if (!is.null(man$adaptive)) {
+    add("<h3>Adaptive allocation</h3><p>Replications were allocated in rounds to bring the Monte Carlo standard error of ",
+        html_escape(man$adaptive$measure), " to ", html_escape(man$adaptive$target),
+        " in every scenario, from its estimated variability only. Every round:</p>",
+        html_table(man$adaptive$allocation))
+  }
   sq <- man$sequential
   if (is.null(sq$looks)) sq <- NULL
   if (!is.null(sq)) {
@@ -615,7 +633,11 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   saveRDS(exported, file.path(dir, "results.rds"))
   jsonlite::write_json(list(
     schema_version = SCHEMA_VERSION, study = study$name, aims = study$aims,
-    label = man$label, seed = man$seed, replications = man$replications,
+    label = man$label, rng_domain = man$rng_domain %||% "production", seed = man$seed,
+    replications = man$replications,
+    scenario_replications = as.list(man$scenario_replications),
+    analyzed_replications = as.list(planned_replications(man, study$scenarios$keys)),
+    adaptive = man$adaptive, derived_from = man$derived_from,
     study_fingerprint = man$study_fingerprint, fingerprints = man$fingerprints,
     revisions = man$revisions, amendments = study$amendments,
     frozen = study$status$frozen, protocol = unclass(study$protocol),
@@ -633,24 +655,29 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     "- `code/`: source of the generator, methods and truth functions.",
     "- `manifest.json`: seed, fingerprints, protocol, revisions, amendments, environment.",
     "- `report.html`: self-contained report (if exported).",
+    "- `reanalyse.R`, `regenerate.R`: scripts that reanalyze the results and rerun the study.",
     "- `CHECKSUMS.md5`: md5 checksums of every file.", "",
     "## Reanalysis", "",
     "```r", "library(adempR)", "res <- sim_import(\".\")   # verifies the checksums",
     "sim_summarise(res)", "```", "",
     "## Regeneration", "",
-    "The study can be rerun from `res$manifest$study` with the recorded seed, label",
-    "(a pilot label selects the pilot streams) and stream registry, so that every",
-    "scenario, method and truth draws from the stream it used originally:", "",
-    "```r",
-    paste0("run <- sim_run(res$manifest$study, replications = ", man$replications,
-           ", seed = ", man$seed, ", path = \"rerun\", label = \"", man$label %||% "draft",
-           "\", rng_registry = res$manifest$rng_registry)"),
-    "```", "",
+    "`regenerate.R` reruns the study from `res$manifest$study` with the recorded seed,",
+    "label (which fixes the random number domain, here ", paste0("`", man$rng_domain %||% "production", "`),"),
+    "stream registry and per scenario replication counts, so that every scenario,",
+    "method and truth draws from the stream it used originally:", "",
+    "```r", regen_code(), "```", "",
+    if (!is.null(man$sequential$analyzed))
+      c("The run used a sequential design; its analysis uses the replications up to the",
+        "stopping look recorded in `res$manifest$sequential`.", ""),
+    if (!is.null(man$adaptive))
+      c("The per scenario counts are the final counts of the adaptive allocation",
+        "recorded in `res$manifest$adaptive`.", ""),
     "Exact regeneration requires the same R version, package versions and numerical",
     "libraries (see `manifest.json`). A package lockfile does not recreate missing",
     "system libraries."), file.path(dir, "README.md"))
   writeLines(c("library(adempR)", "res <- sim_import(\".\")", "print(sim_summarise(res))"),
              file.path(dir, "reanalyse.R"))
+  writeLines(regen_code(), file.path(dir, "regenerate.R"))
   files <- list.files(dir, recursive = TRUE, all.files = TRUE)
   files <- setdiff(files, "CHECKSUMS.md5")
   sums <- tools::md5sum(file.path(dir, files))
@@ -669,6 +696,17 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   }
   if (!is.null(old)) unlink(old, recursive = TRUE)
   invisible(final)
+}
+
+# The regeneration recipe written into a bundle. It reads every setting
+# from the imported manifest, so the recipe cannot drift from the record.
+regen_code <- function() {
+  c("library(adempR)",
+    "res <- sim_import(\".\")",
+    "m <- res$manifest",
+    "run <- sim_run(m$study, replications = m$replications, seed = m$seed,",
+    "               path = \"rerun\", label = m$label, rng_registry = m$rng_registry,",
+    "               scenario_replications = m$scenario_replications)")
 }
 
 # A directory holds an adempR bundle when its checksum list names the
