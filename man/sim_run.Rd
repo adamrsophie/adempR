@@ -84,10 +84,14 @@ scenarios above \code{replications}, named by scenario label or key (see
 \code{\link[=sim_run_adaptive]{sim_run_adaptive()}}). Counts only increase; they are stored in the
 manifest and used by every summary.}
 
-\item{gpus}{Optional GPU device identifiers. Batches are assigned
-devices in turn; methods declared with \code{sim_method(gpu = TRUE)} see
-their batch's device (see \code{\link[=sim_method]{sim_method()}}). With the future backend,
-use as many workers as devices.}
+\item{gpus}{Optional GPU device identifiers. Methods declared with
+\code{sim_method(gpu = TRUE)} see their batch's device (see \code{\link[=sim_method]{sim_method()}}),
+and the device is recorded in the \code{gpu} column of their attempts.
+Sequential batches take the devices in turn. With the future backend,
+batches run in waves of one batch per worker, the k-th batch of a wave
+on the k-th device, so batches running at the same time use different
+devices when there are at least as many devices as workers (a warning
+says otherwise).}
 
 \item{...}{Further arguments passed to \code{sim_run()}.}
 }

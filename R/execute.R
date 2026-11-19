@@ -120,6 +120,11 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   if (isTRUE(study$retention$data)) artifacts$data <- data
   if (isTRUE(study$retention$fits)) artifacts$fits <- list()
 
+  old_cuda <- Sys.getenv("CUDA_VISIBLE_DEVICES", unset = NA)
+  restore_cuda <- function() {
+    if (is.na(old_cuda)) Sys.unsetenv("CUDA_VISIBLE_DEVICES") else Sys.setenv(CUDA_VISIBLE_DEVICES = old_cuda)
+  }
+  on.exit(restore_cuda(), add = TRUE)
   for (mn in task$methods) {
     m <- study$methods[[mn]]
     comp <- method_component(m, mn)
@@ -132,16 +137,11 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
       mctx$meta <- meta
     }
     # a method that declared gpu = TRUE sees only its assigned device while
-    # it runs; the variable is restored afterwards
-    if (isTRUE(m$gpu) && !is.null(task$gpu)) {
-      mctx$gpu <- task$gpu
-      old_cuda <- Sys.getenv("CUDA_VISIBLE_DEVICES", unset = NA)
-      Sys.setenv(CUDA_VISIBLE_DEVICES = task$gpu)
-      restore_cuda <- function() {
-        if (is.na(old_cuda)) Sys.unsetenv("CUDA_VISIBLE_DEVICES") else Sys.setenv(CUDA_VISIBLE_DEVICES = old_cuda)
-      }
-    } else {
-      restore_cuda <- function() invisible()
+    # it runs; the variable is restored afterwards, and on any exit
+    gpu_dev <- if (isTRUE(m$gpu) && !is.null(task$gpu)) as.character(task$gpu) else NA_character_
+    if (!is.na(gpu_dev)) {
+      mctx$gpu <- gpu_dev
+      Sys.setenv(CUDA_VISIBLE_DEVICES = gpu_dev)
     }
     retries <- study$failure$retries
     for (attempt in seq_len(retries + 1L)) {
@@ -194,7 +194,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         timeout = m$timeout %||% NA_real_,
         # the limit is cooperative: compiled code can run past it unnoticed
         overrun = !is.null(m$timeout) && status != "timeout" && fit$elapsed > m$timeout,
-        final = FALSE, fallback = FALSE, stringsAsFactors = FALSE)
+        final = FALSE, fallback = FALSE, gpu = gpu_dev, stringsAsFactors = FALSE)
       if (status == "ok" || attempt > retries || status == "timeout") break
     }
     attempts[[length(attempts)]]$final <- TRUE
@@ -218,7 +218,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
         n_warnings = length(fb$warnings), warnings = collapse_warnings(fb$warnings),
         elapsed = fb$elapsed, cpu = fb$cpu, timeout = m$timeout %||% NA_real_,
         overrun = !is.null(m$timeout) && fb_status != "timeout" && fb$elapsed > m$timeout,
-        final = FALSE, fallback = TRUE, stringsAsFactors = FALSE)
+        final = FALSE, fallback = TRUE, gpu = gpu_dev, stringsAsFactors = FALSE)
       if (is.null(fb$error)) {
         rows <- fb$value
         used_fallback <- TRUE

@@ -266,10 +266,14 @@ check_frozen <- function(study) {
 #'   scenarios above `replications`, named by scenario label or key (see
 #'   [sim_run_adaptive()]). Counts only increase; they are stored in the
 #'   manifest and used by every summary.
-#' @param gpus Optional GPU device identifiers. Batches are assigned
-#'   devices in turn; methods declared with `sim_method(gpu = TRUE)` see
-#'   their batch's device (see [sim_method()]). With the future backend,
-#'   use as many workers as devices.
+#' @param gpus Optional GPU device identifiers. Methods declared with
+#'   `sim_method(gpu = TRUE)` see their batch's device (see [sim_method()]),
+#'   and the device is recorded in the `gpu` column of their attempts.
+#'   Sequential batches take the devices in turn. With the future backend,
+#'   batches run in waves of one batch per worker, the k-th batch of a wave
+#'   on the k-th device, so batches running at the same time use different
+#'   devices when there are at least as many devices as workers (a warning
+#'   says otherwise).
 #' @param cost Optional function of the scenario returning the relative cost
 #'   of one task (for example `function(scenario) scenario$n^2`, or times
 #'   per scenario from [sim_pilot()]). Tasks are then scheduled longest
@@ -432,18 +436,11 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
     tasks <- build_tasks(study, ctx, todo, attr(done, "data_md5"))
     if (!is.null(cost)) tasks <- lpt_order(study, tasks, cost)
     chunks <- split(tasks, ceiling(seq_along(tasks) / chunk_size))
-    if (!is.null(gpus)) {
-      # one device per batch, in turn, so concurrent batches use different devices
-      for (i in seq_along(chunks)) {
-        dev <- as.character(gpus[(i - 1L) %% length(gpus) + 1L])
-        chunks[[i]] <- lapply(chunks[[i]], function(t) { t$gpu <- dev; t })
-      }
-    }
     if (progress) {
       message(sprintf("Running %d task(s) in %d batch(es) with the %s backend.",
                       length(tasks), length(chunks), backend))
     }
-    run_chunks(study, chunks, p, backend, workers, progress)
+    run_chunks(study, chunks, p, backend, workers, progress, gpus)
   }
   man$status <- "complete"
   man$completed <- now_utc()
@@ -770,9 +767,23 @@ chunk_worker <- local(function(chunk, study, packages) {
   run_chunk(study, chunk)
 }, envir = new.env(parent = asNamespace("adempR")))
 
-run_chunks <- function(study, chunks, p, backend, workers, progress) {
+# Devices are assigned where batches are dispatched. Sequential batches
+# take the devices in turn. With the future backend and devices, each wave
+# holds one batch per worker, dispatched as one future each, and the k-th
+# batch of a wave gets the k-th device, so batches that run at the same time
+# never share a device.
+# ponytail: a wave waits for its slowest batch; pin devices per persistent
+# worker if that idle time matters.
+with_device <- function(chunk, dev) {
+  if (is.null(dev)) return(chunk)
+  lapply(chunk, function(t) { t$gpu <- as.character(dev); t })
+}
+
+run_chunks <- function(study, chunks, p, backend, workers, progress, gpus = NULL) {
+  dev_of <- function(k) if (is.null(gpus)) NULL else gpus[(k - 1L) %% length(gpus) + 1L]
   if (backend == "sequential") {
     for (i in seq_along(chunks)) {
+      chunks[[i]] <- with_device(chunks[[i]], dev_of(i))
       commit_chunk(study, run_chunk(study, chunks[[i]]), p)
       if (progress) message(sprintf("  batch %d/%d committed", i, length(chunks)))
     }
@@ -789,7 +800,12 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
     on.exit(future::plan(oplan), add = TRUE)
   }
   nw <- future::nbrOfWorkers()
-  wave <- max(1L, as.integer(if (is.finite(nw)) nw else 1L)) * 2L
+  nw <- max(1L, as.integer(if (is.finite(nw)) nw else 1L))
+  wave <- if (is.null(gpus)) nw * 2L else nw
+  if (!is.null(gpus) && nw > length(gpus)) {
+    warning(sprintf("%d workers share %d GPU device(s); some batches that run at the same time use the same device.",
+                    nw, length(gpus)), call. = FALSE)
+  }
   pkgs <- study_packages(study)
   missing <- unshipped_globals(study)
   if (length(missing)) {
@@ -800,9 +816,11 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
   starts <- seq(1L, length(chunks), by = wave)
   for (s in starts) {
     idx <- s:min(s + wave - 1L, length(chunks))
-    res <- future.apply::future_lapply(chunks[idx], chunk_worker, study = shipped,
+    batch <- lapply(seq_along(idx), function(k) with_device(chunks[[idx[k]]], dev_of(k)))
+    res <- future.apply::future_lapply(batch, chunk_worker, study = shipped,
                                        packages = pkgs, future.seed = FALSE,
-                                       future.packages = "adempR", future.globals = FALSE)
+                                       future.packages = "adempR", future.globals = FALSE,
+                                       future.chunk.size = if (is.null(gpus)) NULL else 1L)
     for (r in res) commit_chunk(study, r, p)
     if (progress) message(sprintf("  batches %d to %d of %d committed", min(idx), max(idx),
                                   length(chunks)))

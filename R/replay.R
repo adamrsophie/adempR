@@ -37,6 +37,8 @@ resolve_scenario <- function(study, scenario) {
 #' @param scenario Scenario key, label or index.
 #' @param replication Replication number.
 #' @param methods Methods to rerun; defaults to all methods.
+#' @param gpu Device for methods declared with `gpu = TRUE`; defaults to the
+#'   device recorded for this replication, if any.
 #' @return A list with `scenario` (the full scenario), `data` (the analysis
 #'   data, `NULL` when generation failed), `meta` (protected metadata),
 #'   `generation` (recorded and replayed generation status and message),
@@ -59,7 +61,7 @@ resolve_scenario <- function(study, scenario) {
 #' rp <- sim_replay(run, scenario = 1, replication = 3)
 #' rp$matches
 #' @export
-sim_replay <- function(run, scenario, replication, methods = NULL) {
+sim_replay <- function(run, scenario, replication, methods = NULL, gpu = NULL) {
   stopifnot(inherits(run, "adempr_run"))
   man <- run$manifest
   study <- man$study
@@ -73,13 +75,20 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
   seeds <- task_seeds(ctx, key, replication, study, methods)[[1]]
   idx <- scenario_index(study$scenarios, key)
   scenario_full <- study$scenarios$values[[idx]]
+  raw <- read_raw_results(run$path)
+  # the device recorded for this replication is used unless another is given
+  if (is.null(gpu) && !is.null(raw$attempts$gpu)) {
+    a <- raw$attempts
+    d <- a$gpu[a$scenario_key == key & a$replication == replication & !is.na(a$gpu)]
+    if (length(d)) gpu <- d[1]
+  }
   # generation runs once, through the same captured path as the run
   out <- execute_task_seeded(study,
-    list(scenario_key = key, replication = replication, seeds = seeds, methods = methods),
+    list(scenario_key = key, replication = replication, seeds = seeds, methods = methods,
+         gpu = gpu),
     keep_data = TRUE)
   data <- out$data
   meta <- out$meta
-  raw <- read_raw_results(run$path)
   gen_fp <- man$fingerprints$generator
   recorded <- raw$replications
   if (!is.null(recorded)) {

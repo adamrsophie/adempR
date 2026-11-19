@@ -4,7 +4,7 @@
 \alias{sim_replay}
 \title{Replay one replication}
 \usage{
-sim_replay(run, scenario, replication, methods = NULL)
+sim_replay(run, scenario, replication, methods = NULL, gpu = NULL)
 }
 \arguments{
 \item{run}{A run from \code{\link[=sim_run]{sim_run()}} or \code{\link[=sim_open]{sim_open()}}.}
@@ -14,6 +14,9 @@ sim_replay(run, scenario, replication, methods = NULL)
 \item{replication}{Replication number.}
 
 \item{methods}{Methods to rerun; defaults to all methods.}
+
+\item{gpu}{Device for methods declared with \code{gpu = TRUE}; defaults to the
+device recorded for this replication, if any.}
 }
 \value{
 A list with \code{scenario} (the full scenario), \code{data} (the analysis
