@@ -17,10 +17,11 @@ sim_confidence_sequence(
 
 \item{measure}{\code{"coverage"}, \code{"rejection"}, \code{"bias"} or \code{"mse"}.}
 
-\item{alpha}{Error probability over the whole sequence.}
+\item{alpha}{Error probability over the whole sequence of one cell.}
 
-\item{t_opt}{Replication count at which the sequence is tightest;
-defaults to the number of replications of the run.}
+\item{t_opt}{Replication count at which the sequence is tightest. At
+the first call for a measure it defaults to the number of
+replications of the run; later calls reuse the recorded value.}
 
 \item{path}{Return the sequence at every replication count instead of
 only the last.}
@@ -47,6 +48,20 @@ For unbounded measures (\code{"bias"}, \code{"mse"}) the asymptotic confidence
 sequence of Waudby-Smith et al. (2024) is used, with the running
 standard deviation in place of the unknown one. The mixing parameter
 \code{rho} is tuned to be tightest at \code{t_opt} replications.
+
+The guarantee holds per cell (scenario, method and estimand), with the
+replication as the independent unit, and only for tuning fixed before
+the first look. The tuning (\code{t_opt} and \code{alpha}) is therefore recorded
+in the run at the first call for a measure and reused by later calls,
+also after the run is extended; a call with different tuning is an
+error. The asymptotic sequence assumes a finite positive variance of the
+contributions (for \code{"mse"}, a finite fourth moment of the error) and
+becomes valid as the number of replications grows; cells whose running
+standard deviation is 0 get no interval (\code{NA}) because the asymptotic
+boundary is not defined there. Rejection uses the decision and the
+eligibility of \code{\link[=sim_summarise]{sim_summarise()}}: an explicit \code{reject} wins over the
+p-value, and tests from fits excluded by the failure policy do not
+count.
 }
 \references{
 Robbins H (1970). Statistical methods related to the law of
