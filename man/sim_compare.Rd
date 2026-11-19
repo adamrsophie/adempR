@@ -27,8 +27,12 @@ other method is compared with it.}
 \code{"relative_precision"}, \code{"empse_ratio"}, \code{"rmse_ratio"}.}
 
 \item{margin}{Optional scientifically meaningful tolerance; the output
-flags whether the confidence interval of the difference lies within
-\verb{(-margin, margin)}.}
+flags whether the confidence interval lies within \verb{(-margin, margin)}
+for differences and the percent change in precision, and within
+\verb{(1 / (1 + margin), 1 + margin)} for the ratios \code{empse_ratio} and
+\code{rmse_ratio}. No equivalence is claimed (\code{within_margin = NA}) when
+the status is not \code{ok}, for example when every paired difference is
+equal (status \code{boundary}).}
 
 \item{bootstrap}{Number of paired bootstrap resamples for nonlinear
 comparisons.}
@@ -59,9 +63,19 @@ on joint success is not the original data-generating distribution when
 failures are informative; read it together with the \code{usable}
 comparison, which uses all generated data sets.
 
+Only methods that target the estimand can be compared. \code{usable} uses the
+replications attempted by both methods, so work that has not run yet is
+not counted as failure. Infinite estimates excluded from a comparison
+are counted in the note.
+
 A common truth cancels from differences in bias, so its uncertainty does
-not enter; for other measures the truth does not cancel and a
-sensitivity range is not computed here (see \code{\link[=sim_summarise]{sim_summarise()}}).
+not enter. For MAE, MSE and coverage differences against a Monte Carlo
+truth it does not cancel: the interval is conditional on the truth, and
+\code{truth_sens_lower} and \code{truth_sens_upper} give the range of the
+difference while the shared truth moves by two of its standard errors
+for both methods together. Bootstrap comparisons report how many
+resamples were undefined and withhold the interval (status \code{unstable})
+when more than 1 percent were.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),

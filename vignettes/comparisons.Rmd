@@ -66,14 +66,17 @@ paired.
 
 Relative precision compares empirical variances:
 $100\,(\operatorname{Var}(\hat\theta_A) / \operatorname{Var}(\hat\theta_B) - 1)$,
-with the MCSE of Morris, White and Crowther (2019),
-$200\,\frac{\operatorname{Var}_A}{\operatorname{Var}_B}\sqrt{\frac{1-\rho^2}{n-1}}$,
-where $A$ is the reference method, $B$ the compared method, and $\rho$ the
-correlation between their estimates. Positive values mean the compared
-method is more precise than the reference. The
-interval comes from a paired bootstrap over replications, which resamples
-both methods together. `empse_ratio` and `rmse_ratio` use the same
-bootstrap.
+where $A$ is the reference method and $B$ the compared method. Positive
+values mean the compared method is more precise than the reference. The
+interval and the reported MCSE come from a paired bootstrap over
+replications, which resamples both methods together. The note also gives
+the analytic MCSE of Morris, White and Crowther (2019),
+$200\,\frac{\operatorname{Var}_A}{\operatorname{Var}_B}\sqrt{\frac{1-\rho^2}{n-1}}$
+with $\rho$ the correlation between the estimates, which assumes bivariate
+normal estimates and can be too small for heavy tailed data such as these.
+`empse_ratio` and `rmse_ratio` use the same bootstrap; when more than 1
+percent of resamples are undefined (a zero denominator) the interval is
+withheld with status `unstable`.
 
 With $t_3$ data the median is more precise than the mean; with $t_{30}$
 data the mean wins.
@@ -81,7 +84,12 @@ data the mean wins.
 ## Equivalence margins
 
 A difference can be statistically clear and scientifically irrelevant.
-Give a margin to flag comparisons whose whole interval lies inside it:
+Give a margin to flag comparisons whose whole interval lies inside it.
+For differences the margin is around 0; for the ratios `empse_ratio` and
+`rmse_ratio` it is relative, around 1. When every paired difference is
+equal (for coverage: no data set where one method covers and the other
+does not), the MCSE is 0 and says nothing about agreement; such rows get
+status `boundary` and no equivalence flag.
 
 ```{r}
 eq <- sim_compare(run, c("mean", "median"), measures = "coverage", margin = 0.02)
