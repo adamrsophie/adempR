@@ -133,9 +133,9 @@ benchmark scripts are planned for a later release.
   global option, or a file read at run time) must be declared in `depends`.
 * For the `future` backend, global objects used by study functions defined
   at top level are copied to the workers. A function created inside another
-  function carries its own enclosing environment; global objects it reaches
-  only through the search path are not copied and must be passed in or
-  declared.
+  function carries its own enclosing environment; if it uses global objects
+  that it reaches only by falling through to the global environment, the
+  `future` backend refuses to start and names them.
 * A lock held by a process on another host, or any stale lock on Windows,
   cannot be checked and must be released with `sim_unlock()`.
 * Export bundles contain R code; their checksums detect corruption, not

@@ -144,3 +144,18 @@ test_that("a missing declared package fails validation", {
   v <- sim_validate(st, error = FALSE)
   expect_true(any(v$check == "package:notAPackageXYZ" & v$status == "error"))
 })
+
+test_that("the future backend refuses closures that reach global objects", {
+  assign("adempr_test_helper2", eval(quote(function(y) mean(y)), globalenv()), envir = globalenv())
+  on.exit(rm("adempr_test_helper2", envir = globalenv()), add = TRUE)
+  make <- eval(quote(function() function(data) sim_estimate("mean", adempr_test_helper2(data$y))),
+               globalenv())
+  st <- normal_study(n = 10L, mu = 0, methods = list(m = make()))
+  expect_identical(adempR:::unshipped_globals(st), "adempr_test_helper2")
+  expect_length(adempR:::unshipped_globals(normal_study(n = 10L, mu = 0,
+                                                        methods = stochastic_methods())), 0L)
+  skip_if_not_installed("future")
+  skip_if_not_installed("future.apply")
+  expect_error(sim_run(st, replications = 2, seed = 1, path = run_path(), backend = "future"),
+               "adempr_test_helper2")
+})

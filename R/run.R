@@ -502,6 +502,46 @@ localize_globals <- function(study) {
   rebind(study)
 }
 
+# A function created inside another function keeps its own enclosing
+# environment, which travels to the workers. Global objects it reaches only
+# by falling through to the global environment do not travel, and copying
+# them would mean changing the user's environments. Such references are
+# found before the run and refused, instead of failing on every worker.
+unshipped_globals <- function(study) {
+  seen <- new.env(parent = emptyenv())
+  out <- character()
+  visit <- function(f) {
+    if (!is.function(f) || is.primitive(f)) return()
+    env <- environment(f)
+    if (is.null(env) || identical(env, globalenv()) || isNamespace(env)) return()
+    id <- paste(utils::capture.output(print(env)), collapse = "")
+    key <- paste(id, paste(deparse(f), collapse = ""))
+    if (exists(key, envir = seen, inherits = FALSE)) return()
+    assign(key, TRUE, envir = seen)
+    for (v in tryCatch(codetools::findGlobals(f), error = function(e) character())) {
+      e <- env
+      repeat {
+        if (identical(e, emptyenv()) || isNamespace(e) || identical(e, baseenv())) break
+        if (identical(e, globalenv())) {
+          if (exists(v, envir = e, inherits = FALSE)) out <<- c(out, v)
+          break
+        }
+        if (exists(v, envir = e, inherits = FALSE)) {
+          visit(get(v, envir = e, inherits = FALSE))
+          break
+        }
+        e <- parent.env(e)
+      }
+    }
+  }
+  walk <- function(x) {
+    if (is.function(x)) visit(x)
+    else if (is.list(x) && !is.data.frame(x)) for (el in x) walk(el)
+  }
+  walk(unclass(study))
+  unique(out)
+}
+
 # The worker function lives in a minimal environment so that a future
 # carries only its own chunk and the study, not the coordinator's frame.
 chunk_worker <- local(function(chunk, study, packages) {
@@ -531,6 +571,11 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
   nw <- future::nbrOfWorkers()
   wave <- max(1L, as.integer(if (is.finite(nw)) nw else 1L)) * 2L
   pkgs <- study_packages(study)
+  missing <- unshipped_globals(study)
+  if (length(missing)) {
+    stopf("Study functions created inside other functions use global object(s) %s, which the future backend cannot send to workers. Define those functions at top level, pass the objects into the function that creates them, or use the sequential backend.",
+          paste(missing, collapse = ", "))
+  }
   shipped <- localize_globals(study)
   starts <- seq(1L, length(chunks), by = wave)
   for (s in starts) {
