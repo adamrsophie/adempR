@@ -315,8 +315,10 @@ k_prop <- function(x, level = 0.95) {
     note <- sprintf("%s events observed: the plug-in MCSE is 0 but the uncertainty is not; use the exact interval",
                     if (k == 0) "no" else "only")
   }
-  kernel_result(value = p, mcse = sqrt(p * (1 - p) / n), lower = lo, upper = hi,
-                n = n, status = status, note = note)
+  r <- kernel_result(value = p, mcse = sqrt(p * (1 - p) / n), lower = lo, upper = hi,
+                     n = n, status = status, note = note)
+  r$proportion <- TRUE
+  r
 }
 
 # Bias eliminated coverage: the proportion of intervals that contain the

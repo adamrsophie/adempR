@@ -257,6 +257,10 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
   out <- list()
   keys <- study$scenarios$keys
   labels <- study$scenarios$labels
+  # measures whose contributions are events (built in proportions, and
+  # custom measures returning logical contributions)
+  prop_ids <- names(mlist)[vapply(mlist, function(m) is.character(m) &&
+                                    m %in% c(PROPORTION_MEASURES, "usable_coverage"), logical(1))]
   for (si in seq_along(keys)) {
     key <- keys[si]
     gen_ok <- if (is.null(reps)) integer() else
@@ -282,6 +286,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
           } else {
             measure_cell(m, rows, study, estimand)
           }
+          if (isTRUE(r$proportion)) prop_ids <- union(prop_ids, mid)
           # antithetic replications are dependent in pairs: the uncertainty
           # comes from the pairs, the independent units
           if (isTRUE(study$generator$antithetic) && nrow(rows)) {
@@ -317,7 +322,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
   }
   summ <- bind_rows(out)
   if (weighted && !is.null(study$scenarios$weights)) {
-    summ <- rbind(summ, weighted_rows(summ, study, by))
+    summ <- rbind(summ, weighted_rows(summ, study, by, prop_ids))
   }
   attr(summ, "failures") <- failure_table(res)
   attr(summ, "runtime") <- runtime_table(res)
@@ -334,12 +339,14 @@ sim_summarize <- sim_summarise
 PROPORTION_MEASURES <- c("coverage", "noncoverage_lower", "noncoverage_upper", "rejection",
                          "usable")
 
-weighted_rows <- function(summ, study, by = NULL) {
+weighted_rows <- function(summ, study, by = NULL, prop_ids = PROPORTION_MEASURES) {
   if (!is.null(by)) {
     sc <- as.data.frame(study$scenarios)
     miss <- setdiff(by, names(sc))
     if (length(miss)) stopf("Unknown scenario field(s) in `by`: %s.", paste(miss, collapse = ", "))
-    lev <- do.call(paste, c(lapply(sc[by], as.character), sep = ", "))
+    # groups are typed tuples of the factor values, so ("a, b", "c") and
+    # ("a", "b, c") stay apart
+    lev <- do.call(paste, c(lapply(sc[by], col_text), sep = "\r"))
     lab <- do.call(paste, c(Map(function(n, v) paste0(n, "=", v), by, lapply(sc[by], as.character)),
                             sep = ", "))
     out <- lapply(unique(lev), function(l) {
@@ -350,7 +357,7 @@ weighted_rows <- function(summ, study, by = NULL) {
       if (!sum(w)) return(NULL)
       st$scenarios$keys <- keys
       st$scenarios$weights <- w / sum(w)
-      r <- weighted_rows(sub, st)
+      r <- weighted_rows(sub, st, prop_ids = prop_ids)
       r$scenario_key <- paste0("weighted: ", lab[lev == l][1])
       r$scenario_id <- paste("prespecified weighted average over scenarios with", lab[lev == l][1])
       r
@@ -360,6 +367,11 @@ weighted_rows <- function(summ, study, by = NULL) {
   w <- stats::setNames(study$scenarios$weights, study$scenarios$keys)
   grp <- unique(summ[c("method", "estimand", "measure")])
   z <- stats::qnorm(1 - (1 - study$level) / 2)
+  # Scenarios that share random numbers (common = ) are dependent. Their
+  # covariances are not estimated here, so the MCSE is the bound for
+  # perfectly correlated scenarios, sum(w * MCSE), which holds for any
+  # correlation.
+  shared <- length(study$generator$common) > 0L
   rows <- lapply(seq_len(nrow(grp)), function(i) {
     s <- summ[summ$method == grp$method[i] & summ$estimand == grp$estimand[i] &
                 summ$measure == grp$measure[i], , drop = FALSE]
@@ -371,15 +383,18 @@ weighted_rows <- function(summ, study, by = NULL) {
     # its uncertainty status
     have <- !is.na(s$value) & is.finite(s$value)
     val <- if (all(have)) sum(ww * s$value) else NA_real_
-    mc <- if (all(have) && !anyNA(s$mcse)) sqrt(sum(ww^2 * s$mcse^2)) else NA_real_
+    mc <- if (all(have) && !anyNA(s$mcse)) {
+      if (shared) sum(ww * s$mcse) else sqrt(sum(ww^2 * s$mcse^2))
+    } else NA_real_
     lo <- val - z * mc
     hi <- val + z * mc
     status <- if (all(have)) "ok" else "unavailable"
-    note <- if (all(have)) "weighted average; scenarios treated as independent" else
-      "some weighted scenarios have no value"
+    note <- if (!all(have)) "some weighted scenarios have no value" else if (shared)
+      "weighted average; scenarios share random numbers, so the MCSE is the bound for perfectly correlated scenarios" else
+      "weighted average; scenarios treated as independent"
     boundary <- s$status %in% "boundary"
     if (all(have) && any(boundary)) {
-      if (grp$measure[i] %in% PROPORTION_MEASURES) {
+      if (grp$measure[i] %in% prop_ids) {
         # A plug-in MCSE of 0 is not certainty. Exact per scenario intervals
         # at level 1 - (1 - level) / S all hold with probability at least
         # `level`, so their weighted sum bounds the weighted proportion.
@@ -403,9 +418,20 @@ weighted_rows <- function(summ, study, by = NULL) {
     s1$mcse <- mc
     s1$lower <- lo
     s1$upper <- hi
-    s1[c("n_eligible", "n_generated", "n_attempted", "n_completed", "n_valid",
-         "n_generation_failed")] <- NA
+    # counts are totals over the weighted scenarios
+    for (cn in c("n_eligible", "n_planned", "n_generated", "n_attempted", "n_completed",
+                 "n_valid", "n_generation_failed")) {
+      s1[[cn]] <- sum(s[[cn]])
+    }
     s1$truth_se <- s1$mcse_total <- s1$truth_sens_lower <- s1$truth_sens_upper <- NA_real_
+    # a Monte Carlo truth adds its own uncertainty to the bias; scenarios
+    # may share one truth, so the truth terms are added as perfectly
+    # correlated
+    tse <- s$truth_se
+    if (identical(grp$measure[i], "bias") && is.finite(mc) && any(is.finite(tse) & tse > 0)) {
+      tse[!is.finite(tse)] <- 0
+      s1$mcse_total <- sqrt(mc^2 + sum(ww * tse)^2)
+    }
     s1$status <- status
     rngv <- range(s$value[have])
     s1$note <- if (any(have)) sprintf("%s; %d scenarios, values from %s to %s", note, nrow(s),

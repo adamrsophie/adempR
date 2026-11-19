@@ -262,3 +262,47 @@ test_that("weighted averages can be formed within levels of a factor and show th
   expect_true(all(grepl("2 scenarios, values from", w$note)))
   expect_error(sim_summarise(run, weighted = TRUE, by = "nope"), "Unknown")
 })
+
+test_that("weighted groups are typed tuples, dependent scenarios get a valid bound, counts are totals", {
+  # factor values whose concatenations collide stay separate groups
+  sc <- sim_scenarios(a = c("x, y", "x"), b = c("z", "y, z"), .weights = rep(1, 4))
+  st <- sim_study("grp", scenarios = sc,
+    generate = function(scenario, context) data.frame(y = rnorm(5) + nchar(scenario$a)),
+    estimands = list(sim_estimand("m", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = function(data) sim_estimate("m", mean(data$y))), measures = "bias")
+  run <- sim_run(st, replications = 4, seed = 1, path = run_path())
+  s <- as.data.frame(sim_summarise(run, weighted = TRUE, by = c("a", "b")))
+  # four distinct (a, b) tuples; ("x, y", "z") and ("x", "y, z") read the
+  # same when pasted together but are different groups
+  expect_equal(length(unique(s$scenario_key[startsWith(s$scenario_key, "weighted: ")])), 4L)
+  # common random numbers: two scenarios with identical errors
+  gen <- sim_generator(function(scenario, context) data.frame(y = scenario$mu + rnorm(20)),
+                       common = "n")
+  sc2 <- sim_scenarios(n = 20L, mu = c(0, 1), .weights = c(1, 1))
+  st2 <- sim_study("crn", scenarios = sc2,
+    generate = gen,
+    estimands = list(sim_estimand("m", sim_truth_exact(function(scenario) scenario$mu))),
+    methods = list(m = function(data) sim_estimate("m", mean(data$y))), measures = "bias")
+  s2 <- as.data.frame(sim_summarise(sim_run(st2, replications = 30, seed = 2, path = run_path()),
+                                    weighted = TRUE))
+  per <- s2$mcse[s2$scenario_key != "weighted" & s2$measure == "bias"]
+  expect_equal(per[1], per[2], tolerance = 1e-12)
+  wrow <- s2[s2$scenario_key == "weighted" & s2$measure == "bias", ]
+  # the weighted mean of two identical error vectors has the per scenario MCSE
+  expect_equal(wrow$mcse, per[1], tolerance = 1e-12)
+  expect_match(wrow$note, "share random numbers")
+  expect_equal(wrow$n_planned, 60L)
+  expect_equal(wrow$n_eligible, 60L)
+})
+
+test_that("weighted boundary intervals cover usable_coverage and custom logical proportions", {
+  hit <- sim_measure("hit", function(rows) rep(TRUE, nrow(rows)), requires = "estimate")
+  st <- normal_study(n = c(10L, 20L), mu = 0,
+                     measures = sim_measures("usable_coverage", hit))
+  st$scenarios$weights <- c(0.5, 0.5)
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 5, seed = 1, path = run_path()),
+                                   weighted = TRUE))
+  w <- s[s$scenario_key == "weighted" & s$measure == "hit", ]
+  expect_equal(w$status, "boundary")
+  expect_true(is.finite(w$lower) && w$lower < 1)
+})
