@@ -90,6 +90,11 @@ MEASURE_INFO <- data.frame(
 #' @export
 sim_measures <- function(...) {
   ms <- list(...)
+  # a plain list of custom measures (from the measure factories) is spliced
+  ms <- do.call(c, lapply(ms, function(m) {
+    if (is.list(m) && !inherits(m, "adempr_measure") && length(m) &&
+        all(vapply(m, inherits, logical(1), "adempr_measure"))) unname(m) else list(m)
+  }))
   if (!length(ms)) ms <- as.list(MEASURE_INFO$measure[MEASURE_INFO$default])
   out <- list()
   for (m in ms) {
@@ -388,4 +393,77 @@ k_custom <- function(measure, rows, level = 0.95) {
 null_true <- function(theta, h0, alt) {
   ifelse(alt == "two.sided", abs(theta - h0) <= 1e-12 * pmax(1, abs(h0)),
   ifelse(alt == "less", theta >= h0, theta <= h0))
+}
+
+#' Measures for categorical estimands
+#'
+#' For an estimand of type `"categorical"` (a class coded as a number, such
+#' as a selected model or an estimated number of components), returns
+#' custom measures: `correct`, the proportion of replications in which the
+#' estimate equals the truth, and `select_<class>`, the proportion in which
+#' each class is chosen (a multinomial distribution of selections, each
+#' with an exact interval). Pass them to [sim_measures()] with any other
+#' measures.
+#'
+#' @param classes Numeric codes of the classes.
+#' @param labels Labels used in the measure ids; default the codes.
+#' @return A list of [sim_measure()] objects.
+#' @examples
+#' sim_measures("usable", sim_measures_categorical(1:3))
+#' @export
+sim_measures_categorical <- function(classes, labels = classes) {
+  if (!is.numeric(classes) || !length(classes) || anyNA(classes) || anyDuplicated(classes)) {
+    stopf("`classes` must be distinct numbers.")
+  }
+  if (length(labels) != length(classes)) stopf("`labels` must have one entry per class.")
+  out <- list(sim_measure("correct", function(rows) rows$estimate == rows$truth,
+                          requires = c("estimate", "truth"), direction = "higher",
+                          description = "proportion of replications choosing the true class"))
+  for (i in seq_along(classes)) {
+    cl <- classes[i]
+    out[[i + 1L]] <- sim_measure(paste0("select_", labels[i]),
+      local({
+        cl <- cl
+        function(rows) rows$estimate == cl
+      }), requires = "estimate", description = sprintf("proportion choosing class %s", labels[i]))
+  }
+  out
+}
+
+#' Interval score
+#'
+#' The interval score of Gneiting and Raftery (2007) for a central interval
+#' at level `1 - alpha` rewards narrow intervals and penalizes misses in
+#' proportion to their distance: `(u - l) + 2 / alpha * (l - y) 1(y < l) +
+#' 2 / alpha * (y - u) 1(y > u)`, with `y` the truth and `alpha` taken from
+#' each row's interval level. Lower is better. It is a mean of independent
+#' contributions, so its MCSE is the usual one. With `scale`, each
+#' contribution is divided by a per row scale (for example `"truth"` for a
+#' relative score, or a number), so scenarios on different scales can be
+#' compared.
+#'
+#' @param id Measure id.
+#' @param scale `NULL`, a column name of the estimates (for example
+#'   `"truth"` or `"se"`), or a positive number.
+#' @return A [sim_measure()].
+#' @references Gneiting T, Raftery AE (2007). Strictly proper scoring rules,
+#'   prediction, and estimation. Journal of the American Statistical
+#'   Association 102(477):359-378.
+#' @examples
+#' sim_measures("coverage", sim_measure_interval_score())
+#' @export
+sim_measure_interval_score <- function(id = "interval_score", scale = NULL) {
+  if (!is.null(scale) && !(is_scalar_character(scale) || (is_scalar_number(scale) && scale > 0))) {
+    stopf("`scale` must be NULL, a column name or a positive number.")
+  }
+  sim_measure(id, function(rows) {
+    a <- 1 - rows$level
+    y <- rows$truth
+    s <- (rows$upper - rows$lower) + 2 / a * (rows$lower - y) * (y < rows$lower) +
+      2 / a * (y - rows$upper) * (y > rows$upper)
+    if (is.null(scale)) return(s)
+    d <- if (is.character(scale)) abs(rows[[scale]]) else scale
+    ifelse(d > 0, s / d, NA_real_)
+  }, requires = c("interval", "truth"), direction = "lower",
+  description = if (is.null(scale)) "interval score" else paste("interval score scaled by", scale))
 }

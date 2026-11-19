@@ -29,8 +29,12 @@ EFFECT_TYPES <- c("unspecified", "marginal", "conditional", "subject_specific",
 #'   `"log_odds_ratio"`, `"risk_difference"`.
 #' @param units Units of measurement.
 #' @param horizon Time horizon for time to event estimands.
-#' @param type Output type. Only `"scalar"` is implemented; other types
-#'   (vectors, matrices, functions) are rejected with an informative error.
+#' @param type Output type: `"scalar"`, or `"categorical"` for a class
+#'   label coded as a number (a selected model, a number of components),
+#'   evaluated with [sim_measures_categorical()]. Vector and function
+#'   valued estimands are represented by one scalar component per point
+#'   with [sim_estimand_grid()]; other types are rejected with an
+#'   informative error.
 #' @param null Value under the null hypothesis, used to label rejection
 #'   rates as type I error or power.
 #' @param description Free text.
@@ -50,8 +54,8 @@ sim_estimand <- function(id, truth = sim_truth_unknown(), quantity = NULL,
   }
   effect <- match.arg(effect, EFFECT_TYPES)
   if (!is_scalar_character(scale)) stopf("`scale` must be a nonempty string.")
-  if (!identical(type, "scalar")) {
-    stopf("Estimand type `%s` is not supported in adempR %s; only scalar estimands are implemented. Represent each component as its own scalar estimand.",
+  if (!is_scalar_character(type) || !type %in% c("scalar", "categorical")) {
+    stopf("Estimand type `%s` is not supported in adempR %s; only scalar and categorical estimands are implemented. Represent each component as its own scalar estimand (see sim_estimand_grid()).",
           paste(type, collapse = ""), utils::packageVersion("adempR"))
   }
   if (!is.null(null) && !is_scalar_number(null)) stopf("`null` must be a single number.")
@@ -273,5 +277,121 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
       out$truth_method <- "unknown"
     }
   )
+  out
+}
+
+#' Vector and function valued estimands on a grid
+#'
+#' A function valued estimand (a survival curve, a dose response curve) or
+#' a vector valued one is represented by one scalar component per grid
+#' point, so every measure, comparison and diagnostic applies to each point.
+#' `sim_estimand_grid()` creates the components, named `<id>_1`, `<id>_2`,
+#' ...; `sim_estimate_grid()` returns a method's estimates for all of them;
+#' `sim_summarise_grid()` collects a measure along the grid and adds its
+#' average over the grid points (for example the integrated squared error
+#' from `"mse"`), with an MCSE that accounts for the correlation between
+#' points.
+#'
+#' @param id Identifier stem.
+#' @param grid Numeric grid points.
+#' @param truth Function of `scenario` and the grid point `at` returning the
+#'   true value; wrapped in [sim_truth_exact()].
+#' @param ... Passed to [sim_estimand()] for every component.
+#' @return `sim_estimand_grid()`: a list of estimands with attributes
+#'   recording the grid. `sim_estimate_grid()`: a list of estimates.
+#'   `sim_summarise_grid()`: a data frame.
+#' @examples
+#' grid <- c(0.5, 1, 2)
+#' est <- sim_estimand_grid("surv", grid,
+#'   truth = function(scenario, at) exp(-scenario$rate * at))
+#' study <- sim_study("curve", scenarios = sim_scenarios(n = 100L, rate = 0.5),
+#'   generate = function(scenario, context) rexp(scenario$n, scenario$rate),
+#'   estimands = est,
+#'   methods = list(km = function(data) {
+#'     sim_estimate_grid("surv", grid, vapply(grid, function(t) mean(data > t), numeric(1)))
+#'   }))
+#' run <- sim_run(study, replications = 30, seed = 1, path = tempfile("adempR-run-"))
+#' sim_summarise_grid(run, "surv", "bias")
+#' @export
+sim_estimand_grid <- function(id, grid, truth, ...) {
+  check_id(id, "id")
+  if (!is.numeric(grid) || !length(grid) || anyNA(grid) || anyDuplicated(grid)) {
+    stopf("`grid` must be distinct numbers.")
+  }
+  check_function(truth, "truth")
+  lapply(seq_along(grid), function(i) {
+    at <- grid[i]
+    f <- local({
+      at <- at
+      truth <- truth
+      function(scenario) truth(scenario = scenario, at = at)
+    })
+    # the grid point is part of the truth version, so each component's
+    # truth has its own fingerprint even though the code is shared
+    e <- sim_estimand(paste0(id, "_", i), truth = sim_truth_exact(f, version = paste0("at=", format(at, digits = 17))), ...)
+    e$grid <- list(of = id, index = i, at = at)
+    e
+  })
+}
+
+#' @rdname sim_estimand_grid
+#' @param values Estimates, one per grid point.
+#' @param se,lower,upper Optional vectors of the same length.
+#' @param level Interval level.
+#' @export
+sim_estimate_grid <- function(id, grid, values, se = NULL, lower = NULL, upper = NULL,
+                              level = NA_real_) {
+  k <- length(grid)
+  if (length(values) != k) stopf("`values` must have one entry per grid point.")
+  pick <- function(v, i) if (is.null(v)) NA_real_ else v[i]
+  lapply(seq_len(k), function(i) {
+    sim_estimate(paste0(id, "_", i), values[i], se = pick(se, i), lower = pick(lower, i),
+                 upper = pick(upper, i), level = level)
+  })
+}
+
+#' @rdname sim_estimand_grid
+#' @param run A run or results.
+#' @param measure One of `"bias"`, `"mse"` or `"coverage"` for the grid
+#'   average; any measure for the pointwise table.
+#' @export
+sim_summarise_grid <- function(run, id, measure = "bias") {
+  res <- sim_results(run)
+  study <- res$manifest$study
+  comp <- Filter(function(e) identical(e$grid$of, id), study$estimands)
+  if (!length(comp)) stopf("No grid estimand `%s` in this study.", id)
+  ids <- vapply(comp, `[[`, character(1), "id")
+  at <- vapply(comp, function(e) e$grid$at, numeric(1))
+  s <- as.data.frame(sim_summarise(res, measures = measure))
+  s <- s[s$estimand %in% ids & s$measure == measure, , drop = FALSE]
+  s$at <- at[match(s$estimand, ids)]
+  point <- s[c("scenario_id", "method", "estimand", "at", "measure", "value", "mcse")]
+  # grid average: mean over points of each replication's contribution, so
+  # its MCSE uses the replication-level averages and is valid under any
+  # correlation between points
+  avg <- NULL
+  if (measure %in% c("bias", "mse", "coverage")) {
+    e <- res$estimates
+    e <- e[e$estimand %in% ids & !is.na(e$truth), , drop = FALSE]
+    e <- if (measure == "coverage") e[e$interval_status == "valid", , drop = FALSE] else
+      e[e$valid & is.finite(e$estimate), , drop = FALSE]
+    e$contrib <- switch(measure, bias = e$estimate - e$truth, mse = (e$estimate - e$truth)^2,
+                        coverage = as.numeric(e$lower <= e$truth & e$truth <= e$upper))
+    rows <- list()
+    for (grp in split(e, list(e$scenario_key, e$method), drop = TRUE)) {
+      per <- tapply(grp$contrib, grp$replication, function(v) if (length(v) == length(ids)) mean(v) else NA_real_)
+      per <- per[!is.na(per)]
+      n <- length(per)
+      if (!n) next
+      rows[[length(rows) + 1L]] <- data.frame(
+        scenario_id = study$scenarios$labels[match(grp$scenario_key[1], study$scenarios$keys)],
+        method = grp$method[1], estimand = id, at = NA_real_,
+        measure = paste0("grid_mean_", measure), value = mean(per),
+        mcse = if (n > 1) stats::sd(per) / sqrt(n) else NA_real_, stringsAsFactors = FALSE)
+    }
+    avg <- bind_rows(rows)
+  }
+  out <- bind_rows(list(point, avg))
+  rownames(out) <- NULL
   out
 }

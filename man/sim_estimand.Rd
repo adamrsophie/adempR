@@ -45,8 +45,12 @@ sim_estimand(
 
 \item{horizon}{Time horizon for time to event estimands.}
 
-\item{type}{Output type. Only \code{"scalar"} is implemented; other types
-(vectors, matrices, functions) are rejected with an informative error.}
+\item{type}{Output type: \code{"scalar"}, or \code{"categorical"} for a class
+label coded as a number (a selected model, a number of components),
+evaluated with \code{\link[=sim_measures_categorical]{sim_measures_categorical()}}. Vector and function
+valued estimands are represented by one scalar component per point
+with \code{\link[=sim_estimand_grid]{sim_estimand_grid()}}; other types are rejected with an
+informative error.}
 
 \item{null}{Value under the null hypothesis, used to label rejection
 rates as type I error or power.}
