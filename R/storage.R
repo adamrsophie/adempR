@@ -279,8 +279,17 @@ environment_info <- function(packages = character()) {
     platform = R.version$platform,
     os = paste(si[["sysname"]], si[["release"]]),
     machine = si[["machine"]],
+    r_number = paste(R.version$major, R.version$minor, sep = "."),
     rng_kind = RNG_KIND,
     packages = as.list(vers),
+    # version and source of every package in the dependency closure
+    package_sources = package_records(pk),
+    repositories = repository_urls(),
+    # collation changes the order of sorted strings; the time zone changes
+    # date arithmetic
+    locale = Sys.getlocale("LC_COLLATE"),
+    timezone = Sys.timezone() %||% NA_character_,
+    renv = renv_status(),
     # File names only: a library path can contain the user name.
     blas = tryCatch(basename(extSoftVersion()[["BLAS"]]), error = function(e) NA_character_),
     lapack = tryCatch(basename(La_library()), error = function(e) NA_character_),
@@ -429,7 +438,7 @@ export_function <- function(f, memo) {
 
 # Environment fields compared across sessions (not the time).
 environment_signature <- function(env) {
-  env[intersect(c("r_version", "platform", "os", "packages", "blas", "lapack", "threads"),
+  env[intersect(c("r_version", "platform", "os", "packages", "blas", "lapack", "threads", "locale"),
                 names(env))]
 }
 

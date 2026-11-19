@@ -6,7 +6,7 @@ new_manifest <- function(study, seed, replications, label, registry = NULL) {
        created = now_utc(), fingerprints = study_fingerprints(study),
        study_fingerprint = sim_fingerprint(study),
        rng_registry = rng_registry(rng_keys(study), registry),
-       revisions = list(), environment = environment_info(study_packages(study)),
+       revisions = list(), environment = environment_info(env_packages(study)),
        # Pilot and calibration directories draw from their own stream
        # families (fixed at creation), never from the production streams.
        rng_domain = if (isTRUE(label %in% c("pilot", "calibration"))) label else NULL,
@@ -202,10 +202,10 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
 # A session whose software differs from the one that created the directory
 # is recorded and reported, because results may then differ numerically.
 record_session <- function(man) {
-  env <- environment_info(study_packages(man$study))
+  env <- environment_info(env_packages(man$study))
   man$sessions <- c(man$sessions, list(env))
   if (!identical(environment_signature(env), environment_signature(man$environment))) {
-    warnf("The computing environment differs from the one that created this run directory (R, platform, BLAS, thread settings or package versions). The new session is recorded in the manifest and shown in the report.")
+    warnf("The computing environment differs from the one that created this run directory (R, platform, BLAS, thread settings, collation locale or package versions). The new session is recorded in the manifest and shown in the report.")
   }
   g <- env$git
   if (identical(man$label, "production") && !is.null(g) && isTRUE(g$dirty)) {

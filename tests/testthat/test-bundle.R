@@ -242,6 +242,11 @@ test_that("the bundle's regeneration script reproduces per scenario counts, and 
   expect_match(h, "from 3 to 6 per scenario", fixed = TRUE)
   expect_match(h, "Random number domain: pilot", fixed = TRUE)
   expect_match(h, "With 3 replications (the smallest", fixed = TRUE)
+  # the bundle carries a lockfile of the creating session, covered by the
+  # checksums, and the recipe checks it first
+  expect_true(file.exists(file.path(dir, "renv.lock")))
+  expect_match(readLines(file.path(dir, "CHECKSUMS.md5")), "renv.lock", all = FALSE)
+  expect_match(readLines(file.path(dir, "regenerate.R")), "sim_check_environment", all = FALSE)
   # run the published recipe from the bundle directory
   old <- setwd(dir)
   on.exit(setwd(old), add = TRUE)

@@ -60,3 +60,26 @@ test_that("thread settings are part of the compared environment and shown in the
   h <- paste(readLines(f), collapse = "\n")
   expect_match(h, "OMP_NUM_THREADS", fixed = TRUE)
 })
+
+test_that("runs record package sources and write a lockfile that the check reads", {
+  st <- normal_study(n = 5L, mu = 0, methods = list(
+    m = function(data) sim_estimate("mean", stats::median(data$y))))
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  env <- run$manifest$environment
+  expect_true("adempR" %in% names(env$package_sources))
+  expect_true("jsonlite" %in% names(env$package_sources))
+  expect_false(is.null(env$locale))
+  expect_type(env$renv$active, "logical")
+  lock <- tempfile(fileext = ".lock")
+  sim_lockfile(run, lock)
+  j <- jsonlite::read_json(lock)
+  expect_equal(j$R$Version, paste(R.version$major, R.version$minor, sep = "."))
+  expect_equal(j$Packages$jsonlite$Version, as.character(utils::packageVersion("jsonlite")))
+  chk <- sim_check_environment(lock)
+  expect_true(all(chk$match[chk$package != "adempR"]))
+  # a recorded version that is not installed is reported
+  j$Packages$jsonlite$Version <- "0.0.1"
+  jsonlite::write_json(j, lock, auto_unbox = TRUE)
+  expect_warning(chk <- sim_check_environment(lock), "jsonlite 0.0.1 recorded")
+  expect_false(chk$match[chk$package == "jsonlite"])
+})

@@ -344,10 +344,16 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
                          g$remote %||% ""))
   }
   add(html_table(rbind(
-    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", names(env$threads),
-                        names(env$packages)),
+    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", "collation locale", "time zone",
+                        "renv project", "packages in the dependency closure",
+                        names(env$threads), names(env$packages)),
                value = c(env$r_version, env$platform, env$os, env$blas %||% "",
-                         env$lapack %||% "",
+                         env$lapack %||% "", env$locale %||% "not recorded",
+                         env$timezone %||% "not recorded",
+                         if (is.null(env$renv)) "not recorded" else if (isTRUE(env$renv$active))
+                           paste("active, lockfile md5", env$renv$lockfile_md5) else "not active",
+                         if (is.null(env$package_sources)) "not recorded" else
+                           paste(length(env$package_sources), "(versions and sources: sim_lockfile())"),
                          vapply(env$threads, function(v) if (is.null(v) || is.na(v)) "unset" else as.character(v), ""),
                          unlist(env$packages)),
                stringsAsFactors = FALSE),
@@ -661,6 +667,7 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
     "- `manifest.json`: seed, fingerprints, protocol, revisions, amendments, environment.",
     "- `report.html`: self-contained report (if exported).",
     "- `reanalyse.R`, `regenerate.R`: scripts that reanalyze the results and rerun the study.",
+    "- `renv.lock`: versions and sources of the packages of the session that created the run, in the format of the renv package.",
     "- `CHECKSUMS.md5`: md5 checksums of every file.", "",
     "## Reanalysis", "",
     "```r", "library(adempR)", "res <- sim_import(\".\")   # verifies the checksums",
@@ -678,11 +685,14 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
       c("The per scenario counts are the final counts of the adaptive allocation",
         "recorded in `res$manifest$adaptive`.", ""),
     "Exact regeneration requires the same R version, package versions and numerical",
-    "libraries (see `manifest.json`). A package lockfile does not recreate missing",
-    "system libraries."), file.path(dir, "README.md"))
+    "libraries (see `manifest.json`). Restore the recorded package versions first with",
+    "`renv::restore(lockfile = \"renv.lock\")`; `regenerate.R` checks them with",
+    "`sim_check_environment()`. A package lockfile does not recreate the R version or",
+    "system libraries; a container image (for example from the Rocker project) does."), file.path(dir, "README.md"))
   writeLines(c("library(adempR)", "res <- sim_import(\".\")", "print(sim_summarise(res))"),
              file.path(dir, "reanalyse.R"))
   writeLines(regen_code(), file.path(dir, "regenerate.R"))
+  write_lockfile(man$environment, file.path(dir, "renv.lock"))
   files <- list.files(dir, recursive = TRUE, all.files = TRUE)
   files <- setdiff(files, "CHECKSUMS.md5")
   sums <- tools::md5sum(file.path(dir, files))
@@ -706,7 +716,9 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
 # The regeneration recipe written into a bundle. It reads every setting
 # from the imported manifest, so the recipe cannot drift from the record.
 regen_code <- function() {
-  c("library(adempR)",
+  c("# Restore the recorded package versions first: renv::restore(lockfile = \"renv.lock\")",
+    "library(adempR)",
+    "sim_check_environment(\"renv.lock\")",
     "res <- sim_import(\".\")",
     "m <- res$manifest",
     "run <- sim_run(m$study, replications = m$replications, seed = m$seed,",
