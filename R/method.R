@@ -42,6 +42,19 @@
 #'   [sim_results()] as `records` and summarized by [sim_diagnose()], so a
 #'   mechanism that drifts from its intended targets is visible. The record
 #'   function is not part of the generator fingerprint.
+#' @param common Optional character vector of scenario factors that alone
+#'   determine the data stream (common random numbers across scenarios).
+#'   Scenarios that agree on these factors draw the same random numbers,
+#'   so a contrast between scenarios that differ only in other factors (for
+#'   example the effect size) has less Monte Carlo error. Part of the
+#'   fingerprint.
+#' @param antithetic If `TRUE`, replications come in pairs (1 and 2, 3 and
+#'   4, ...) that share one data stream; `context$antithetic` is `TRUE` in
+#'   the second of each pair, and the generator should then use the
+#'   antithetic draws (for example `-z` for standard normal `z`, `1 - u`
+#'   for uniform `u`). Pairs are negatively correlated by design, so the
+#'   usual MCSE does not apply: summarize with [sim_summarise_antithetic()].
+#'   Part of the fingerprint.
 #' @return An object of class `adempr_generator`.
 #' @examples
 #' sim_generator(function(scenario, context) {
@@ -49,17 +62,39 @@
 #' }, description = "independent normal outcomes")
 #' @export
 sim_generator <- function(fun, check = NULL, version = NULL, depends = list(),
-                          packages = character(), description = NULL, record = NULL) {
+                          packages = character(), description = NULL, record = NULL,
+                          common = NULL, antithetic = FALSE) {
   check_function(fun, "fun", c("scenario", "context"))
   if (!is.null(check)) check_function(check, "check", "scenario")
   if (!is.null(record)) check_function(record, "record")
-  structure(list(fun = fun, check = check, version = version, depends = depends,
-                 packages = packages, description = description, record = record),
-            class = "adempr_generator")
+  if (!is.null(common) && (!is.character(common) || !length(common) || anyNA(common))) {
+    stopf("`common` must name scenario factors.")
+  }
+  if (!is.logical(antithetic) || length(antithetic) != 1L || is.na(antithetic)) {
+    stopf("`antithetic` must be TRUE or FALSE.")
+  }
+  g <- list(fun = fun, check = check, version = version, depends = depends,
+            packages = packages, description = description, record = record)
+  # added only when used, so the fingerprints of other generators are unchanged
+  if (!is.null(common)) g$common <- common
+  if (antithetic) g$antithetic <- TRUE
+  structure(g, class = "adempr_generator")
 }
 
 generator_fingerprint <- function(g) {
-  fingerprint(g$fun, g$version, g$depends)
+  if (is.null(g$common) && !isTRUE(g$antithetic)) return(fingerprint(g$fun, g$version, g$depends))
+  fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic))
+}
+
+# Identity of the data stream of a scenario: the scenario itself, or the
+# values of the common random number factors.
+data_stream_key <- function(study, key) {
+  common <- study$generator$common
+  if (is.null(common)) return(key)
+  sc <- study$scenarios$values[[scenario_index(study$scenarios, key)]]
+  miss <- setdiff(common, names(sc))
+  if (length(miss)) stopf("`common` names unknown scenario factor(s): %s.", paste(miss, collapse = ", "))
+  paste0("common-", fingerprint(common, sc[common]))
 }
 
 #' Generated data with protected metadata

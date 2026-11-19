@@ -11,7 +11,9 @@ sim_generator(
   depends = list(),
   packages = character(),
   description = NULL,
-  record = NULL
+  record = NULL,
+  common = NULL,
+  antithetic = FALSE
 )
 }
 \arguments{
@@ -50,6 +52,21 @@ both arms). Values are stored per replication, returned by
 \code{\link[=sim_results]{sim_results()}} as \code{records} and summarized by \code{\link[=sim_diagnose]{sim_diagnose()}}, so a
 mechanism that drifts from its intended targets is visible. The record
 function is not part of the generator fingerprint.}
+
+\item{common}{Optional character vector of scenario factors that alone
+determine the data stream (common random numbers across scenarios).
+Scenarios that agree on these factors draw the same random numbers,
+so a contrast between scenarios that differ only in other factors (for
+example the effect size) has less Monte Carlo error. Part of the
+fingerprint.}
+
+\item{antithetic}{If \code{TRUE}, replications come in pairs (1 and 2, 3 and
+4, ...) that share one data stream; \code{context$antithetic} is \code{TRUE} in
+the second of each pair, and the generator should then use the
+antithetic draws (for example \code{-z} for standard normal \code{z}, \code{1 - u}
+for uniform \code{u}). Pairs are negatively correlated by design, so the
+usual MCSE does not apply: summarize with \code{\link[=sim_summarise_antithetic]{sim_summarise_antithetic()}}.
+Part of the fingerprint.}
 }
 \value{
 An object of class \code{adempr_generator}.

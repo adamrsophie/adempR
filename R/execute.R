@@ -58,6 +58,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   idx <- scenario_index(study$scenarios, key)
   scenario <- study$scenarios$values[[idx]]
   gctx <- list(replication = rep, scenario_key = key, stage = dgp_stage)
+  if (isTRUE(study$generator$antithetic)) gctx$antithetic <- rep %% 2L == 0L
   gen <- with_rng_state(task$seeds$data, run_captured(function() {
     out <- study$generator$fun(scenario, gctx)
     check_generated(out)
@@ -232,8 +233,10 @@ task_seeds <- function(ctx, key, reps, study, methods) {
   base <- rng_base_seed(ctx$seed, ctx$domain)
   comps <- unique(vapply(methods, function(mn) method_component(study$methods[[mn]], mn),
                          character(1)))
-  k_data <- rng_lookup(ctx$registry, ctx$dgp_stage, key, "data")
-  data_seeds <- rng_substreams(rng_stream_seeds(base, k_data, ctx$cache)[[1]], reps)
+  k_data <- rng_lookup(ctx$registry, ctx$dgp_stage, data_stream_key(study, key), "data")
+  # antithetic pairs share the data substream of their first replication
+  data_reps <- if (isTRUE(study$generator$antithetic)) 2L * ((reps + 1L) %/% 2L) - 1L else reps
+  data_seeds <- rng_substreams(rng_stream_seeds(base, k_data, ctx$cache)[[1]], data_reps)
   comp_seeds <- lapply(comps, function(cp) {
     k <- rng_lookup(ctx$registry, ctx$method_stage, key, cp)
     rng_substreams(rng_stream_seeds(base, k, ctx$cache)[[1]], reps)

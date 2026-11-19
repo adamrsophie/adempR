@@ -21,8 +21,9 @@ rng_keys <- function(study, dgp_stage = "dgp", method_stage = "method") {
   keys <- study$scenarios$keys
   comps <- method_stream_components(study)
   rbind(
-    data.frame(stage = dgp_stage, scenario_key = keys, component = "data",
-               stringsAsFactors = FALSE),
+    data.frame(stage = dgp_stage,
+               scenario_key = unique(vapply(keys, data_stream_key, character(1), study = study)),
+               component = "data", stringsAsFactors = FALSE),
     expand.grid(stage = method_stage, scenario_key = keys, component = comps,
                 stringsAsFactors = FALSE),
     truth_stream_keys(study)
