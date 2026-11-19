@@ -315,7 +315,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   if (!is.null(man$adaptive)) {
     add("<h3>Adaptive allocation</h3><p>Replications were allocated in rounds to bring the Monte Carlo standard error of ",
         html_escape(man$adaptive$measure), " to ", html_escape(man$adaptive$target),
-        " in every scenario, from its estimated variability only. Every round:</p>",
+        " in every scenario. ", html_escape(man$adaptive$inference %||% ADAPTIVE_NOTE),
+        " Every round:</p>",
         html_table(man$adaptive$allocation))
   }
   sq <- man$sequential

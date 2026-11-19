@@ -37,9 +37,10 @@ sim_run_adaptive(
 \item{...}{Passed to \code{\link[=sim_run]{sim_run()}}.}
 }
 \value{
-The run, with \code{run$allocation}: one row per round and scenario
-giving the replications, the worst MCSE over methods and estimands, and
-whether the target is met.
+The run, with \code{run$allocation}: one row per call, round and
+scenario giving the replications, the worst precision (MCSE, or the
+exact half width for proportions at a boundary) over methods and
+estimands, and whether the target is met.
 }
 \description{
 Runs \code{initial} replications per scenario, then repeatedly estimates the
@@ -50,9 +51,19 @@ proportional to \code{1 / sqrt(R)}, inflated by \code{inflate}), up to
 the cap. Scenarios that are already precise get no more replications, so
 the budget goes where the Monte Carlo error is. The earlier replications
 are kept (Morris's proposal for choosing the number of imputations
-applied to scenarios). The allocation uses the estimated variability
-only; it does not look at the value of the measure, so it does not
-steer the estimate. Every round is recorded in the manifest.
+applied to scenarios).
+}
+\details{
+The procedure is heuristic. The MCSE of a proportion is a function of
+its value, and stopping depends on the results observed, so the reported
+values can be shifted slightly (for a Bernoulli measure the expected
+reported proportion differs from the true one) and their MCSEs are not
+adjusted for the stopping. For confirmatory inference, plan the counts
+from an independent pilot (\code{\link[=sim_pilot]{sim_pilot()}}). The precision of a
+proportion at 0 or 1, whose plug-in MCSE is 0, is the half width of its
+exact interval divided by the normal quantile. A scenario in which any
+monitored cell has no MCSE is not extended and reports \code{target_met = NA}, with a warning. Every round is recorded in the manifest as it
+finishes, and later calls on the same directory append to the record.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(sd = c(1, 4)),

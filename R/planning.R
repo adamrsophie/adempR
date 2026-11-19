@@ -222,9 +222,19 @@ print.adempr_pilot <- function(x, ...) {
 #' the cap. Scenarios that are already precise get no more replications, so
 #' the budget goes where the Monte Carlo error is. The earlier replications
 #' are kept (Morris's proposal for choosing the number of imputations
-#' applied to scenarios). The allocation uses the estimated variability
-#' only; it does not look at the value of the measure, so it does not
-#' steer the estimate. Every round is recorded in the manifest.
+#' applied to scenarios).
+#'
+#' The procedure is heuristic. The MCSE of a proportion is a function of
+#' its value, and stopping depends on the results observed, so the reported
+#' values can be shifted slightly (for a Bernoulli measure the expected
+#' reported proportion differs from the true one) and their MCSEs are not
+#' adjusted for the stopping. For confirmatory inference, plan the counts
+#' from an independent pilot ([sim_pilot()]). The precision of a
+#' proportion at 0 or 1, whose plug-in MCSE is 0, is the half width of its
+#' exact interval divided by the normal quantile. A scenario in which any
+#' monitored cell has no MCSE is not extended and reports `target_met =
+#' NA`, with a warning. Every round is recorded in the manifest as it
+#' finishes, and later calls on the same directory append to the record.
 #'
 #' @param study A study.
 #' @param measure Measure whose MCSE is targeted.
@@ -235,9 +245,10 @@ print.adempr_pilot <- function(x, ...) {
 #' @param max_rounds Maximum number of allocation rounds.
 #' @param inflate Factor applied to the projected requirement.
 #' @param ... Passed to [sim_run()].
-#' @return The run, with `run$allocation`: one row per round and scenario
-#'   giving the replications, the worst MCSE over methods and estimands, and
-#'   whether the target is met.
+#' @return The run, with `run$allocation`: one row per call, round and
+#'   scenario giving the replications, the worst precision (MCSE, or the
+#'   exact half width for proportions at a boundary) over methods and
+#'   estimands, and whether the target is met.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(sd = c(1, 4)),
 #'   generate = function(scenario, context) rnorm(20, 0, scenario$sd),
@@ -255,32 +266,64 @@ sim_run_adaptive <- function(study, measure, target, seed, path, initial = 100L,
   if (!is_count(initial, 2)) stopf("`initial` must be a whole number of at least 2.")
   if (!is_count(max_replications, initial)) stopf("`max_replications` must be at least `initial`.")
   run <- sim_run(study, replications = initial, seed = seed, path = path, ...)
+  z <- stats::qnorm(1 - (1 - study$level) / 2)
+  prior <- run$manifest$adaptive$allocation
+  call_no <- if (is.null(prior) || is.null(prior$call)) 1L + !is.null(prior) else max(prior$call) + 1L
   log <- list()
   for (round in seq_len(max_rounds + 1L)) {
     s <- as.data.frame(sim_summarise(run, measures = measure))
     s <- s[s$measure == measure, , drop = FALSE]
-    worst <- tapply(s$mcse, s$scenario_key, function(v) if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE))
+    # A proportion at 0 or 1 has a plug-in MCSE of 0 although its
+    # uncertainty is not 0; its precision is judged by the half width of
+    # its exact interval on the MCSE scale, never by the plug-in value.
+    prec <- s$mcse
+    prop <- s$measure %in% PROPORTION_MEASURES & is.finite(s$lower) & is.finite(s$upper)
+    prec[prop] <- pmax(prec[prop], (s$upper[prop] - s$lower[prop]) / (2 * z), na.rm = TRUE)
+    # every monitored cell must resolve: one cell without a precision
+    # leaves the scenario unresolved
+    worst <- tapply(prec, s$scenario_key, function(v) if (anyNA(v)) NA_real_ else max(v))
     have <- tapply(s$n_planned, s$scenario_key, max)
     keys <- names(worst)
-    met <- !is.na(worst) & worst <= target
+    met <- ifelse(is.na(worst), NA, worst <= target)
     capped <- have >= max_replications
-    log[[round]] <- data.frame(round = round, scenario_id = study$scenarios$labels[match(keys, study$scenarios$keys)],
-                               replications = as.integer(have), mcse = as.numeric(worst),
+    log[[round]] <- data.frame(call = call_no, round = round, measure = measure, target = target,
+                               scenario_id = study$scenarios$labels[match(keys, study$scenarios$keys)],
+                               replications = as.integer(have), precision = as.numeric(worst),
                                target_met = met, stringsAsFactors = FALSE)
-    todo <- !met & !capped & !is.na(worst)
+    record_adaptive(path, measure, target, prior, log)
+    todo <- met %in% FALSE & !capped
     if (!any(todo) || round > max_rounds) break
     need <- ceiling(have[todo] * (worst[todo] / target)^2 * inflate)
     need <- pmin(pmax(need, have[todo] + 1L), max_replications)
     run <- sim_run(study, replications = initial, seed = seed, path = path,
                    scenario_replications = stats::setNames(as.integer(need), keys[todo]), ...)
   }
-  alloc <- bind_rows(log)
+  alloc <- bind_rows(c(list(prior), log))
   rownames(alloc) <- NULL
-  update_manifest(path, function(man) {
-    man$adaptive <- list(measure = measure, target = target, allocation = alloc)
-    man
-  })
+  last <- log[[length(log)]]
+  if (any(is.na(last$target_met))) {
+    warning(sprintf("The precision of `%s` is undefined in scenario(s) %s (a cell without an MCSE), so the target could not be judged there.",
+                    measure, paste(last$scenario_id[is.na(last$target_met)], collapse = ", ")),
+            call. = FALSE)
+  }
   run <- sim_open(path)
   run$allocation <- alloc
   run
 }
+
+# The allocation history is written after every round, so an interrupted
+# allocation leaves its record, and appended to the history of earlier
+# calls on the same directory.
+record_adaptive <- function(path, measure, target, prior, log) {
+  alloc <- bind_rows(c(list(prior), log))
+  rownames(alloc) <- NULL
+  update_manifest(path, function(man) {
+    man$adaptive <- list(measure = measure, target = target, allocation = alloc,
+                         inference = ADAPTIVE_NOTE)
+    man
+  })
+}
+
+ADAPTIVE_NOTE <- paste("Heuristic allocation: the replication counts depend on the results observed",
+                       "in earlier rounds, and the summaries are not adjusted for this. For",
+                       "confirmatory inference, plan the counts from an independent pilot.")
