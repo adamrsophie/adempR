@@ -343,9 +343,11 @@ export_functions <- function(x, memo = NULL) {
   if (is.null(memo)) {
     memo <- new.env(parent = emptyenv())
     memo$pairs <- list(); memo$carried <- character(); memo$whole <- character()
+    memo$unshipped <- character()
     out <- export_functions(x, memo)
     attr(out, "carried") <- unique(memo$carried)
     attr(out, "whole") <- unique(memo$whole)
+    attr(out, "unshipped") <- unique(memo$unshipped)
     return(out)
   }
   if (is.function(x)) return(export_function(x, memo))
@@ -378,10 +380,18 @@ export_function <- function(f, memo) {
   e <- environment(f)
   if (is.null(e) || isNamespace(e) || identical(e, baseenv()) || identical(e, emptyenv())) return(f)
   names_used <- unique(c(code_names(body(f)), unlist(lapply(formals(f), code_names))))
-  if (any(DYNAMIC_LOOKUP %in% names_used)) {
-    if (!identical(e, globalenv())) {
-      memo$whole <- c(memo$whole, ls(e, all.names = TRUE))
-      memo$carried <- c(memo$carried, ls(e, all.names = TRUE))
+  if (any(DYNAMIC_LOOKUP %in% names_used) && !identical(e, globalenv())) {
+    memo$whole <- c(memo$whole, ls(e, all.names = TRUE))
+    memo$carried <- c(memo$carried, ls(e, all.names = TRUE))
+    # names that fall through to the global environment do not travel with
+    # a whole environment
+    for (v in names_used) {
+      h <- e
+      while (!identical(h, globalenv()) && !isNamespace(h) && !identical(h, emptyenv()) &&
+             !identical(h, baseenv()) && !exists(v, envir = h, inherits = FALSE)) h <- parent.env(h)
+      if (identical(h, globalenv()) && exists(v, envir = h, inherits = FALSE)) {
+        memo$unshipped <- c(memo$unshipped, v)
+      }
     }
     return(f)
   }

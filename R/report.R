@@ -570,8 +570,7 @@ sim_export <- function(run, dir, overwrite = FALSE, report = TRUE, include_data 
   pruned <- export_functions(strip_sources(study))
   carried <- attr(pruned, "carried")
   whole <- attr(pruned, "whole")
-  attr(pruned, "carried") <- NULL
-  attr(pruned, "whole") <- NULL
+  attributes(pruned)[c("carried", "whole", "unshipped")] <- NULL
   if (length(carried)) {
     message(sprintf("The exported functions carry these objects they use: %s. Check that none of them is private.",
                     paste(utils::head(carried, 20), collapse = ", ")))

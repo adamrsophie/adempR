@@ -17,6 +17,51 @@ study_packages <- function(study) {
   unique(c(study$generator$packages, unlist(lapply(study$methods, `[[`, "packages"))))
 }
 
+# Packages the study's code reaches: declared ones, and every package named
+# with `::` or `:::` in a study function or a function it uses.
+referenced_packages <- function(study) {
+  pk <- character()
+  seen <- list()
+  scan <- function(x) {
+    if (is.call(x)) {
+      fn <- x[[1L]]
+      if (is.symbol(fn) && as.character(fn) %in% c("::", ":::") && length(x) == 3L) {
+        pk <<- c(pk, as.character(x[[2L]]))
+      }
+      lapply(as.list(x), scan)
+    }
+    invisible()
+  }
+  visit <- function(f) {
+    if (!is.function(f) || is.primitive(f)) return()
+    for (g in seen) if (identical(g, f)) return()
+    seen[[length(seen) + 1L]] <<- f
+    scan(body(f))
+    lapply(formals(f), scan)
+    e <- environment(f)
+    if (is.null(e) || isNamespace(e)) return()
+    for (v in code_names(body(f))) {
+      h <- e
+      while (!isNamespace(h) && !identical(h, emptyenv()) && !identical(h, baseenv()) &&
+             !exists(v, envir = h, inherits = FALSE)) {
+        if (identical(h, globalenv())) { h <- emptyenv(); break }
+        h <- parent.env(h)
+      }
+      if (!isNamespace(h) && !identical(h, emptyenv()) && !identical(h, baseenv())) {
+        val <- get(v, envir = h, inherits = FALSE)
+        if (is.function(val)) visit(val)
+      }
+    }
+  }
+  walk <- function(x) {
+    if (is.function(x)) visit(x)
+    else if (is.list(x) && !is.data.frame(x)) for (el in x) walk(el)
+  }
+  walk(unclass(study))
+  # adempR itself is the framework, recorded with the environment
+  setdiff(unique(c(study_packages(study), pk)), "adempR")
+}
+
 rng_keys <- function(study, dgp_stage = "dgp", method_stage = "method") {
   keys <- study$scenarios$keys
   comps <- method_stream_components(study)
@@ -225,7 +270,14 @@ check_frozen <- function(study) {
 #' distributes chunks of tasks with \pkg{future.apply} using the current
 #' [future::plan()] (or a temporary multisession plan with `workers`
 #' workers, restored on exit). Seeds are preassigned per task, so results
-#' are identical across backends, worker counts and chunk sizes.
+#' are identical across backends, worker counts and chunk sizes. Workers
+#' receive every study function with copies of the variables it names,
+#' found transitively through global helpers and closures made by other
+#' functions; a closure that looks variables up by name (`get()`, `eval()`
+#' and similar) and reaches a global object is refused before dispatch.
+#' A warning names packages the study's code reaches (declared, or named
+#' with `::`) that are loaded from source or have traced functions; other
+#' modifications of installed packages are not detected.
 #' Parallel methods that use multithreaded linear algebra can oversubscribe
 #' cores; limit threads (for example `OMP_NUM_THREADS`) when using many
 #' workers.
@@ -318,7 +370,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   if (!is_count(chunk_size, 1)) stopf("`chunk_size` must be a positive whole number.")
   sim_validate(study, error = TRUE)
   check_frozen(study)
-  warn_patched(study_packages(study))
+  warn_patched(referenced_packages(study))
   replications <- as.integer(replications)
   p <- run_paths(path)
   if (dir.exists(path) && !file.exists(p$manifest)) {
@@ -699,83 +751,21 @@ local_packages <- function(pkgs) {
   }
 }
 
-# Functions defined at top level refer to helpers in the global environment,
-# which a separate worker process does not have. Every study function whose
-# environment is the global environment, and every global function it calls
-# in turn, is given a private environment holding copies of the global
-# objects it uses. Values and fingerprints are unchanged.
-localize_globals <- function(study) {
-  shared <- new.env(parent = globalenv())
-  todo <- list()
-  collect <- function(f) {
-    if (!is.function(f) || is.primitive(f) || !identical(environment(f), globalenv())) return()
-    vars <- tryCatch(codetools::findGlobals(f), error = function(e) character())
-    for (v in setdiff(vars, ls(shared, all.names = TRUE))) {
-      if (!exists(v, envir = globalenv(), inherits = FALSE)) next
-      val <- get(v, envir = globalenv(), inherits = FALSE)
-      assign(v, val, envir = shared)
-      collect(val)
-    }
+# Workers receive the study with every function pruned to the bindings it
+# uses, found transitively through global helpers and factory closures and
+# copied with it (export_functions()), so a separate process has every
+# object a study function names. A closure that looks names up dynamically
+# keeps its whole environment; global objects it names would not travel, so
+# such a study is refused before dispatch.
+ship_study <- function(study) {
+  shipped <- export_functions(study)
+  missing <- attr(shipped, "unshipped")
+  if (length(missing)) {
+    stopf("Study functions that look up variables by name (get(), eval() and similar) use global object(s) %s, which the future backend cannot send to workers. Pass the objects into the function that creates them, or use the sequential backend.",
+          paste(missing, collapse = ", "))
   }
-  rebind <- function(x) {
-    if (is.function(x) && !is.primitive(x) && identical(environment(x), globalenv())) {
-      environment(x) <- shared
-      return(x)
-    }
-    if (is.list(x) && !is.data.frame(x) && length(x)) {
-      a <- attributes(x)
-      x <- lapply(x, rebind)
-      attributes(x) <- a
-    }
-    x
-  }
-  walk <- function(x) {
-    if (is.function(x)) collect(x)
-    else if (is.list(x) && !is.data.frame(x)) for (el in x) walk(el)
-  }
-  walk(unclass(study))
-  for (v in ls(shared, all.names = TRUE)) assign(v, rebind(get(v, envir = shared)), envir = shared)
-  rebind(study)
-}
-
-# A function created inside another function keeps its own enclosing
-# environment, which travels to the workers. Global objects it reaches only
-# by falling through to the global environment do not travel, and copying
-# them would mean changing the user's environments. Such references are
-# found before the run and refused, instead of failing on every worker.
-unshipped_globals <- function(study) {
-  seen <- new.env(parent = emptyenv())
-  out <- character()
-  visit <- function(f) {
-    if (!is.function(f) || is.primitive(f)) return()
-    env <- environment(f)
-    if (is.null(env) || identical(env, globalenv()) || isNamespace(env)) return()
-    id <- paste(utils::capture.output(print(env)), collapse = "")
-    key <- paste(id, paste(deparse(f), collapse = ""))
-    if (exists(key, envir = seen, inherits = FALSE)) return()
-    assign(key, TRUE, envir = seen)
-    for (v in tryCatch(codetools::findGlobals(f), error = function(e) character())) {
-      e <- env
-      repeat {
-        if (identical(e, emptyenv()) || isNamespace(e) || identical(e, baseenv())) break
-        if (identical(e, globalenv())) {
-          if (exists(v, envir = e, inherits = FALSE)) out <<- c(out, v)
-          break
-        }
-        if (exists(v, envir = e, inherits = FALSE)) {
-          visit(get(v, envir = e, inherits = FALSE))
-          break
-        }
-        e <- parent.env(e)
-      }
-    }
-  }
-  walk <- function(x) {
-    if (is.function(x)) visit(x)
-    else if (is.list(x) && !is.data.frame(x)) for (el in x) walk(el)
-  }
-  walk(unclass(study))
-  unique(out)
+  attributes(shipped)[c("carried", "whole", "unshipped")] <- NULL
+  shipped
 }
 
 # The worker function lives in a minimal environment so that a future
@@ -824,12 +814,7 @@ run_chunks <- function(study, chunks, p, backend, workers, progress, gpus = NULL
                     nw, length(gpus)), call. = FALSE)
   }
   pkgs <- study_packages(study)
-  missing <- unshipped_globals(study)
-  if (length(missing)) {
-    stopf("Study functions created inside other functions use global object(s) %s, which the future backend cannot send to workers. Define those functions at top level, pass the objects into the function that creates them, or use the sequential backend.",
-          paste(missing, collapse = ", "))
-  }
-  shipped <- localize_globals(study)
+  shipped <- ship_study(study)
   starts <- seq(1L, length(chunks), by = wave)
   for (s in starts) {
     idx <- s:min(s + wave - 1L, length(chunks))
@@ -862,8 +847,11 @@ truth_stream_keys <- function(study) {
 }
 
 # A package is identified by name and version in fingerprints. A namespace
-# loaded from source (pkgload::load_all()) or with traced or replaced
-# functions runs code that its version number does not identify.
+# loaded from source (pkgload::load_all()) or with traced functions runs
+# code that its version number does not identify. This detects those two
+# modifications in the packages the study's code reaches; it does not
+# verify package code, so other modifications (functions replaced with
+# assignInNamespace(), a library edited in place) go unnoticed.
 patched_namespaces <- function(pkgs) {
   pkgs <- pkgs[vapply(pkgs, isNamespaceLoaded, logical(1))]
   pkgs[vapply(pkgs, function(p) {

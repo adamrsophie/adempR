@@ -135,7 +135,14 @@ Backends: \code{"sequential"} is the reference implementation. \code{"future"}
 distributes chunks of tasks with \pkg{future.apply} using the current
 \code{\link[future:plan]{future::plan()}} (or a temporary multisession plan with \code{workers}
 workers, restored on exit). Seeds are preassigned per task, so results
-are identical across backends, worker counts and chunk sizes.
+are identical across backends, worker counts and chunk sizes. Workers
+receive every study function with copies of the variables it names,
+found transitively through global helpers and closures made by other
+functions; a closure that looks variables up by name (\code{get()}, \code{eval()}
+and similar) and reaches a global object is refused before dispatch.
+A warning names packages the study's code reaches (declared, or named
+with \code{::}) that are loaded from source or have traced functions; other
+modifications of installed packages are not detected.
 Parallel methods that use multithreaded linear algebra can oversubscribe
 cores; limit threads (for example \code{OMP_NUM_THREADS}) when using many
 workers.

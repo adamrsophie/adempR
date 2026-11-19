@@ -145,19 +145,38 @@ test_that("a missing declared package fails validation", {
   expect_true(any(v$check == "package:notAPackageXYZ" & v$status == "error"))
 })
 
-test_that("the future backend refuses closures that reach global objects", {
-  assign("adempr_test_helper2", eval(quote(function(y) mean(y)), globalenv()), envir = globalenv())
-  on.exit(rm("adempr_test_helper2", envir = globalenv()), add = TRUE)
-  make <- eval(quote(function() function(data) sim_estimate("mean", adempr_test_helper2(data$y))),
-               globalenv())
-  st <- normal_study(n = 10L, mu = 0, methods = list(m = make()))
-  expect_identical(adempR:::unshipped_globals(st), "adempr_test_helper2")
-  expect_length(adempR:::unshipped_globals(normal_study(n = 10L, mu = 0,
-                                                        methods = stochastic_methods())), 0L)
-  skip_if_not_installed("future")
-  skip_if_not_installed("future.apply")
-  expect_error(sim_run(st, replications = 2, seed = 1, path = run_path(), backend = "future"),
-               "adempr_test_helper2")
+test_that("workers receive every global a study function reaches, through helpers and factories", {
+  # a top-level method calls a factory-made global helper that reads
+  # another global
+  assign("adempr_test_hidden", 5, envir = globalenv())
+  assign("adempr_test_helper2", eval(quote((function() function(y) mean(y) + adempr_test_hidden)()),
+                                     globalenv()), envir = globalenv())
+  on.exit(rm("adempr_test_helper2", "adempr_test_hidden", envir = globalenv()), add = TRUE)
+  m <- eval(quote(function(data) sim_estimate("mean", adempr_test_helper2(data$y))), globalenv())
+  st <- normal_study(n = 10L, mu = 0, methods = list(m = m))
+  shipped <- adempR:::ship_study(st)
+  f <- shipped$methods$m$fun
+  # serialize as a worker would and evaluate with the globals gone
+  blob <- serialize(f, NULL)
+  rm("adempr_test_hidden", "adempr_test_helper2", envir = globalenv())
+  g <- unserialize(blob)
+  expect_equal(g(data.frame(y = c(1, 3)))$estimate, 7)
+  assign("adempr_test_hidden", 5, envir = globalenv())
+  assign("adempr_test_helper2", 1, envir = globalenv())
+  # a closure that looks names up dynamically and reaches a global is refused
+  dyn <- local(function(data) sim_estimate("mean", get("x") + adempr_test_hidden))
+  st2 <- normal_study(n = 10L, mu = 0, methods = list(d = dyn))
+  expect_error(adempR:::ship_study(st2), "adempr_test_hidden")
+})
+
+test_that("packages named with :: in study code are checked for source loads and traces", {
+  helper <- function(y) tools::file_ext(y)
+  m <- list(md = function(data) sim_estimate("mean", nchar(helper("a.b")) + mean(data$y)))
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = "bias")
+  expect_true("tools" %in% adempR:::referenced_packages(st))
+  suppressMessages(trace("file_ext", quote(NULL), where = asNamespace("tools"), print = FALSE))
+  on.exit(suppressMessages(untrace("file_ext", where = asNamespace("tools"))), add = TRUE)
+  expect_warning(sim_run(st, replications = 1, seed = 1, path = run_path()), "traced functions")
 })
 
 test_that("registry lookups refuse aliased indices and fractional replications", {
