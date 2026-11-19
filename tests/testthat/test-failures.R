@@ -196,3 +196,27 @@ test_that("failed generations are final until an explicit retry", {
   expect_match(r$manifest$revisions[[length(r$manifest$revisions)]]$changes, "retry round 1")
   expect_s3_class(sim_summarise(r), "data.frame")
 })
+
+test_that("fit and estimand checks apply to interval and test only results", {
+  m <- list(
+    nonconv = sim_method(function(data) {
+      sim_estimate("mean", NA_real_, lower = -1, upper = 1, level = 0.95, p_value = 0.01, null = 0,
+                   converged = FALSE)
+    }, estimands = "mean"),
+    fine = sim_method(function(data) {
+      sim_estimate("mean", NA_real_, lower = -1, upper = 1, level = 0.95, p_value = 0.01, null = 0)
+    }, estimands = "mean"),
+    wrong = sim_method(function(data) {
+      sim_estimate("mean", NA_real_, lower = -1, upper = 1, level = 0.95, effect = "conditional")
+    }, estimands = "mean"))
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = c("coverage", "rejection"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 3, seed = 1, path = run_path())))
+  cov <- s[s$measure == "coverage", ]
+  expect_equal(cov$n_eligible[cov$method == "nonconv"], 0)
+  expect_equal(cov$n_eligible[cov$method == "wrong"], 0)
+  expect_equal(cov$n_eligible[cov$method == "fine"], 3)
+  expect_equal(cov$value[cov$method == "fine"], 1)
+  rej <- s[s$measure %in% c("rejection", "type_i_error"), ]
+  expect_equal(rej$n_eligible[rej$method == "nonconv"], 0)
+  expect_equal(rej$n_eligible[rej$method == "fine"], 3)
+})

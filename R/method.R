@@ -362,27 +362,24 @@ outputs_to_rows <- function(out, targets) {
 classify_rows <- function(est, estimands, policy) {
   n <- nrow(est)
   if (!n) return(est)
-  ok_attempt <- est$attempt_status == "ok"
   e <- est$estimate
-  status <- ifelse(!ok_attempt, est$attempt_status,
-            ifelse(is.na(e), "missing",
-            ifelse(is.infinite(e),
-                   if (policy$infinite == "include") "infinite" else "invalid_infinite",
-                   "valid")))
   eff <- vapply(est$estimand, function(id) estimands[[id]]$effect, character(1))
   scl <- vapply(est$estimand, function(id) estimands[[id]]$scale, character(1))
   incompatible <- (!is.na(est$declared_effect) & est$declared_effect != eff) |
     (!is.na(est$declared_scale) & est$declared_scale != scl)
-  usable <- status %in% c("valid", "infinite")
-  status[usable & incompatible] <- "incompatible"
-  usable <- status %in% c("valid", "infinite")
-  if (policy$nonconverged == "invalid") {
-    status[usable & est$converged %in% FALSE] <- "nonconverged"
-  }
-  usable <- status %in% c("valid", "infinite")
-  if (policy$boundary == "invalid") status[usable & est$boundary %in% TRUE] <- "boundary"
-  usable <- status %in% c("valid", "infinite")
-  if (policy$warnings == "invalid") status[usable & est$had_warning %in% TRUE] <- "warning"
+  # Checks of the fit and of the estimand apply to every output of a row
+  # (point estimate, SE, interval, test), so they come first: an interval
+  # only result from a nonconverged fit must not count toward coverage.
+  status <- rep(NA_character_, n)
+  set <- function(cond, value) status[is.na(status) & cond] <<- value
+  set(est$attempt_status != "ok", est$attempt_status[is.na(status) & est$attempt_status != "ok"])
+  set(incompatible, "incompatible")
+  if (policy$nonconverged == "invalid") set(est$converged %in% FALSE, "nonconverged")
+  if (policy$boundary == "invalid") set(est$boundary %in% TRUE, "boundary")
+  if (policy$warnings == "invalid") set(est$had_warning %in% TRUE, "warning")
+  set(is.na(e), "missing")
+  set(is.infinite(e), if (policy$infinite == "include") "infinite" else "invalid_infinite")
+  set(TRUE, "valid")
   est$estimate_status <- status
   est$valid <- status %in% c("valid", "infinite")
   est$se_status <- ifelse(is.na(est$se), "missing",
