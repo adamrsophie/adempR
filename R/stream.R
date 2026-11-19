@@ -23,10 +23,9 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
   man <- run$manifest
   study <- man$study
   p <- run_paths(run$path)
-  R <- man$replications
-  if (!is.null(man$sequential$analyzed)) R <- min(R, man$sequential$analyzed)
-  fps <- unlist(man$fingerprints$methods)
   keys <- study$scenarios$keys
+  R <- planned_replications(man, keys)
+  fps <- unlist(man$fingerprints$methods)
   files <- sub("\\.md5$", ".rds", list.files(p$batches, pattern = "\\.md5$", full.names = TRUE))
   read_batch <- function(f) {
     side <- sub("\\.rds$", ".md5", f)
@@ -40,7 +39,8 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
   keep <- function(df) {
     if (is.null(df) || !nrow(df)) return(NULL)
     if (is.null(df$round)) df$round <- 0L
-    df <- df[df$scenario_key %in% keys & df$replication <= R & df$method %in% names(fps), , drop = FALSE]
+    df <- df[df$scenario_key %in% keys & df$method %in% names(fps), , drop = FALSE]
+    df <- df[df$replication <= R[df$scenario_key], , drop = FALSE]
     df[df$method_fp == fps[df$method], , drop = FALSE]
   }
   task_id <- function(df) paste(df$scenario_key, df$replication, df$method, sep = "\r")

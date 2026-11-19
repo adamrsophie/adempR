@@ -210,17 +210,19 @@ sim_results <- function(run) {
   study <- man$study
   raw <- read_raw_results(run$path)
   keys <- study$scenarios$keys
-  R <- man$replications
-  # A sequential run is analyzed at the replication count of its stopping
-  # look, even when later replications are on disk.
-  if (!is.null(man$sequential$analyzed)) R <- min(R, man$sequential$analyzed)
+  # Replications per scenario: the run's count (raised for scenarios that
+  # received more by adaptive allocation). A sequential run is analyzed at
+  # the replication count of its stopping look, even when later
+  # replications are on disk.
+  R <- planned_replications(man, keys)
   # Results are selected by the fingerprints stored when they were run, never
   # by fingerprints recomputed in the current session.
   fps <- unlist(man$fingerprints$methods)
   gen_fp <- man$fingerprints$generator
   keep_rep <- function(df) {
     if (is.null(df)) return(df)
-    df[df$scenario_key %in% keys & df$replication <= R, , drop = FALSE]
+    df <- df[df$scenario_key %in% keys, , drop = FALSE]
+    df[df$replication <= R[df$scenario_key], , drop = FALSE]
   }
   keep_meth <- function(df) {
     if (is.null(df)) return(df)

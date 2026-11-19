@@ -237,6 +237,10 @@ check_frozen <- function(study) {
 #'   uses the same stream of every scenario, method and truth even when the
 #'   original run was extended with new methods or scenarios over time.
 #'   Ignored when the directory already holds a run.
+#' @param scenario_replications Optional replication counts for some
+#'   scenarios above `replications`, named by scenario label or key (see
+#'   [sim_run_adaptive()]). Counts only increase; they are stored in the
+#'   manifest and used by every summary.
 #' @param cost Optional function of the scenario returning the relative cost
 #'   of one task (for example `function(scenario) scenario$n^2`, or times
 #'   per scenario from [sim_pilot()]). Tasks are then scheduled longest
@@ -259,7 +263,8 @@ check_frozen <- function(study) {
 sim_run <- function(study, replications, seed, path, backend = c("sequential", "future"),
                     chunk_size = 25L, workers = NULL, max_tasks = 1e6,
                     update = FALSE, retry_failed = FALSE, label = NULL,
-                    progress = interactive(), rng_registry = NULL, cost = NULL) {
+                    progress = interactive(), rng_registry = NULL, cost = NULL,
+                    scenario_replications = NULL) {
   stopifnot(inherits(study, "adempr_study"))
   backend <- match.arg(backend)
   if (!(isTRUE(update) || isFALSE(update) || identical(update, "production"))) {
@@ -299,10 +304,22 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   p$generator_fp <- man$fingerprints$generator
   done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed)
   # the budget is checked before the manifest changes or the task grid exists
-  n_todo <- count_tasks(study, man$replications, done)
+  if (!is.null(scenario_replications)) {
+    sr <- scenario_replications
+    if (!is.numeric(sr) || is.null(names(sr)) || any(!vapply(sr, is_count, logical(1), min = 1))) {
+      stopf("`scenario_replications` must be positive whole numbers named by scenario.")
+    }
+    ks <- vapply(names(sr), function(s) resolve_scenario(study, s), character(1))
+    cur <- man$scenario_replications %||% integer()
+    for (i in seq_along(ks)) cur[[ks[i]]] <- max(cur[ks[i]] %||% 0L, as.integer(sr[[i]]), na.rm = TRUE)
+    man$scenario_replications <- cur
+  }
+  plan_R <- planned_replications(man, study$scenarios$keys)
+  if (!is.null(man$sequential$analyzed)) plan_R[] <- man$replications
+  n_todo <- count_tasks(study, plan_R, done)
   if (n_todo > max_tasks) {
     stopf("This call would run %s method fits (%d scenarios x up to %d replications x %d methods), more than `max_tasks` = %s. Check the design or raise `max_tasks` deliberately.",
-          format(n_todo, big.mark = ","), length(study$scenarios), man$replications,
+          format(n_todo, big.mark = ","), length(study$scenarios), max(plan_R),
           length(study$methods), format(max_tasks, big.mark = ","))
   }
   man <- record_session(man)
@@ -320,7 +337,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
       fingerprint_before = man$study_fingerprint, fingerprint_after = man$study_fingerprint)))
     write_manifest(p, man)
   }
-  todo <- plan_tasks(study, man$replications, done)
+  todo <- plan_tasks(study, plan_R, done)
   ctx <- list(seed = seed, domain = man$rng_domain, registry = man$rng_registry,
               cache = new.env(parent = emptyenv()),
               dgp_stage = "dgp", method_stage = "method")
@@ -431,19 +448,28 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE) {
 }
 
 # Number of method fits still to run, without building the grid.
+# `R` is one replication count, or one per scenario (named by key).
+per_scenario <- function(R, keys) {
+  if (length(R) == 1L && is.null(names(R))) return(stats::setNames(rep(as.integer(R), length(keys)), keys))
+  stats::setNames(as.integer(R[keys]), keys)
+}
+
 count_tasks <- function(study, R, done) {
   keys <- study$scenarios$keys
+  Rs <- per_scenario(R, keys)
   ms <- names(study$methods)
-  d <- done[done$scenario_key %in% keys & done$method %in% ms & done$replication <= R, ,
-            drop = FALSE]
+  d <- done[done$scenario_key %in% keys & done$method %in% ms &
+              done$replication <= Rs[done$scenario_key], , drop = FALSE]
   n_done <- length(unique(paste(d$scenario_key, d$replication, d$method, sep = "\r")))
-  as.numeric(length(keys)) * R * length(ms) - n_done
+  sum(as.numeric(Rs)) * length(ms) - n_done
 }
 
 plan_tasks <- function(study, R, done) {
   keys <- study$scenarios$keys
-  grid <- expand.grid(replication = seq_len(R), scenario_key = keys,
+  Rs <- per_scenario(R, keys)
+  grid <- expand.grid(replication = seq_len(max(Rs)), scenario_key = keys,
                       method = names(study$methods), stringsAsFactors = FALSE)
+  grid <- grid[grid$replication <= Rs[grid$scenario_key], , drop = FALSE]
   id_all <- paste(grid$scenario_key, grid$replication, grid$method, sep = "\r")
   id_done <- paste(done$scenario_key, done$replication, done$method, sep = "\r")
   grid[!(id_all %in% id_done), c("scenario_key", "replication", "method")]
@@ -722,4 +748,17 @@ lpt_order <- function(study, tasks, cost) {
   }, numeric(1))
   tk <- vapply(tasks, `[[`, character(1), "scenario_key")
   tasks[order(-w[tk], seq_along(tasks))]
+}
+
+# Replications planned per scenario: the run's count, raised for scenarios
+# that received more by adaptive allocation.
+planned_replications <- function(man, keys) {
+  R <- stats::setNames(rep(as.integer(man$replications), length(keys)), keys)
+  extra <- man$scenario_replications
+  if (length(extra)) {
+    k <- intersect(names(extra), keys)
+    R[k] <- pmax(R[k], as.integer(extra[k]))
+  }
+  if (!is.null(man$sequential$analyzed)) R <- pmin(R, man$sequential$analyzed)
+  R
 }

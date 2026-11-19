@@ -299,7 +299,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
             scenario_key = key, scenario_id = labels[si], method = mn, estimand = en,
             measure = mid, label = label, value = r$value, mcse = r$mcse,
             lower = r$lower, upper = r$upper, n_eligible = r$n,
-            n_planned = man$replications, n_generated = length(gen_ok),
+            n_planned = unname(planned_replications(man, key)), n_generated = length(gen_ok),
             n_generation_failed = n_gen_attempted - length(gen_ok),
             n_attempted = nrow(rows), n_completed = sum(rows$attempt_status == "ok"),
             n_valid = sum(rows$valid), truth_kind = tkind, truth_se = tse,
@@ -522,8 +522,8 @@ as.data.frame.adempr_summary <- function(x, ...) {
 sim_flow <- function(run) {
   res <- sim_results(run)
   man <- res$manifest
-  planned <- min(man$replications, man$sequential$analyzed %||% man$replications)
   f <- failure_table(res)
+  planned <- unname(planned_replications(man, man$study$scenarios$keys)[f$scenario_key])
   est <- res$estimates
   fit_failed <- vapply(seq_len(nrow(f)), function(i) {
     if (is.null(est) || !nrow(est)) return(0L)

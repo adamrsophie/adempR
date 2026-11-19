@@ -19,7 +19,8 @@ sim_run(
   label = NULL,
   progress = interactive(),
   rng_registry = NULL,
-  cost = NULL
+  cost = NULL,
+  scenario_replications = NULL
 )
 
 sim_resume(path, ...)
@@ -75,6 +76,11 @@ per scenario from \code{\link[=sim_pilot]{sim_pilot()}}). Tasks are then schedul
 first (LPT), which shortens the total time with parallel workers when
 scenarios differ in cost. Scheduling never changes results: every task
 has its own preassigned streams.}
+
+\item{scenario_replications}{Optional replication counts for some
+scenarios above \code{replications}, named by scenario label or key (see
+\code{\link[=sim_run_adaptive]{sim_run_adaptive()}}). Counts only increase; they are stored in the
+manifest and used by every summary.}
 
 \item{...}{Further arguments passed to \code{sim_run()}.}
 }

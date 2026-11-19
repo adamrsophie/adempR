@@ -211,3 +211,76 @@ print.adempr_pilot <- function(x, ...) {
   cat("\nPilot results are not part of the production run.\n")
   invisible(x)
 }
+
+#' Allocate replications adaptively to reach a precision target
+#'
+#' Runs `initial` replications per scenario, then repeatedly estimates the
+#' Monte Carlo standard error of `measure` in every scenario and gives each
+#' scenario that misses `target` the replications it needs (from MCSE
+#' proportional to `1 / sqrt(R)`, inflated by `inflate`), up to
+#' `max_replications`, until every scenario meets the target or reaches
+#' the cap. Scenarios that are already precise get no more replications, so
+#' the budget goes where the Monte Carlo error is. The earlier replications
+#' are kept (Morris's proposal for choosing the number of imputations
+#' applied to scenarios). The allocation uses the estimated variability
+#' only; it does not look at the value of the measure, so it does not
+#' steer the estimate. Every round is recorded in the manifest.
+#'
+#' @param study A study.
+#' @param measure Measure whose MCSE is targeted.
+#' @param target Target MCSE.
+#' @param seed,path Passed to [sim_run()].
+#' @param initial Replications per scenario in the first round.
+#' @param max_replications Cap per scenario.
+#' @param max_rounds Maximum number of allocation rounds.
+#' @param inflate Factor applied to the projected requirement.
+#' @param ... Passed to [sim_run()].
+#' @return The run, with `run$allocation`: one row per round and scenario
+#'   giving the replications, the worst MCSE over methods and estimands, and
+#'   whether the target is met.
+#' @examples
+#' study <- sim_study("demo", scenarios = sim_scenarios(sd = c(1, 4)),
+#'   generate = function(scenario, context) rnorm(20, 0, scenario$sd),
+#'   estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+#'   methods = list(mean = function(data) sim_estimate("mean", mean(data))),
+#'   measures = "bias")
+#' run <- sim_run_adaptive(study, "bias", target = 0.05, seed = 1,
+#'                         path = tempfile("adempR-run-"), initial = 20)
+#' run$allocation
+#' @export
+sim_run_adaptive <- function(study, measure, target, seed, path, initial = 100L,
+                             max_replications = 1e4, max_rounds = 5L, inflate = 1.1, ...) {
+  stopifnot(inherits(study, "adempr_study"))
+  if (!is_scalar_number(target) || target <= 0) stopf("`target` must be a positive number.")
+  if (!is_count(initial, 2)) stopf("`initial` must be a whole number of at least 2.")
+  if (!is_count(max_replications, initial)) stopf("`max_replications` must be at least `initial`.")
+  run <- sim_run(study, replications = initial, seed = seed, path = path, ...)
+  log <- list()
+  for (round in seq_len(max_rounds + 1L)) {
+    s <- as.data.frame(sim_summarise(run, measures = measure))
+    s <- s[s$measure == measure, , drop = FALSE]
+    worst <- tapply(s$mcse, s$scenario_key, function(v) if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE))
+    have <- tapply(s$n_planned, s$scenario_key, max)
+    keys <- names(worst)
+    met <- !is.na(worst) & worst <= target
+    capped <- have >= max_replications
+    log[[round]] <- data.frame(round = round, scenario_id = study$scenarios$labels[match(keys, study$scenarios$keys)],
+                               replications = as.integer(have), mcse = as.numeric(worst),
+                               target_met = met, stringsAsFactors = FALSE)
+    todo <- !met & !capped & !is.na(worst)
+    if (!any(todo) || round > max_rounds) break
+    need <- ceiling(have[todo] * (worst[todo] / target)^2 * inflate)
+    need <- pmin(pmax(need, have[todo] + 1L), max_replications)
+    run <- sim_run(study, replications = initial, seed = seed, path = path,
+                   scenario_replications = stats::setNames(as.integer(need), keys[todo]), ...)
+  }
+  alloc <- bind_rows(log)
+  rownames(alloc) <- NULL
+  update_manifest(path, function(man) {
+    man$adaptive <- list(measure = measure, target = target, allocation = alloc)
+    man
+  })
+  run <- sim_open(path)
+  run$allocation <- alloc
+  run
+}
