@@ -9,7 +9,7 @@
 #' run can be monitored and stopped at any time.
 #'
 #' For proportions (`"coverage"`, `"rejection"`) the contributions are
-#' bounded in [0, 1], hence 1/2 sub-Gaussian, and the two-sided normal
+#' bounded between 0 and 1, hence 1/2 sub-Gaussian, and the two-sided normal
 #' mixture boundary of Robbins (1970) gives a sequence that is valid for
 #' every sample size without approximation:
 #' `|S_t - t p| < sqrt((t/4 + rho) log((t/4 + rho) / (rho alpha^2)))`.

@@ -54,6 +54,7 @@ Suggests:
     lme4,
     logistf,
     metafor,
+    pkgload,
     rmarkdown,
     rsimsum,
     SimDesign,
