@@ -74,10 +74,13 @@ Ignored when the directory already holds a run.}
 
 \item{cost}{Optional function of the scenario returning the relative cost
 of one task (for example \code{function(scenario) scenario$n^2}, or times
-per scenario from \code{\link[=sim_pilot]{sim_pilot()}}). Tasks are then scheduled longest
-first (LPT), which shortens the total time with parallel workers when
-scenarios differ in cost. Scheduling never changes results: every task
-has its own preassigned streams.}
+per scenario from \code{\link[=sim_pilot]{sim_pilot()}}). It must be deterministic; it is
+evaluated for every scenario before the run starts, without touching
+the caller's random number stream. Tasks are then packed into batches
+longest first (LPT), so batches carry nearly equal work and costly
+batches start first, which shortens the total time with parallel
+workers when scenarios differ in cost. Scheduling never changes
+results: every task has its own preassigned streams.}
 
 \item{scenario_replications}{Optional replication counts for some
 scenarios above \code{replications}, named by scenario label or key (see

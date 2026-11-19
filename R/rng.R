@@ -55,7 +55,8 @@ with_rng_state <- function(seed, expr) {
 # truths, generator checks). The caller's generator is restored, and a call
 # that draws random numbers stops with an error instead of silently
 # advancing the caller's stream or giving a different value at every call.
-deterministic_call <- function(what, fun, ...) {
+deterministic_call <- function(what, fun, ...,
+                               hint = " Use a Monte Carlo truth (sim_truth_mc()) for a value that needs simulation.") {
   state <- rng_save()
   on.exit(rng_restore(state), add = TRUE)
   set.seed(1L, kind = RNG_KIND[1], normal.kind = RNG_KIND[2], sample.kind = RNG_KIND[3])
@@ -65,7 +66,7 @@ deterministic_call <- function(what, fun, ...) {
     get(".Random.seed", envir = globalenv())
   }
   if (!identical(before, after)) {
-    stopf("%s draws random numbers, but it must be deterministic. Use a Monte Carlo truth (sim_truth_mc()) for a value that needs simulation.", what)
+    stopf("%s draws random numbers, but it must be deterministic.%s", what, hint)
   }
   out
 }

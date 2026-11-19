@@ -276,10 +276,13 @@ check_frozen <- function(study) {
 #'   says otherwise).
 #' @param cost Optional function of the scenario returning the relative cost
 #'   of one task (for example `function(scenario) scenario$n^2`, or times
-#'   per scenario from [sim_pilot()]). Tasks are then scheduled longest
-#'   first (LPT), which shortens the total time with parallel workers when
-#'   scenarios differ in cost. Scheduling never changes results: every task
-#'   has its own preassigned streams.
+#'   per scenario from [sim_pilot()]). It must be deterministic; it is
+#'   evaluated for every scenario before the run starts, without touching
+#'   the caller's random number stream. Tasks are then packed into batches
+#'   longest first (LPT), so batches carry nearly equal work and costly
+#'   batches start first, which shortens the total time with parallel
+#'   workers when scenarios differ in cost. Scheduling never changes
+#'   results: every task has its own preassigned streams.
 #' @return An object of class `adempr_run`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -303,6 +306,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   if (!is.null(gpus) && (!length(gpus) || anyNA(gpus) || !(is.numeric(gpus) || is.character(gpus)))) {
     stopf("`gpus` must be device identifiers, for example 0:1.")
   }
+  weights <- if (is.null(cost)) NULL else cost_weights(study, cost)
   if (!(isTRUE(update) || isFALSE(update) || identical(update, "production"))) {
     stopf("`update` must be TRUE, FALSE or \"production\".")
   }
@@ -434,8 +438,8 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
               dgp_stage = "dgp", method_stage = "method")
   if (nrow(todo)) {
     tasks <- build_tasks(study, ctx, todo, attr(done, "data_md5"))
-    if (!is.null(cost)) tasks <- lpt_order(study, tasks, cost)
-    chunks <- split(tasks, ceiling(seq_along(tasks) / chunk_size))
+    chunks <- if (is.null(weights)) split(tasks, ceiling(seq_along(tasks) / chunk_size)) else
+      lpt_chunks(tasks, weights, chunk_size)
     if (progress) {
       message(sprintf("Running %d task(s) in %d batch(es) with the %s backend.",
                       length(tasks), length(chunks), backend))
@@ -571,15 +575,28 @@ count_tasks <- function(study, R, done) {
   sum(as.numeric(Rs)) * length(ms) - n_done
 }
 
+# Missing fits are generated per scenario and method, so the work done is
+# proportional to the planned count of each scenario, never to the largest
+# count times every scenario.
 plan_tasks <- function(study, R, done) {
   keys <- study$scenarios$keys
   Rs <- per_scenario(R, keys)
-  grid <- expand.grid(replication = seq_len(max(Rs)), scenario_key = keys,
-                      method = names(study$methods), stringsAsFactors = FALSE)
-  grid <- grid[grid$replication <= Rs[grid$scenario_key], , drop = FALSE]
-  id_all <- paste(grid$scenario_key, grid$replication, grid$method, sep = "\r")
-  id_done <- paste(done$scenario_key, done$replication, done$method, sep = "\r")
-  grid[!(id_all %in% id_done), c("scenario_key", "replication", "method")]
+  ms <- names(study$methods)
+  have <- if (is.null(done) || !nrow(done)) list() else
+    split(done$replication, paste(done$scenario_key, done$method, sep = "\r"))
+  out <- list()
+  for (m in ms) for (k in keys) {
+    miss <- setdiff(seq_len(Rs[[k]]), have[[paste(k, m, sep = "\r")]])
+    if (length(miss)) {
+      out[[length(out) + 1L]] <- data.frame(scenario_key = k, replication = miss, method = m,
+                                            stringsAsFactors = FALSE)
+    }
+  }
+  if (!length(out)) {
+    return(data.frame(scenario_key = character(), replication = integer(), method = character(),
+                      stringsAsFactors = FALSE))
+  }
+  do.call(rbind, out)
 }
 
 build_tasks <- function(study, ctx, todo, data_md5 = NULL) {
@@ -869,18 +886,43 @@ warn_patched <- function(pkgs) {
   invisible(bad)
 }
 
-# Longest processing time first: tasks of costly scenarios start first, so
-# workers finish close together instead of waiting on a late costly chunk.
-lpt_order <- function(study, tasks, cost) {
+# The cost of every scenario, evaluated before the run changes any state.
+# The function must be deterministic, so the schedule is reproducible and
+# the caller's random number stream is never advanced.
+cost_weights <- function(study, cost) {
   check_function(cost, "cost", "scenario")
-  keys <- unique(vapply(tasks, `[[`, character(1), "scenario_key"))
-  w <- vapply(keys, function(k) {
-    v <- call_flexible(cost, list(scenario = study$scenarios$values[[scenario_index(study$scenarios, k)]]))
+  keys <- study$scenarios$keys
+  vapply(seq_along(keys), function(i) {
+    v <- deterministic_call("`cost`", function() {
+      call_flexible(cost, list(scenario = study$scenarios$values[[i]]))
+    }, hint = "")
     if (!is_scalar_number(v) || v < 0) stopf("`cost` must return one nonnegative number per scenario.")
     as.numeric(v)
-  }, numeric(1))
-  tk <- vapply(tasks, `[[`, character(1), "scenario_key")
-  tasks[order(-w[tk], seq_along(tasks))]
+  }, numeric(1)) |> stats::setNames(keys)
+}
+
+# Tasks are packed into batches longest first (LPT): each task, in
+# decreasing order of cost, goes to the batch with the least work that
+# still has room. Batches then carry nearly equal work, so the way a
+# parallel backend groups consecutive batches onto workers cannot leave
+# one worker with all the costly scenarios. Costly batches go first.
+lpt_chunks <- function(tasks, w, chunk_size) {
+  n <- length(tasks)
+  nb <- ceiling(n / chunk_size)
+  tw <- unname(w[vapply(tasks, `[[`, character(1), "scenario_key")])
+  ord <- order(-tw, seq_len(n))
+  load <- numeric(nb)
+  size <- integer(nb)
+  bin <- integer(n)
+  for (i in ord) {
+    open <- which(size < chunk_size)
+    b <- open[which.min(load[open])]
+    bin[i] <- b
+    load[b] <- load[b] + tw[i]
+    size[b] <- size[b] + 1L
+  }
+  chunks <- lapply(seq_len(nb), function(b) tasks[ord[bin[ord] == b]])
+  chunks[order(-load, seq_len(nb))]
 }
 
 # Replications planned per scenario: the run's count, raised for scenarios

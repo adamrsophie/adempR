@@ -197,11 +197,46 @@ test_that("LPT scheduling leaves results unchanged and orders costly scenarios f
   ctx <- list(seed = 3, domain = NULL, registry = a$manifest$rng_registry,
               cache = new.env(parent = emptyenv()), dgp_stage = "dgp", method_stage = "method")
   todo <- adempR:::plan_tasks(st, 2L, NULL)
-  tasks <- adempR:::lpt_order(st, adempR:::build_tasks(st, ctx, todo), function(scenario) scenario$n)
-  first <- st$scenarios$values[[adempR:::scenario_index(st$scenarios, tasks[[1]]$scenario_key)]]
+  w <- adempR:::cost_weights(st, function(scenario) scenario$n)
+  chunks <- adempR:::lpt_chunks(adempR:::build_tasks(st, ctx, todo), w, 1L)
+  first <- st$scenarios$values[[adempR:::scenario_index(st$scenarios, chunks[[1]][[1]]$scenario_key)]]
   expect_equal(first$n, 40L)
   expect_error(sim_run(st, replications = 1, seed = 3, path = run_path(), cost = function(scenario) -1),
                "nonnegative")
+})
+
+test_that("LPT batches carry balanced work, and a random cost is refused before the run starts", {
+  # costs 100, 1, 100, 1: contiguous batches of two would hold 101 and 101
+  # only by luck; packing gives every batch one costly and one cheap task
+  st <- normal_study(n = c(1L, 2L, 3L, 4L), mu = 0)
+  w <- stats::setNames(c(100, 1, 100, 1), st$scenarios$keys)
+  tasks <- lapply(st$scenarios$keys, function(k) list(scenario_key = k))
+  ch <- adempR:::lpt_chunks(tasks, w, 2L)
+  loads <- vapply(ch, function(b) sum(w[vapply(b, `[[`, "", "scenario_key")]), 0)
+  expect_equal(loads, c(101, 101))
+  # eight tasks into four batches of two: loads within one task of each other
+  w8 <- c(9, 8, 7, 6, 5, 4, 3, 2)
+  t8 <- lapply(seq_along(w8), function(i) list(scenario_key = as.character(i)))
+  l8 <- vapply(adempR:::lpt_chunks(t8, stats::setNames(w8, seq_along(w8)), 2L),
+               function(b) sum(w8[as.integer(vapply(b, `[[`, "", "scenario_key"))]), 0)
+  expect_equal(sort(l8), c(11, 11, 11, 11))
+  path <- run_path()
+  set.seed(42); before <- runif(1); set.seed(42)
+  expect_error(sim_run(st, replications = 1, seed = 3, path = path,
+                       cost = function(scenario) runif(1)), "draws random numbers")
+  expect_equal(runif(1), before)
+  expect_false(dir.exists(path))
+})
+
+test_that("planning missing work scales with each scenario's own count", {
+  st <- normal_study(n = c(10L, 20L), mu = 0)
+  R <- stats::setNames(c(3L, 1e6L), st$scenarios$keys)
+  done <- data.frame(scenario_key = st$scenarios$keys[2], replication = seq_len(1e6),
+                     method = "t_interval", stringsAsFactors = FALSE)
+  todo <- adempR:::plan_tasks(st, R, done)
+  expect_equal(nrow(todo), 3L)
+  expect_true(all(todo$scenario_key == st$scenarios$keys[1]))
+  expect_equal(nrow(adempR:::plan_tasks(st, 2L, NULL)), 4L)
 })
 
 test_that("changes that alter a production run need explicit confirmation", {
