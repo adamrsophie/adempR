@@ -1,0 +1,14 @@
+{
+  "title": "adempR: Reproducible Statistical Simulation Studies",
+  "description": "A framework for statistical simulation studies organized by aims, data-generating mechanisms, estimands, methods and performance measures (ADEMP). Provides typed estimands with exact, numerical, Monte Carlo and data set specific truth, metric-specific failure handling and denominators, content-keyed L'Ecuyer-CMRG random number streams that are invariant to scheduling, recoverable execution with atomic commits, checkpointing, resumption and replay, performance measures with Monte Carlo standard errors, paired method comparisons, precision planning, sequential stopping, diagnostics, HTML reports and reproducible export bundles.",
+  "upload_type": "software",
+  "license": "GPL-3.0-only",
+  "access_right": "open",
+  "creators": [{"name": "Sophie, Adam R"}],
+  "keywords": ["simulation study", "ADEMP", "Monte Carlo", "Monte Carlo standard error", "reproducibility", "statistical methods", "R"],
+  "related_identifiers": [
+    {"identifier": "https://github.com/adamrsophie/adempR", "relation": "isSupplementTo", "scheme": "url"},
+    {"identifier": "https://adamrsophie.github.io/adempR/", "relation": "isDocumentedBy", "scheme": "url"},
+    {"identifier": "10.1002/sim.8086", "relation": "references", "scheme": "doi"}
+  ]
+}

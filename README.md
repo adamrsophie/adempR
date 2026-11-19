@@ -1,4 +1,4 @@
-# adempR <img src="man/figures/logo.png" align="right" height="139" alt="adempR logo" />
+# adempR: Reproducible Statistical Simulation Studies <img src="man/figures/logo.png" align="right" height="139" alt="adempR logo" />
 
 <!-- badges: start -->
 [![R-CMD-check](https://github.com/adamrsophie/adempR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/adamrsophie/adempR/actions/workflows/R-CMD-check.yaml)
@@ -11,71 +11,270 @@
 [![Archived on Software Heritage](https://archive.softwareheritage.org/badge/origin/https://github.com/adamrsophie/adempR/)](https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/adamrsophie/adempR)
 <!-- badges: end -->
 
-adempR runs statistical simulation studies as reproducible experiments.
-A study is declared with the ADEMP structure of Morris, White and Crowther
-(2019): **A**ims, **D**ata-generating mechanisms, **E**stimands,
-**M**ethods and **P**erformance measures. adempR then
+***adempR*** runs statistical simulation studies as reproducible scientific
+experiments. A study is declared with the ADEMP structure of Morris, White and
+Crowther (2019): **A**ims, **D**ata-generating mechanisms, **E**stimands,
+**M**ethods and **P**erformance measures. Each part is a declared R object,
+the study is fingerprinted, and the run is recorded in a directory that can be
+interrupted, resumed, extended, replayed, summarized and exported.
 
-* checks that every method is evaluated against the estimand it actually
-  targets, with exact, numerical, Monte Carlo or data set specific truth;
-* keeps every failed fit and gives each performance measure its own
-  denominator, with failures reported by default;
-* assigns random number streams by content, so results do not change when
-  scenarios or methods are reordered, chunks are resized, the backend
-  changes, or replications and methods are added;
-* records progress atomically, so interrupted runs resume without double
-  counting, and any replication can be replayed;
-* reports Monte Carlo standard errors for every measure, paired method
-  comparisons, precision planning and sequential stopping with valid
-  intervals;
-* writes a self-contained HTML report and a reproducible export bundle.
+Simulation studies are easy to get subtly wrong: a method judged against a
+parameter it does not target, failed fits silently dropped, results that
+change when a scenario is added or the job runs in parallel, a resumed run
+that counts replications twice, performance reported without Monte Carlo
+error. adempR is built to make each of these errors either impossible or
+visible:
+
+- **Estimands are first class.** Each estimand declares its population,
+  conditioning set, effect type and scale; methods declare what they target,
+  and mismatches are validation errors. Truth can be exact, numerical, Monte
+  Carlo (with its own standard error carried into the summary), data set
+  specific, or unknown.
+- **Each measure has its own denominator.** Estimate, standard error,
+  interval and test validity are classified separately, failures are reported
+  by default, and composite measures over all generated data sets are
+  available.
+- **Random numbers are tied to content, not position.** L'Ecuyer-CMRG streams
+  are keyed by stage, scenario content and component, so results do not
+  change when scenarios or methods are reordered, chunks are resized, the
+  backend changes, or replications and methods are added.
+- **Runs are recoverable and auditable.** Atomic commits with checksums,
+  quarantine of corrupt files, duplicate and conflict detection, stale lock
+  recovery, selective invalidation by fingerprint, protocol freezing and
+  amendments, and replay of any single replication.
+- **Every measure comes with its Monte Carlo error.** Seventeen built in
+  measures with MCSEs, exact intervals for proportions, paired method
+  comparisons, precision planning, pilots, and sequential stopping with
+  intervals that stay valid after optional stopping.
 
 ## Installation
 
 ```r
+# Development version
 # install.packages("remotes")
 remotes::install_github("adamrsophie/adempR")
 ```
 
-## Example
+adempR needs R 4.2.0 or later. Its hard dependencies are `jsonlite`,
+`codetools` and base R packages. It contains no compiled code. The parallel
+backend uses `future` and `future.apply` when they are installed.
+
+## Quick start
+
+Compare the t interval with the Wald interval for a normal mean.
 
 ```r
 library(adempR)
 
 study <- sim_study(
   name = "normal_mean",
-  aims = "Coverage of the t interval for a normal mean",
+  aims = "Coverage and power of t and Wald intervals for a normal mean",
   scenarios = sim_scenarios(n = c(10L, 40L), mu = c(0, 0.5)),
   generate = function(scenario, context) rnorm(scenario$n, scenario$mu),
-  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) scenario$mu))),
-  methods = list(t = function(data) {
-    tt <- t.test(data)
-    sim_estimate("mean", mean(data), se = sd(data) / sqrt(length(data)),
-                 lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95,
-                 p_value = tt$p.value, null = 0)
-  }),
+  estimands = list(sim_estimand("mean", population = "normal DGP",
+    truth = sim_truth_exact(function(scenario) scenario$mu))),
+  methods = list(
+    t = function(data) {
+      tt <- t.test(data)
+      sim_estimate("mean", mean(data), se = sd(data) / sqrt(length(data)),
+                   lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95,
+                   p_value = tt$p.value, null = 0)
+    },
+    wald = function(data) {
+      m <- mean(data); se <- sd(data) / sqrt(length(data))
+      sim_estimate("mean", m, se = se, lower = m - 1.96 * se, upper = m + 1.96 * se,
+                   level = 0.95, p_value = 2 * pnorm(-abs(m / se)), null = 0)
+    }),
   measures = c("bias", "empse", "coverage", "rejection"))
+
+sim_validate(study, smoke = TRUE)
+#> <adempR validation: 0 error(s), 0 warning(s)>
 
 path <- file.path(tempdir(), "normal-mean")
 run <- sim_run(study, replications = 1000, seed = 2026, path = path)
-sim_summarise(run)
-
-# interrupt at any time, then call sim_run() again to resume
-sim_replay(run, scenario = 1, replication = 17)$matches
-sim_report(run, file.path(tempdir(), "report.html"))
 ```
+
+Performance with Monte Carlo standard errors. The rejection rate is labeled
+as the type I error where the null is true and as power elsewhere.
+
+```r
+perf <- as.data.frame(sim_summarise(run))
+perf[perf$measure %in% c("coverage", "rejection"),
+     c("scenario_id", "method", "label", "value", "mcse")]
+#>   scenario_id method        label value    mcse
+#>    n=10, mu=0      t     coverage 0.943 0.00733
+#>    n=10, mu=0      t type_i_error 0.057 0.00733
+#>    n=10, mu=0   wald     coverage 0.916 0.00877
+#>    n=10, mu=0   wald type_i_error 0.084 0.00877
+#>  n=10, mu=0.5      t        power 0.304 0.01455
+#>  n=10, mu=0.5   wald        power 0.397 0.01547
+#>  ...
+```
+
+Both methods saw the same data sets, so their difference is estimated from
+the paired replications and is far more precise than the two separate MCSEs
+suggest:
+
+```r
+cmp <- sim_compare(run, c("t", "wald"), measures = "coverage")
+cmp[c("scenario_id", "value", "mcse", "n_common")]
+#>   scenario_id  value    mcse n_common
+#>    n=10, mu=0 -0.027 0.00513     1000
+#>    n=40, mu=0 -0.009 0.00299     1000
+#>  n=10, mu=0.5 -0.036 0.00589     1000
+#>  n=40, mu=0.5 -0.008 0.00282     1000
+```
+
+Stop R at any point and call `sim_run()` again with the same arguments: only
+missing replications run. Raise `replications` to extend the study; the
+first 1000 stay unchanged. Recompute any single replication from its
+recorded random number streams, then write the report and a reproducible
+bundle:
+
+```r
+sim_replay(run, scenario = 1, replication = 17)$matches
+#> [1] TRUE
+
+sim_report(run, file.path(tempdir(), "normal-mean.html"))
+sim_export(run, file.path(tempdir(), "normal-mean-bundle"))
+```
+
+## Workflow
+
+| Step | Functions |
+|------|-----------|
+| Protocol and design | `sim_protocol()`, `sim_scenarios()`, `sim_constraint()`, `sim_scenarios_table()`, `sim_scenarios_sample()`, `sim_scenarios_bind()`, `sim_completeness()` |
+| Estimands and truth | `sim_estimand()`, `sim_truth_exact()`, `sim_truth_numeric()`, `sim_truth_mc()`, `sim_truth_dataset()`, `sim_truth_unknown()`, `sim_truth_value()` |
+| Data and methods | `sim_generator()`, `sim_data()`, `sim_method()`, `sim_estimate()`, `sim_failure_policy()`, `sim_retention()` |
+| Study | `sim_study()`, `sim_validate()`, `sim_fingerprint()`, `sim_freeze()`, `sim_amend()` |
+| Planning | `sim_plan_replications()`, `sim_pilot()` |
+| Execution | `sim_run()`, `sim_resume()`, `sim_open()`, `sim_unlock()`, `sim_run_sequential()` |
+| Results | `sim_results()`, `sim_truth()`, `sim_summarise()`, `sim_compare()`, `sim_pareto()`, `sim_measures()`, `sim_measure()` |
+| Checking | `sim_check_dgp()`, `sim_diagnose()`, `sim_plot()`, `sim_replay()`, `sim_capabilities()` |
+| Reporting | `sim_report()`, `sim_export()`, `sim_import()` |
+| Generator helpers | `sim_rmvnorm()`, `sim_check_matrix()`, `sim_calibrate_intercept()`, `sim_rweibull_ph()`, `sim_add_missing()`, `sim_rclustered()`, `sim_contaminate()` |
+| Low level | `rng_registry()`, `rng_task_seed()`, `sim_accumulator()`, `sim_accumulate()`, `sim_merge()`, `sim_accumulated()` |
+
+## Performance measures
+
+| Measure | Eligible replications | MCSE |
+|---------|-----------------------|------|
+| `bias`, `mae`, `mse` | usable estimate and truth | sample SD of contributions over sqrt(n) |
+| `relbias` | usable estimate, nonzero truth | delta method for varying truth |
+| `rmse` | usable estimate and truth | delta method |
+| `empse` | usable estimate | kurtosis based variance of the sample variance |
+| `mean_se`, `rmvar` | valid standard error | mean, or delta method |
+| `se_ratio` | valid standard error | Morris et al. (2019) Table 6 |
+| `coverage`, `noncoverage_lower`, `noncoverage_upper` | valid interval and truth | binomial, with Clopper-Pearson interval |
+| `be_coverage` | valid interval | binomial |
+| `width` | valid interval | sample SD over sqrt(n) |
+| `rejection` | valid test | binomial; labeled type I error or power |
+| `usable`, `usable_coverage` | all generated data sets | binomial |
+
+Custom measures are defined with `sim_measure()`; no MCSE is claimed for a
+nonlinear aggregate unless one is supplied. Comparisons add paired
+differences of any linear measure and relative precision (analytic MCSE
+plus a paired bootstrap).
 
 ## Documentation
 
-The [website](https://adamrsophie.github.io/adempR/) has a getting
-started guide and articles on protocols and scenarios, estimands and
-truth, failures and denominators, random numbers, recovery and replay,
-performance measures and their Monte Carlo error, comparisons, planning
-and sequential stopping, diagnostics and reporting, worked examples, the
-relation to other simulation packages, and a
-[capability matrix](https://adamrsophie.github.io/adempR/articles/capabilities.html)
-that states what is verified and by which test.
+The [website](https://adamrsophie.github.io/adempR/) has the reference
+manual and these articles:
+
+- [Getting started](https://adamrsophie.github.io/adempR/articles/adempR.html)
+- [Protocols and scenario designs](https://adamrsophie.github.io/adempR/articles/protocol-and-scenarios.html)
+- [Estimands and true values](https://adamrsophie.github.io/adempR/articles/estimands-and-truth.html)
+  (including marginal and conditional odds ratios)
+- [Failures and denominators](https://adamrsophie.github.io/adempR/articles/failures-and-denominators.html)
+  (logistic regression with separation)
+- [Random numbers and reproducibility](https://adamrsophie.github.io/adempR/articles/rng-and-reproducibility.html)
+- [Execution, recovery and replay](https://adamrsophie.github.io/adempR/articles/execution-and-recovery.html)
+- [Performance measures and Monte Carlo error](https://adamrsophie.github.io/adempR/articles/performance-measures.html)
+- [Comparing methods](https://adamrsophie.github.io/adempR/articles/comparisons.html)
+- [Planning replications and sequential stopping](https://adamrsophie.github.io/adempR/articles/planning-and-sequential.html)
+- [Diagnostics and reporting](https://adamrsophie.github.io/adempR/articles/diagnostics-and-reporting.html)
+- [Worked examples](https://adamrsophie.github.io/adempR/articles/examples.html):
+  clustered data, survival at a horizon, missing data, meta-analysis
+- [adempR and other simulation packages](https://adamrsophie.github.io/adempR/articles/ecosystem.html)
+- [Capabilities, status and evidence](https://adamrsophie.github.io/adempR/articles/capabilities.html)
+
+## Validation
+
+- Built in measures and their MCSEs are tested against hand calculations
+  from the formulas, and against
+  [rsimsum](https://CRAN.R-project.org/package=rsimsum) where the
+  definitions agree.
+- Scientific tests check known results: the t interval for a normal mean,
+  informative failures and conditional versus composite denominators, the
+  noncollapsible marginal odds ratio with Monte Carlo truth, paired
+  comparisons, nested resampling, and the simultaneous coverage of the
+  sequential stopping rule.
+- Operational tests compare results bit for bit across scenario order,
+  method order, chunk size, the `future` backend, extension and method
+  addition; kill R with `SIGKILL` at each stage of a commit and check that
+  the resumed run equals an uninterrupted one; and check corruption
+  quarantine, duplicate and conflict detection, stale locks, replay,
+  selective invalidation, retention and bundle import in a clean process.
+- Continuous integration runs `R CMD check` on Linux, macOS and Windows.
+
+The [capability matrix](https://adamrsophie.github.io/adempR/articles/capabilities.html)
+lists every feature as verified, implemented, experimental or deferred, with
+the test that supports each claim. Deferred in 0.1.0: vector and functional
+estimands, out of core result storage, tested cluster scheduler integration,
+time-uniform confidence sequences, variance reduction designs, adaptive
+allocation, Bayesian calibration adapters and benchmarks.
+
+## Related packages
+
+[SimDesign](https://CRAN.R-project.org/package=SimDesign),
+[simChef](https://github.com/Yu-Group/simChef),
+[SimEngine](https://CRAN.R-project.org/package=SimEngine),
+[simpr](https://CRAN.R-project.org/package=simpr) and
+[simsalapar](https://CRAN.R-project.org/package=simsalapar) run simulation
+studies; [rsimsum](https://CRAN.R-project.org/package=rsimsum),
+[simhelpers](https://CRAN.R-project.org/package=simhelpers) and
+[simMetric](https://CRAN.R-project.org/package=simMetric) analyze their
+results; [simstudy](https://CRAN.R-project.org/package=simstudy) and
+[simsurv](https://CRAN.R-project.org/package=simsurv) generate data. adempR
+results are plain data frames that work with the analysis packages, and its
+generators can call the data generation packages. See the
+[ecosystem article](https://adamrsophie.github.io/adempR/articles/ecosystem.html)
+for a comparison.
+
+## Citing adempR
+
+```r
+citation("adempR")
+```
+
+The repository ships machine readable citation and software metadata:
+
+- [`CITATION.cff`](CITATION.cff): Citation File Format (GitHub "Cite this
+  repository", Zenodo).
+- [`codemeta.json`](codemeta.json): CodeMeta 2.0 software metadata.
+- [`.zenodo.json`](.zenodo.json): Zenodo deposit metadata.
+- `inst/CITATION`: the R level citation.
+- `inst/REFERENCES.bib`: the methodological references, checked against
+  Crossref.
+
+Please also cite the methodological work your study relies on, in
+particular Morris, White and Crowther (2019),
+[doi:10.1002/sim.8086](https://doi.org/10.1002/sim.8086).
+
+## Contributing
+
+Bug reports, feature requests and pull requests are welcome; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md). A wrong number is the most useful bug
+report: include a small study that reproduces it and the value you expected.
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security
+issues privately as described in [`SECURITY.md`](SECURITY.md).
+
+## Author
+
+- Adam R Sophie (author, maintainer, copyright holder),
+  <adamrsophie@gmail.com>
 
 ## License
 
-GPL-3.
+GPL-3. See [`LICENSE.md`](LICENSE.md) or
+<https://www.gnu.org/licenses/gpl-3.0> for the full license text.
