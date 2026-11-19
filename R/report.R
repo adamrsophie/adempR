@@ -82,6 +82,13 @@ REFERENCES <- data.frame(
 #' @param file Output HTML file.
 #' @param overwrite Overwrite an existing file.
 #' @param plots Include plots.
+#' @param blind_methods Replace method names by neutral labels
+#'   (`method_A`, `method_B`, ...) in a random order, and leave out method
+#'   code, descriptions and versions, so the results can be interpreted
+#'   before the methods are known. The key is written next to the report
+#'   (`<file>.blinding-key.csv`); keep it apart until the interpretation is
+#'   fixed.
+#' @param blind_seed Seed of the random order of the labels.
 #' @return The file path, invisibly.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -94,12 +101,17 @@ REFERENCES <- data.frame(
 #' f <- sim_report(run, tempfile(fileext = ".html"), plots = FALSE)
 #' file.exists(f)
 #' @export
-sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
+sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods = FALSE,
+                       blind_seed = 1L) {
   if (!is_scalar_character(file)) stopf("`file` must be a path.")
   if (file.exists(file) && !overwrite) {
     stopf("%s exists; use `overwrite = TRUE` to replace it.", file)
   }
   res <- sim_results(run)
+  if (isTRUE(blind_methods)) {
+    res <- blind_results(res, blind_seed)
+    utils::write.csv(res$blinding, paste0(file, ".blinding-key.csv"), row.names = FALSE)
+  }
   man <- res$manifest
   study <- man$study
   summ <- sim_summarise(res)
@@ -208,7 +220,10 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
                description = m$description %||% "", stringsAsFactors = FALSE)
   }))
   add(html_table(md))
-  for (mn in names(study$methods)) {
+  if (isTRUE(blind_methods)) {
+    add("<p class=\"note\">Methods are blinded: labels were assigned in a random order and method code is not shown.</p>")
+  }
+  for (mn in if (isTRUE(blind_methods)) character() else names(study$methods)) {
     m <- study$methods[[mn]]
     add("<details><summary>Code of ", html_escape(mn), "</summary><pre>",
         html_escape(fun_source(m$fun)),

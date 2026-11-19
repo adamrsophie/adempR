@@ -274,3 +274,138 @@ sim_contaminate <- function(x, prop, scale = 10, sd = 1) {
   attr(x, "contaminated") <- hit
   x
 }
+
+#' Calibrate an exponential censoring rate to a target censored proportion
+#'
+#' With event times `T` drawn by `event_sampler`, independent exponential
+#' censoring with rate `r` and administrative censoring at `horizon`, the
+#' expected censored proportion is `1 - E[exp(-r T) 1(T <= horizon)]`.
+#' The rate is found with [stats::uniroot()] on a large calibration sample
+#' drawn from its own seed, and the achieved proportion is reported with
+#' its Monte Carlo standard error. Pass the rate to [sim_rweibull_ph()] as
+#' `censoring_rate`.
+#'
+#' @param target Target censored proportion in (0, 1).
+#' @param event_sampler Function of `n` returning `n` event times.
+#' @param horizon Administrative censoring time.
+#' @param n Size of the calibration sample.
+#' @param seed Seed for the calibration sample (the caller's random number
+#'   state is left unchanged).
+#' @param upper Upper end of the search interval for the rate.
+#' @return A list with `rate`, `achieved`, `achieved_se`, `minimum` (the
+#'   censored proportion without random censoring) and `n`.
+#' @examples
+#' cal <- sim_calibrate_censoring(0.3, function(n) {
+#'   sim_rweibull_ph(rnorm(n), lambda = 0.1, shape = 1.5)$event_time
+#' }, horizon = 10, seed = 1)
+#' cal$rate
+#' @export
+sim_calibrate_censoring <- function(target, event_sampler, horizon = Inf, n = 1e5, seed = 1L,
+                                    upper = 1e3) {
+  check_prob(target, "target", open = TRUE)
+  check_function(event_sampler, "event_sampler")
+  if (!is_scalar_number(horizon) || horizon <= 0) stopf("`horizon` must be positive.")
+  t <- with_rng_state(rng_base_seed(seed), event_sampler(n))
+  if (!is.numeric(t) || length(t) != n || anyNA(t) || any(t < 0)) {
+    stopf("`event_sampler` must return `n` nonnegative event times.")
+  }
+  inside <- t <= horizon
+  cens <- function(r) 1 - mean(exp(-r * t) * inside)
+  minimum <- cens(0)
+  if (target < minimum) {
+    stopf("Administrative censoring alone censors %.3f, above the target %s.", minimum, target)
+  }
+  if (cens(upper) < target) stopf("The target %s cannot be reached with rates up to %s.", target, upper)
+  r <- if (target == minimum) 0 else stats::uniroot(function(r) cens(r) - target, c(0, upper),
+                                                    tol = 1e-12)$root
+  ind <- 1 - exp(-r * t) * inside
+  list(rate = r, achieved = mean(ind), achieved_se = stats::sd(ind) / sqrt(n),
+       minimum = minimum, target = target, n = n)
+}
+
+#' Draws from a Gaussian copula with given margins
+#'
+#' Draws correlated normal variables with correlation matrix `corr`,
+#' transforms them to uniforms and applies each margin's quantile
+#' function. The correlation applies to the normal scores, not to the
+#' variables themselves (Spearman correlations equal
+#' `6 / pi * asin(corr / 2)` for continuous margins).
+#'
+#' @param n Number of draws.
+#' @param margins Named list of quantile functions, one per variable, for
+#'   example `list(age = function(p) qnorm(p, 50, 10), y = function(p)
+#'   qpois(p, 3))`.
+#' @param corr Correlation matrix of the normal scores (validated with
+#'   [sim_check_matrix()]).
+#' @return A data frame with one column per margin.
+#' @examples
+#' set.seed(1)
+#' d <- sim_rcopula(1000, list(x = function(p) qexp(p), y = function(p) qbinom(p, 1, 0.3)),
+#'                  matrix(c(1, 0.5, 0.5, 1), 2))
+#' cor(d, method = "spearman")
+#' @export
+sim_rcopula <- function(n, margins, corr) {
+  if (!is_count(n, 1)) stopf("`n` must be a positive whole number.")
+  if (!is.list(margins) || !length(margins) || is.null(names(margins)) ||
+      !all(vapply(margins, is.function, logical(1)))) {
+    stopf("`margins` must be a named list of quantile functions.")
+  }
+  k <- length(margins)
+  corr <- as.matrix(corr)
+  if (!identical(dim(corr), c(k, k))) stopf("`corr` must be a %d by %d matrix.", k, k)
+  sim_check_matrix(corr, "correlation")
+  z <- sim_rmvnorm(n, rep(0, k), corr)
+  u <- stats::pnorm(z)
+  out <- lapply(seq_len(k), function(j) {
+    v <- margins[[j]](u[, j])
+    if (length(v) != n) stopf("Margin `%s` must return one value per probability.", names(margins)[j])
+    v
+  })
+  names(out) <- names(margins)
+  as.data.frame(out, stringsAsFactors = FALSE)
+}
+
+#' Plasmode data: resampled real covariates with simulated outcomes
+#'
+#' A plasmode simulation keeps the joint distribution of covariates from a
+#' real data set by resampling its rows, and generates the outcome (or
+#' treatment) from a specified model so the true effect is known. The rows
+#' drawn are stored in the attribute `rows`, so a data set can be traced to
+#' the source.
+#'
+#' @param data The source data frame (covariates).
+#' @param n Number of rows to draw.
+#' @param outcome Function of the resampled data returning a vector (added
+#'   as column `y`) or a data frame or named list of new columns; `NULL`
+#'   returns the resampled covariates only.
+#' @param replace Sample rows with replacement (bootstrap); `FALSE` draws a
+#'   subsample, which needs `n <= nrow(data)`.
+#' @return A data frame with attribute `rows`.
+#' @examples
+#' set.seed(1)
+#' pm <- sim_plasmode(mtcars, n = 50, outcome = function(d) {
+#'   rbinom(nrow(d), 1, plogis(-1 + 0.5 * d$am + 0.02 * (d$hp - 150)))
+#' })
+#' head(pm)
+#' @export
+sim_plasmode <- function(data, n = nrow(data), outcome = NULL, replace = TRUE) {
+  if (!is.data.frame(data) || !nrow(data)) stopf("`data` must be a nonempty data frame.")
+  if (!is_count(n, 1)) stopf("`n` must be a positive whole number.")
+  if (!replace && n > nrow(data)) stopf("Without replacement `n` cannot exceed %d rows.", nrow(data))
+  rows <- sample.int(nrow(data), n, replace = replace)
+  d <- data[rows, , drop = FALSE]
+  rownames(d) <- NULL
+  if (!is.null(outcome)) {
+    check_function(outcome, "outcome")
+    y <- outcome(d)
+    if (is.list(y)) {
+      if (is.null(names(y)) || any(!nzchar(names(y)))) stopf("`outcome` must return named columns.")
+      for (nm in names(y)) d[[nm]] <- y[[nm]]
+    } else {
+      if (length(y) != n) stopf("`outcome` must return one value per row.")
+      d$y <- y
+    }
+  }
+  attr(d, "rows") <- rows
+  d
+}

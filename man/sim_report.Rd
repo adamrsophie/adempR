@@ -4,7 +4,14 @@
 \alias{sim_report}
 \title{Write an HTML report of a run}
 \usage{
-sim_report(run, file, overwrite = FALSE, plots = TRUE)
+sim_report(
+  run,
+  file,
+  overwrite = FALSE,
+  plots = TRUE,
+  blind_methods = FALSE,
+  blind_seed = 1L
+)
 }
 \arguments{
 \item{run}{A run or results.}
@@ -14,6 +21,15 @@ sim_report(run, file, overwrite = FALSE, plots = TRUE)
 \item{overwrite}{Overwrite an existing file.}
 
 \item{plots}{Include plots.}
+
+\item{blind_methods}{Replace method names by neutral labels
+(\code{method_A}, \code{method_B}, ...) in a random order, and leave out method
+code, descriptions and versions, so the results can be interpreted
+before the methods are known. The key is written next to the report
+(\verb{<file>.blinding-key.csv}); keep it apart until the interpretation is
+fixed.}
+
+\item{blind_seed}{Seed of the random order of the labels.}
 }
 \value{
 The file path, invisibly.
