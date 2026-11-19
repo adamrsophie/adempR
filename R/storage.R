@@ -305,11 +305,16 @@ git_info <- function(dir = getOption("adempR.git_dir", getwd())) {
   }
   sha <- run("rev-parse", "HEAD")
   if (length(sha) != 1L) return(NULL)
-  status <- run("status", "--porcelain", "--untracked-files=no")
+  status <- run("status", "--porcelain", "--untracked-files=normal")
+  untracked <- startsWith(status, "??")
   remote <- run("remote", "get-url", "origin")
+  # `dirty` means changes to tracked files; untracked files (new scripts,
+  # data, run directories) are counted separately, since the commit does
+  # not identify them either
   list(commit = sha,
        branch = run("rev-parse", "--abbrev-ref", "HEAD")[1] %||% NA_character_,
-       dirty = length(status) > 0L,
+       dirty = any(!untracked),
+       untracked = sum(untracked),
        remote = if (length(remote)) strip_credentials(remote[1]) else NA_character_)
 }
 
@@ -424,7 +429,8 @@ export_function <- function(f, memo) {
 
 # Environment fields compared across sessions (not the time).
 environment_signature <- function(env) {
-  env[c("r_version", "platform", "os", "packages", "blas", "lapack")]
+  env[intersect(c("r_version", "platform", "os", "packages", "blas", "lapack", "threads"),
+                names(env))]
 }
 
 # The manifest is written to a temporary file and renamed into place, with

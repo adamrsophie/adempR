@@ -205,7 +205,7 @@ record_session <- function(man) {
   env <- environment_info(study_packages(man$study))
   man$sessions <- c(man$sessions, list(env))
   if (!identical(environment_signature(env), environment_signature(man$environment))) {
-    warnf("The computing environment differs from the one that created this run directory (R, platform, BLAS or package versions). The new session is recorded in the manifest and shown in the report.")
+    warnf("The computing environment differs from the one that created this run directory (R, platform, BLAS, thread settings or package versions). The new session is recorded in the manifest and shown in the report.")
   }
   g <- env$git
   if (identical(man$label, "production") && !is.null(g) && isTRUE(g$dirty)) {

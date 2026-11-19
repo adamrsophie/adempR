@@ -336,14 +336,19 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   git_rows <- if (is.null(g)) {
     data.frame(item = "git", value = "not a git repository, or git not installed")
   } else {
-    data.frame(item = c("git commit", "git branch", "uncommitted changes", "git remote"),
+    data.frame(item = c("git commit", "git branch", "uncommitted changes to tracked files",
+                        "untracked files (not identified by the commit)", "git remote"),
                value = c(g$commit, g$branch %||% "", if (isTRUE(g$dirty)) "yes" else "no",
+                         if (is.null(g$untracked)) "not recorded" else as.character(g$untracked),
                          g$remote %||% ""))
   }
   add(html_table(rbind(
-    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", names(env$packages)),
+    data.frame(item = c("R", "platform", "OS", "BLAS", "LAPACK", names(env$threads),
+                        names(env$packages)),
                value = c(env$r_version, env$platform, env$os, env$blas %||% "",
-                         env$lapack %||% "", unlist(env$packages)),
+                         env$lapack %||% "",
+                         vapply(env$threads, function(v) if (is.null(v) || is.na(v)) "unset" else as.character(v), ""),
+                         unlist(env$packages)),
                stringsAsFactors = FALSE),
     git_rows)))
   sess <- man$sessions %||% list()
