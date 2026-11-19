@@ -1,0 +1,221 @@
+# Run directory storage ----------------------------------------------------
+#
+# Layout of a run directory:
+#   manifest.rds        study, seed, RNG registry, fingerprints, revisions
+#   manifest.json       human readable summary of the manifest
+#   LOCK/owner.json     coordinator lock (one active coordinator per run)
+#   batches/<id>.rds    committed results of a batch of tasks
+#   batches/<id>.md5    checksum sidecar; its presence is the commit point
+#   truth/              computed truth values
+#   tmp/                files being written; never read as results
+#   quarantine/         corrupt or uncommitted files moved aside
+#
+# Commit protocol: the batch is serialized to tmp/, its md5 is written to a
+# temporary sidecar, the data file is renamed into batches/, and finally the
+# sidecar is renamed into batches/. Renames within one directory tree on a
+# local file system are atomic on POSIX systems and on NTFS. A data file
+# without a sidecar is uncommitted; a sidecar whose checksum does not match
+# marks a corrupt file. Network and object stores are not covered by this
+# contract.
+
+SCHEMA_VERSION <- "1.0.0"
+
+fault_point <- function(name) {
+  if (identical(getOption("adempR.fault"), name)) {
+    if (.Platform$OS.type == "unix") {
+      tools::pskill(Sys.getpid(), tools::SIGKILL)
+      Sys.sleep(5)
+    }
+    stop("adempR fault injection: ", name, call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+run_paths <- function(path) {
+  list(root = path,
+       manifest = file.path(path, "manifest.rds"),
+       manifest_json = file.path(path, "manifest.json"),
+       lock = file.path(path, "LOCK"),
+       batches = file.path(path, "batches"),
+       truth = file.path(path, "truth"),
+       tmp = file.path(path, "tmp"),
+       quarantine = file.path(path, "quarantine"))
+}
+
+ensure_dirs <- function(p) {
+  for (d in c(p$root, p$batches, p$truth, p$tmp, p$quarantine)) {
+    if (!dir.exists(d)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
+  }
+}
+
+file_md5 <- function(f) unname(tools::md5sum(f))
+
+# Atomically write an R object with a checksum sidecar.
+atomic_save <- function(obj, dir, name, tmpdir) {
+  tmp_data <- file.path(tmpdir, paste0(name, ".rds"))
+  tmp_side <- file.path(tmpdir, paste0(name, ".md5"))
+  saveRDS(obj, tmp_data)
+  fault_point("after_data_write")
+  writeLines(file_md5(tmp_data), tmp_side)
+  final_data <- file.path(dir, paste0(name, ".rds"))
+  final_side <- file.path(dir, paste0(name, ".md5"))
+  if (!file.rename(tmp_data, final_data)) stopf("Could not commit %s.", final_data)
+  fault_point("before_sidecar")
+  if (!file.rename(tmp_side, final_side)) stopf("Could not commit %s.", final_side)
+  fault_point("after_commit")
+  invisible(final_data)
+}
+
+# Read committed objects. Corrupt and uncommitted files are skipped and
+# reported; with `repair = TRUE` (only under the coordinator lock) they are
+# moved to the quarantine directory so their tasks are rerun.
+read_committed <- function(dir, quarantine, repair = FALSE) {
+  side <- list.files(dir, pattern = "\\.md5$", full.names = TRUE)
+  data_files <- list.files(dir, pattern = "\\.rds$", full.names = TRUE)
+  committed <- sub("\\.md5$", ".rds", side)
+  problems <- character()
+  orphan <- setdiff(data_files, committed)
+  for (f in orphan) {
+    if (repair) file.rename(f, file.path(quarantine, basename(f)))
+    problems <- c(problems, sprintf("uncommitted file %s %s", basename(f),
+                                    if (repair) "moved to quarantine" else "ignored"))
+  }
+  out <- list()
+  for (i in seq_along(side)) {
+    f <- committed[i]
+    expected <- tryCatch(readLines(side[i], warn = FALSE)[1], error = function(e) NA)
+    ok <- file.exists(f) && !is.na(expected) && identical(file_md5(f), expected)
+    obj <- if (ok) tryCatch(readRDS(f), error = function(e) NULL) else NULL
+    if (is.null(obj)) {
+      if (repair) {
+        if (file.exists(f)) file.rename(f, file.path(quarantine, basename(f)))
+        file.rename(side[i], file.path(quarantine, basename(side[i])))
+      }
+      problems <- c(problems, sprintf("corrupt or missing file %s %s", basename(f),
+                                      if (repair) "moved to quarantine; its tasks will be rerun" else
+                                        "ignored; resume the run to repair it"))
+      next
+    }
+    out[[basename(f)]] <- obj
+  }
+  if (length(problems)) warning(paste(problems, collapse = "\n"), call. = FALSE)
+  list(objects = out, problems = problems)
+}
+
+# Locking ----------------------------------------------------------------
+
+pid_alive <- function(pid) {
+  if (.Platform$OS.type != "unix") return(NA)
+  isTRUE(tools::pskill(pid, 0L))
+}
+
+lock_owner <- function(p) {
+  f <- file.path(p$lock, "owner.json")
+  if (!file.exists(f)) return(NULL)
+  tryCatch(jsonlite::fromJSON(f), error = function(e) NULL)
+}
+
+acquire_lock <- function(p) {
+  host <- Sys.info()[["nodename"]]
+  if (!dir.create(p$lock, showWarnings = FALSE)) {
+    owner <- lock_owner(p)
+    stale <- !is.null(owner) && identical(owner$host, host) &&
+      identical(pid_alive(owner$pid), FALSE)
+    if (stale) {
+      message(sprintf("Recovering a stale lock left by process %s (no longer running).",
+                      owner$pid))
+      unlink(p$lock, recursive = TRUE)
+      if (!dir.create(p$lock, showWarnings = FALSE)) {
+        stopf("Could not acquire the run lock at %s.", p$lock)
+      }
+    } else {
+      stopf("The run directory is locked by %s. Only one coordinator may run at a time. If that process is no longer running, call sim_unlock(\"%s\").",
+            if (is.null(owner)) "an unknown process" else
+              sprintf("process %s on %s since %s", owner$pid, owner$host, owner$time),
+            p$root)
+    }
+  }
+  jsonlite::write_json(list(pid = Sys.getpid(), host = host, time = now_utc()),
+                       file.path(p$lock, "owner.json"), auto_unbox = TRUE)
+  invisible(TRUE)
+}
+
+release_lock <- function(p) {
+  owner <- lock_owner(p)
+  if (!is.null(owner) && identical(as.integer(owner$pid), Sys.getpid())) {
+    unlink(p$lock, recursive = TRUE)
+  }
+  invisible(TRUE)
+}
+
+#' Remove a stale run lock
+#'
+#' A run directory admits one coordinator at a time. If a run was killed in
+#' a way that left the lock behind and the stale lock cannot be detected
+#' automatically (for example the process ran on another machine), remove it
+#' with `sim_unlock()` after making sure no coordinator is running.
+#'
+#' @param path Run directory.
+#' @return `TRUE`, invisibly.
+#' @examples
+#' path <- tempfile("adempR-run-")
+#' dir.create(file.path(path, "LOCK"), recursive = TRUE)
+#' sim_unlock(path)
+#' @export
+sim_unlock <- function(path) {
+  lk <- file.path(path, "LOCK")
+  if (dir.exists(lk)) unlink(lk, recursive = TRUE)
+  invisible(TRUE)
+}
+
+# Environment and provenance ---------------------------------------------
+
+environment_info <- function(packages = character()) {
+  pk <- unique(c("adempR", packages))
+  vers <- vapply(pk, function(p) {
+    tryCatch(as.character(utils::packageVersion(p)), error = function(e) NA_character_)
+  }, character(1))
+  si <- Sys.info()
+  list(
+    r_version = R.version.string,
+    platform = R.version$platform,
+    os = paste(si[["sysname"]], si[["release"]]),
+    machine = si[["machine"]],
+    rng_kind = RNG_KIND,
+    packages = as.list(vers),
+    blas = tryCatch(extSoftVersion()[["BLAS"]], error = function(e) NA_character_),
+    lapack = tryCatch(La_library(), error = function(e) NA_character_),
+    threads = as.list(Sys.getenv(c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                                   "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"),
+                                 unset = NA)),
+    time = now_utc()
+  )
+}
+
+write_manifest <- function(p, manifest) {
+  tmp <- file.path(p$tmp, "manifest.rds")
+  saveRDS(manifest, tmp)
+  file.rename(tmp, p$manifest)
+  js <- list(
+    schema_version = manifest$schema_version, study = manifest$study$name,
+    label = manifest$label, seed = manifest$seed,
+    created = manifest$created, updated = now_utc(),
+    replications = manifest$replications,
+    fingerprints = manifest$fingerprints,
+    rng_registry = manifest$rng_registry,
+    revisions = manifest$revisions, environment = manifest$environment
+  )
+  jsonlite::write_json(js, p$manifest_json, auto_unbox = TRUE, pretty = TRUE,
+                       digits = NA, null = "null", na = "null")
+}
+
+read_manifest <- function(path) {
+  p <- run_paths(path)
+  if (!file.exists(p$manifest)) stopf("No adempR run found at %s.", path)
+  m <- readRDS(p$manifest)
+  if (!identical(m$schema_version, SCHEMA_VERSION)) {
+    stopf("The run at %s uses result schema %s; this version of adempR reads schema %s.",
+          path, m$schema_version, SCHEMA_VERSION)
+  }
+  m
+}

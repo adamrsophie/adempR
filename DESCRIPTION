@@ -1,0 +1,64 @@
+Package: adempR
+Title: Reproducible Statistical Simulation Studies
+Version: 0.1.0
+Authors@R:
+    person("Adam R", "Sophie", email = "adamrsophie@gmail.com",
+           role = c("aut", "cre", "cph"))
+Description: A framework for designing, validating, executing, analyzing,
+    comparing and reporting simulation studies that evaluate statistical
+    methods. A study is an executable protocol organized by the ADEMP
+    structure (aims, data-generating mechanisms, estimands, methods and
+    performance measures) of Morris, White and Crowther (2019)
+    <doi:10.1002/sim.8086>. Scenarios are explicit, constrained and
+    labeled by content; estimands carry their scale, population and
+    conditioning, and truth providers distinguish exact, numerical, Monte
+    Carlo, dataset-specific and unknown truth. Competing methods are run on
+    the same generated data sets with separate random number streams,
+    through public views that withhold privileged data-generating
+    information. Every replication keeps structured records of generation,
+    method execution, extraction and output validity, so failures and
+    metric-specific denominators are reported rather than hidden, following
+    Pawel, Bartos, Siepe and Lohmann (2025)
+    <doi:10.1080/00031305.2025.2540002>. Random number streams use a frozen,
+    append-only registry of L'Ecuyer-CMRG streams keyed by scientific
+    identity, so results do not depend on worker counts, chunking or task
+    order, and runs can be extended, interrupted, resumed and replayed.
+    Results are committed atomically with checksums. Performance measures
+    come with Monte Carlo standard errors, exact binomial intervals,
+    numerical truth uncertainty and paired method comparisons, and studies
+    can be exported as reanalyzable bundles with a self-contained HTML
+    report.
+License: GPL-3
+Encoding: UTF-8
+Language: en-US
+Roxygen: list(markdown = TRUE)
+Depends:
+    R (>= 4.2.0)
+Imports:
+    graphics,
+    grDevices,
+    jsonlite,
+    parallel,
+    stats,
+    tools,
+    utils
+Suggests:
+    callr,
+    future,
+    future.apply,
+    geepack,
+    knitr,
+    lme4,
+    logistf,
+    metafor,
+    rmarkdown,
+    rsimsum,
+    SimDesign,
+    survival,
+    testthat (>= 3.0.0)
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+URL: https://adamrsophie.github.io/adempR/,
+    https://github.com/adamrsophie/adempR
+BugReports: https://github.com/adamrsophie/adempR/issues
+Config/roxygen2/version: 8.1.1
