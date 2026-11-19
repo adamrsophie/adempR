@@ -144,10 +144,25 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 
 ## Performance claims
 
-adempR makes no claim about speed in this version. The overhead per task
-(stream lookup, isolation copy, attempt capture, data checksum) has not
-been measured against plain R or other frameworks; benchmark scripts are
-planned for a later release.
+`inst/benchmarks/overhead.R` times one study (normal data, n of 20 and
+100, mean and median, 200 replications per scenario) in four
+implementations. The work per replication is tiny, so the times measure
+framework overhead. One run on an Apple M series laptop, R 4.6.0:
+
+| Implementation | Milliseconds per replication |
+|---|---|
+| Plain R loop (no storage, one stream) | 0.35 |
+| SimDesign 2 (in memory) | 4.7 |
+| adempR, `chunk_size = 250` | 35 |
+| adempR, `chunk_size = 25` | 50 |
+| simChef (in memory) | 600 |
+
+adempR pays for atomic commits to disk, per task random number streams,
+data isolation copies, attempt capture and data checksums: tens of
+milliseconds per replication, which matters only when each fit takes less
+than that. Larger chunks reduce the commit cost. These are single runs on
+one machine, not a controlled comparison; rerun the script on your own
+hardware with `Rscript inst/benchmarks/overhead.R 200`.
 
 ## Known limitations
 

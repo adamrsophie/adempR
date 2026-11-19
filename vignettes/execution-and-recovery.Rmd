@@ -136,3 +136,34 @@ run <- sim_run(study, replications = 1000, seed = 5, path = path, backend = "fut
 or pass `workers = 4` to use a temporary multisession plan. Workers load
 the installed adempR and the packages listed in the study's `packages`
 fields.
+
+With scenarios that differ in cost, `sim_run(cost = function(scenario)
+scenario$n^2)` starts the costly tasks first; results do not change.
+
+## Cluster schedulers
+
+On a scheduler with array jobs (Slurm, PBS, SGE, LSF), each job runs one
+shard of the scenarios in its own directory, so no job writes where
+another writes. Save the study once and read it in every job:
+
+```{r, eval = FALSE}
+saveRDS(study, "study.rds")
+# job script, one array task per shard
+k <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID"))
+sim_run_shard(readRDS("study.rds"), shard = k, n_shards = 20,
+              replications = 2000, seed = 5, path = "shards")
+# after all jobs finished
+run <- sim_collect_shards(study, n_shards = 20, replications = 2000, seed = 5,
+                          path = "shards", into = "run")
+```
+
+The collected run is identical to one `sim_run()` with the same seed. The
+same pattern works with `batchtools::batchMap()` or a `targets` pipeline
+with one target per shard.
+
+## Living benchmarks
+
+`sim_add_methods(path, list(new = fun))` adds methods to the study stored
+in a run as a recorded amendment and fits them to the existing data sets,
+without refitting the other methods. `sim_leaderboard()` summarizes ranks
+over scenarios and when each method entered.
