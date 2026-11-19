@@ -17,7 +17,8 @@ sim_run(
   update = FALSE,
   retry_failed = FALSE,
   label = NULL,
-  progress = interactive()
+  progress = interactive(),
+  rng_registry = NULL
 )
 
 sim_resume(path, ...)
@@ -38,8 +39,10 @@ sim_resume(path, ...)
 \item{workers}{For \code{backend = "future"}, number of multisession workers;
 \code{NULL} uses the current plan.}
 
-\item{max_tasks}{Refuse to schedule more than this many tasks in one
-call; a guard against unintentionally enormous designs.}
+\item{max_tasks}{Refuse to schedule more than this many method fits
+(scenario x replication x method) in one call; a guard against
+unintentionally enormous designs. It is checked before the manifest
+is changed or any task is built.}
 
 \item{update}{Allow refitting methods whose definition changed.}
 
@@ -54,6 +57,12 @@ earlier ones; without it, failures are final and are never rerun.}
 \code{"pilot"} or \code{"production"}).}
 
 \item{progress}{Print progress messages.}
+
+\item{rng_registry}{For a new run directory only: the stream registry of
+an earlier run (\code{res$manifest$rng_registry}), so that a regeneration
+uses the same stream of every scenario, method and truth even when the
+original run was extended with new methods or scenarios over time.
+Ignored when the directory already holds a run.}
 
 \item{...}{Further arguments passed to \code{sim_run()}.}
 }

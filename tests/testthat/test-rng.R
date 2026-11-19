@@ -159,3 +159,18 @@ test_that("the future backend refuses closures that reach global objects", {
   expect_error(sim_run(st, replications = 2, seed = 1, path = run_path(), backend = "future"),
                "adempr_test_helper2")
 })
+
+test_that("registry lookups refuse aliased indices and fractional replications", {
+  reg <- rng_registry(data.frame(stage = "dgp", scenario_key = c("a", "b"), component = "data"))
+  bad <- reg
+  bad$index <- c(1L, 1L)
+  expect_error(rng_task_seed(1, bad, "dgp", "a", "data", 1), "one index")
+  expect_error(rng_registry(data.frame(stage = "dgp", scenario_key = "c", component = "data"), bad),
+               "one index")
+  expect_error(rng_task_seed(1, reg, "dgp", "a", "data", 1.5), "whole number")
+  expect_error(rng_task_seed(1, reg, "dgp", "a", "data", 0), "positive")
+  expect_error(rng_registry(data.frame(stage = "dgp", scenario_key = NA, component = "data")),
+               "complete")
+  expect_false(identical(rng_task_seed(1, reg, "dgp", "a", "data", 1),
+                         rng_task_seed(1, reg, "dgp", "a", "data", 1, domain = "pilot")))
+})

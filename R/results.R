@@ -62,9 +62,20 @@ read_raw_results <- function(path, repair = FALSE) {
     if (!is.null(df) && nrow(df) && is.null(df$round)) df$round <- 0L
     df
   }
+  # every artifact ever committed, before duplicates of a generation are
+  # removed: a later batch (a new or updated method) has its own artifact
+  all_reps <- get("replications")
+  arts <- NULL
+  if (!is.null(all_reps) && "artifact" %in% names(all_reps)) {
+    arts <- all_reps[!is.na(all_reps$artifact), intersect(
+      c("scenario_key", "replication", "generator_fp", "round", "artifact", "artifact_fits"),
+      names(all_reps)), drop = FALSE]
+    rownames(arts) <- NULL
+  }
   reps <- latest_round(dedup_table(get("replications"),
                                    c("scenario_key", "replication", "generator_fp", "round"),
-                                   c("generation_status", "generation_message"), "generation"),
+                                   c("generation_status", "generation_message", "data_md5"),
+                                   "generation"),
                        c("scenario_key", "replication", "generator_fp"))
   task_keys <- c("scenario_key", "replication", "method", "method_fp")
   att <- latest_round(dedup_table(get("attempts"), c(task_keys, "attempt", "round"),
@@ -78,7 +89,19 @@ read_raw_results <- function(path, repair = FALSE) {
                                   "truth", "data set truth"),
                       c("scenario_key", "replication", "estimand"))
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,
-       problems = rc$problems)
+       artifacts = arts, problems = rc$problems)
+}
+
+# Read a retained artifact after checking it against its checksum sidecar;
+# `NULL` when it is missing (a missing copy is reported, a changed one stops).
+read_artifact <- function(root, rel) {
+  f <- file.path(root, rel)
+  side <- sub("\\.rds$", ".md5", f)
+  if (!file.exists(f) || !file.exists(side)) return(NULL)
+  if (!identical(readLines(side, warn = FALSE)[1], file_md5(f))) {
+    stopf("Retained artifact %s does not match its checksum; it was changed or damaged.", rel)
+  }
+  readRDS(f)
 }
 
 #' Compute or load the truth of every estimand
@@ -129,7 +152,14 @@ sim_truth <- function(run) {
           t0 <- proc.time()[["elapsed"]]
           row <- compute_truth_one(tr, sc, seed)
           row$truth_elapsed <- proc.time()[["elapsed"]] - t0
-          atomic_save(row, p$truth, nm, p$tmp)
+          # another reader may have published the value meanwhile: the first
+          # committed value wins, so every reader reports the same row
+          if (file.exists(f) && file.exists(sidecar) &&
+              identical(file_md5(f), readLines(sidecar, warn = FALSE)[1])) {
+            row <- readRDS(f)
+          } else {
+            atomic_save(row, p$truth, nm, p$tmp)
+          }
         }
       } else {
         row <- compute_truth_one(tr, sc)
@@ -217,12 +247,32 @@ sim_results <- function(run) {
     est <- est[order(match(est$scenario_key, keys), est$method, est$estimand,
                      est$replication), , drop = FALSE]
     rownames(est) <- NULL
+  } else {
+    est <- empty_estimates(study)
   }
   sc <- as.data.frame(study$scenarios)
   structure(list(scenarios = sc, replications = reps, attempts = att, estimates = est,
                  truth = truth, manifest = man, path = run$path,
-                 problems = raw$problems),
+                 artifacts = raw$artifacts, problems = raw$problems),
             class = "adempr_results")
+}
+
+# A typed estimates table with no rows, so that summaries, comparisons,
+# pilots and reports of a run without any estimate (for example when every
+# generation failed) report unavailable cells instead of failing.
+empty_estimates <- function(study) {
+  en <- names(study$estimands)[1]
+  row <- cbind(data.frame(scenario_key = NA_character_, replication = NA_integer_,
+                          method = NA_character_, stringsAsFactors = FALSE),
+               missing_row(en))
+  row$attempt_status <- "ok"
+  row$had_warning <- FALSE
+  row$method_fp <- NA_character_
+  row$round <- 0L
+  row$truth <- NA_real_
+  row$truth_se <- NA_real_
+  row$truth_kind <- NA_character_
+  classify_rows(row, study$estimands, study$failure)[0, , drop = FALSE]
 }
 
 #' @export

@@ -186,3 +186,46 @@ test_that("results are read by stored fingerprints, not by the current session",
   expect_equal(nrow(res$replications), 4L)
   expect_silent(sim_resume(p, progress = FALSE))
 })
+
+test_that("replay reports generation failures, checks artifacts and finds current fits", {
+  st <- normal_study(n = 10L, mu = 0, methods = list(a = function(data) sim_estimate("mean", 1)),
+                     retention = sim_retention(data = TRUE, fits = TRUE))
+  path <- run_path()
+  run <- sim_run(st, replications = 2, seed = 1, path = path)
+  # a later method has its own artifact; replay finds its retained fit
+  st2 <- normal_study(n = 10L, mu = 0,
+                      methods = list(a = function(data) sim_estimate("mean", 1),
+                                     b = function(data) sim_estimate("mean", 3)),
+                      retention = sim_retention(data = TRUE, fits = TRUE))
+  run2 <- sim_run(st2, replications = 2, seed = 1, path = path)
+  rp <- sim_replay(run2, scenario = 1, replication = 1)
+  expect_true(rp$matches)
+  expect_equal(rp$stored_fits$b$estimate, 3)
+  expect_equal(rp$stored_fits$a$estimate, 1)
+  # a changed artifact stops replay
+  art <- sim_results(run2)$artifacts$artifact[1]
+  x <- readRDS(file.path(path, art))
+  x$data$y[1] <- 99
+  saveRDS(x, file.path(path, art))
+  expect_error(sim_replay(run2, scenario = 1, replication = 1), "checksum")
+  # a generation failure is returned, not thrown
+  st3 <- sim_study("fail", aims = "x", scenarios = sim_scenarios(n = 5L),
+                   generate = function(scenario, context) stop("no data"),
+                   estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+                   methods = list(a = function(data) sim_estimate("mean", 1)))
+  run3 <- suppressWarnings(sim_run(st3, replications = 1, seed = 1, path = run_path()))
+  rp3 <- sim_replay(run3, scenario = 1, replication = 1)
+  expect_equal(rp3$generation$replayed, "error")
+  expect_true(rp3$matches)
+  expect_null(rp3$data)
+  # a retention policy without retained artifacts does not advertise them
+  run4 <- sim_run(normal_study(n = 10L, mu = 0), replications = 2, seed = 1, path = run_path())
+  run4$manifest$study$retention$data <- TRUE
+  cap <- sim_capabilities(run4)
+  expect_false(cap$available[grepl("stored data", cap$analysis)])
+})
+
+test_that("ambiguous scenario labels are refused", {
+  sc <- list(keys = c("k1", "k2"), labels = c("x=1", "x=1"))
+  expect_error(adempR:::resolve_scenario(list(scenarios = sc), "x=1"), "several")
+})

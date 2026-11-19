@@ -93,3 +93,28 @@ test_that("sequential designs are stored, analyze only the prefix and cannot be 
   sq2 <- sim_run_sequential(st, looks = c(30, 60, 400), half_width = 0.2, seed = 1, path = p)
   expect_identical(sq2$stopped_at, sq$stopped_at)
 })
+
+test_that("the sequential runner splits alpha over looks and cells on prefix counts", {
+  # two scenarios, two methods: four monitored cells; intervals checked
+  # against binom.test() on coverage counts recomputed from the prefix
+  m <- normal_study()$methods
+  m2 <- list(t_a = m$t_interval, t_b = m$t_interval)
+  st <- normal_study(n = c(10L, 20L), mu = 0, methods = m2, measures = "coverage")
+  looks <- c(20, 40)
+  sq <- sim_run_sequential(st, looks = looks, half_width = 0.15, seed = 5, path = run_path(),
+                           alpha = 0.1)
+  expect_equal(sq$cells, 4L)
+  conf <- 1 - 0.1 / (2 * 4)
+  expect_equal(sq$conf_level_per_interval, conf)
+  e <- sim_results(sq$run)$estimates
+  lk <- sq$looks
+  for (i in seq_len(nrow(lk))) {
+    key <- st$scenarios$keys[match(lk$scenario_id[i], st$scenarios$labels)]
+    r <- e[e$scenario_key == key & e$method == lk$method[i] &
+             e$replication <= lk$replications[i], ]
+    k <- sum(r$lower <= r$truth & r$truth <= r$upper)
+    bt <- stats::binom.test(k, nrow(r), conf.level = conf)$conf.int
+    expect_equal(lk$n_eligible[i], nrow(r))
+    expect_equal(c(lk$lower[i], lk$upper[i]), as.numeric(bt), tolerance = 1e-10)
+  }
+})

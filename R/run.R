@@ -1,11 +1,11 @@
 # Running, extending and resuming studies ----------------------------------
 
-new_manifest <- function(study, seed, replications, label) {
+new_manifest <- function(study, seed, replications, label, registry = NULL) {
   list(schema_version = SCHEMA_VERSION, study = strip_sources(study), seed = seed,
        replications = as.integer(replications), label = label,
        created = now_utc(), fingerprints = study_fingerprints(study),
        study_fingerprint = sim_fingerprint(study),
-       rng_registry = rng_registry(rng_keys(study)),
+       rng_registry = rng_registry(rng_keys(study), registry),
        revisions = list(), environment = environment_info(study_packages(study)),
        # Pilot directories draw from their own stream family (fixed at creation).
        rng_domain = if (identical(label, "pilot")) "pilot" else NULL,
@@ -205,8 +205,10 @@ check_frozen <- function(study) {
 #' @param chunk_size Tasks per committed batch.
 #' @param workers For `backend = "future"`, number of multisession workers;
 #'   `NULL` uses the current plan.
-#' @param max_tasks Refuse to schedule more than this many tasks in one
-#'   call; a guard against unintentionally enormous designs.
+#' @param max_tasks Refuse to schedule more than this many method fits
+#'   (scenario x replication x method) in one call; a guard against
+#'   unintentionally enormous designs. It is checked before the manifest
+#'   is changed or any task is built.
 #' @param update Allow refitting methods whose definition changed.
 #' @param retry_failed Rerun replications whose data generation failed and
 #'   method fits that ended in an error or a timeout, with their original
@@ -217,6 +219,11 @@ check_frozen <- function(study) {
 #' @param label Run label; defaults to the study status (`"draft"`,
 #'   `"pilot"` or `"production"`).
 #' @param progress Print progress messages.
+#' @param rng_registry For a new run directory only: the stream registry of
+#'   an earlier run (`res$manifest$rng_registry`), so that a regeneration
+#'   uses the same stream of every scenario, method and truth even when the
+#'   original run was extended with new methods or scenarios over time.
+#'   Ignored when the directory already holds a run.
 #' @return An object of class `adempr_run`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -233,7 +240,7 @@ check_frozen <- function(study) {
 sim_run <- function(study, replications, seed, path, backend = c("sequential", "future"),
                     chunk_size = 25L, workers = NULL, max_tasks = 1e6,
                     update = FALSE, retry_failed = FALSE, label = NULL,
-                    progress = interactive()) {
+                    progress = interactive(), rng_registry = NULL) {
   stopifnot(inherits(study, "adempr_study"))
   backend <- match.arg(backend)
   if (!is_count(replications, 1)) stopf("`replications` must be a positive whole number.")
@@ -246,9 +253,14 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   check_frozen(study)
   replications <- as.integer(replications)
   p <- run_paths(path)
-  if (dir.exists(path) && !file.exists(p$manifest) &&
-      length(setdiff(list.files(path, all.files = TRUE, no.. = TRUE), "LOCK"))) {
-    stopf("%s exists and is not an adempR run directory; refusing to write into it.", path)
+  if (dir.exists(path) && !file.exists(p$manifest)) {
+    # an empty directory, or one left by a first call stopped before its
+    # first manifest (only the run's own empty folders), may be used
+    own <- c("LOCK", "batches", "truth", "tmp", "quarantine")
+    if (length(setdiff(list.files(path, all.files = TRUE, no.. = TRUE), own)) ||
+        length(list.files(p$batches))) {
+      stopf("%s exists and is not an adempR run directory; refusing to write into it.", path)
+    }
   }
   ensure_dirs(p)
   lock_token <- acquire_lock(p)
@@ -257,16 +269,23 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
     reconcile_manifest(read_manifest(path), study, seed, replications, update)
   } else {
     new_manifest(study, seed, replications,
-                 label %||% study$status$label)
+                 label %||% study$status$label, rng_registry)
   }
   if (!is.null(label)) man$label <- label
+  p$method_fps <- unlist(man$fingerprints$methods)
+  p$generator_fp <- man$fingerprints$generator
+  done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed)
+  # the budget is checked before the manifest changes or the task grid exists
+  n_todo <- count_tasks(study, man$replications, done)
+  if (n_todo > max_tasks) {
+    stopf("This call would run %s method fits (%d scenarios x up to %d replications x %d methods), more than `max_tasks` = %s. Check the design or raise `max_tasks` deliberately.",
+          format(n_todo, big.mark = ","), length(study$scenarios), man$replications,
+          length(study$methods), format(max_tasks, big.mark = ","))
+  }
   man <- record_session(man)
   man$status <- "running"
   write_manifest(p, man)
 
-  p$method_fps <- unlist(man$fingerprints$methods)
-  p$generator_fp <- man$fingerprints$generator
-  done <- committed_index(path, p$method_fps, p$generator_fp, retry = retry_failed)
   retried <- attr(done, "retried")
   p$round <- man$retry_round %||% 0L
   if (sum(retried)) {
@@ -279,11 +298,6 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
     write_manifest(p, man)
   }
   todo <- plan_tasks(study, man$replications, done)
-  if (nrow(todo) > max_tasks) {
-    stopf("This call would run %s tasks (%d scenarios x up to %d replications), more than `max_tasks` = %s. Check the design or raise `max_tasks` deliberately.",
-          format(nrow(todo), big.mark = ","), length(study$scenarios), man$replications,
-          format(max_tasks, big.mark = ","))
-  }
   ctx <- list(seed = seed, domain = man$rng_domain, registry = man$rng_registry,
               cache = new.env(parent = emptyenv()),
               dgp_stage = "dgp", method_stage = "method")
@@ -392,6 +406,16 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE) {
   done
 }
 
+# Number of method fits still to run, without building the grid.
+count_tasks <- function(study, R, done) {
+  keys <- study$scenarios$keys
+  ms <- names(study$methods)
+  d <- done[done$scenario_key %in% keys & done$method %in% ms & done$replication <= R, ,
+            drop = FALSE]
+  n_done <- length(unique(paste(d$scenario_key, d$replication, d$method, sep = "\r")))
+  as.numeric(length(keys)) * R * length(ms) - n_done
+}
+
 plan_tasks <- function(study, R, done) {
   keys <- study$scenarios$keys
   grid <- expand.grid(replication = seq_len(R), scenario_key = keys,
@@ -429,6 +453,7 @@ commit_chunk <- function(study, results, p) {
     rep <- r$replication
     rep$generator_fp <- gen_fp
     rep$artifact <- NA_character_
+    rep$artifact_fits <- NA_character_
     if (length(r$artifacts)) {
       dir <- file.path(p$root, "artifacts")
       if (!dir.exists(dir)) dir.create(dir)
@@ -436,6 +461,9 @@ commit_chunk <- function(study, results, p) {
                    new_uuid())
       atomic_save(r$artifacts, dir, nm, p$tmp)
       rep$artifact <- file.path("artifacts", paste0(nm, ".rds"))
+      # each artifact lists the method versions whose fits it holds
+      fm <- names(r$artifacts$fits)
+      rep$artifact_fits <- if (length(fm)) paste0(fm, "=", fps[fm], collapse = ";") else ""
     }
     rep
   })
@@ -450,7 +478,11 @@ commit_chunk <- function(study, results, p) {
   batch <- list(schema_version = SCHEMA_VERSION, created = now_utc(),
                 replications = rnd(bind_rows(reps)), attempts = rnd(att), estimates = rnd(est),
                 dataset_truth = rnd(bind_rows(lapply(results, `[[`, "dataset_truth"))))
-  atomic_save(batch, p$batches, paste0("b-", new_uuid()), p$tmp)
+  nm <- paste0("b-", new_uuid())
+  atomic_save(batch, p$batches, nm, p$tmp)
+  # the inventory lists every committed batch, so a batch deleted together
+  # with its sidecar is detected instead of silently shrinking the results
+  cat(nm, "\n", sep = "", file = file.path(p$batches, "INVENTORY"), append = TRUE)
 }
 
 # Declared packages are attached before any study function runs, in the
@@ -559,7 +591,7 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
     return(invisible(NULL))
   }
   for (pkg in c("future", "future.apply")) {
-    if (!requireNamespace(pkg, quietly = TRUE)) {
+    if (!has_namespace(pkg)) {
       stopf("The future backend needs the %s package.", pkg)
     }
   }

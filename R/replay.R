@@ -8,7 +8,12 @@ resolve_scenario <- function(study, scenario) {
   }
   if (!is_scalar_character(scenario)) stopf("`scenario` must be a key, a label or an index.")
   if (scenario %in% sc$keys) return(scenario)
-  if (scenario %in% sc$labels) return(sc$keys[match(scenario, sc$labels)])
+  if (scenario %in% sc$labels) {
+    if (sum(sc$labels == scenario) > 1L) {
+      stopf("The label `%s` names several scenarios; use the scenario key or index.", scenario)
+    }
+    return(sc$keys[match(scenario, sc$labels)])
+  }
   hit <- which(startsWith(sc$keys, scenario))
   if (length(hit) == 1L) return(sc$keys[hit])
   stopf("Unknown scenario `%s`.", scenario)
@@ -33,8 +38,14 @@ resolve_scenario <- function(study, scenario) {
 #' @param replication Replication number.
 #' @param methods Methods to rerun; defaults to all methods.
 #' @return A list with `scenario` (the full scenario), `data` (the analysis
-#'   data), `meta` (protected metadata), `estimates` (replayed), `committed`
-#'   (stored rows), `attempts`, and logical `matches` and `data_matches`.
+#'   data, `NULL` when generation failed), `meta` (protected metadata),
+#'   `generation` (recorded and replayed generation status and message),
+#'   `estimates` (replayed), `committed` (stored rows), `attempts`,
+#'   `stored_fits` (retained fits of the current method versions, when
+#'   kept), and logical `matches` (same generation outcome, raw outputs,
+#'   attempt statuses and warning flags) and `data_matches` (replayed data
+#'   identical to the retained copy). A retained artifact whose checksum
+#'   does not match stops with an error.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = 10L),
 #'   generate = function(scenario, context) rnorm(scenario$n),
@@ -58,13 +69,23 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
   seeds <- task_seeds(ctx, key, replication, study, methods)[[1]]
   idx <- scenario_index(study$scenarios, key)
   scenario_full <- study$scenarios$values[[idx]]
-  gen <- with_rng_state(seeds$data, study$generator$fun(
-    scenario_full, list(replication = as.integer(replication), scenario_key = key, stage = "dgp")))
-  data <- if (inherits(gen, "adempr_data")) gen$data else gen
-  meta <- if (inherits(gen, "adempr_data")) gen[c("truth", "meta")] else list()
+  # generation runs once, through the same captured path as the run
   out <- execute_task_seeded(study, list(scenario_key = key, replication = replication,
-                                         seeds = seeds, methods = methods))
+                                         seeds = seeds, methods = methods), keep_data = TRUE)
+  data <- out$data
+  meta <- out$meta
   raw <- read_raw_results(run$path)
+  gen_fp <- man$fingerprints$generator
+  recorded <- raw$replications
+  if (!is.null(recorded)) {
+    recorded <- recorded[recorded$scenario_key == key & recorded$replication == replication &
+                           recorded$generator_fp == gen_fp, , drop = FALSE]
+  }
+  generation <- data.frame(
+    recorded = if (!is.null(recorded) && nrow(recorded)) recorded$generation_status[1] else NA_character_,
+    replayed = out$replication$generation_status,
+    recorded_message = if (!is.null(recorded) && nrow(recorded)) recorded$generation_message[1] else NA_character_,
+    replayed_message = out$replication$generation_message, stringsAsFactors = FALSE)
   fps <- unlist(man$fingerprints$methods)
   committed <- raw$estimates
   if (!is.null(committed)) {
@@ -73,28 +94,44 @@ sim_replay <- function(run, scenario, replication, methods = NULL) {
                              committed$method %in% methods &
                              committed$method_fp == fps[committed$method], , drop = FALSE]
   }
+  # a match covers the generation outcome, every raw output, the attempt
+  # status and the warning flag (which decides validity under a warnings
+  # policy); messages and timings are compared only through the status
   matches <- NA
-  if (!is.null(committed) && nrow(committed) && !is.null(out$estimates)) {
-    cols <- c("method", "estimand", RAW_ESTIMATE_COLUMNS, "attempt_status")
-    sig <- function(df) {
-      df <- df[order(df$method, df$estimand), cols, drop = FALSE]
-      do.call(paste, c(lapply(df, col_text), sep = "\r"))
+  if (!is.na(generation$recorded)) {
+    matches <- identical(generation$recorded, generation$replayed)
+    if (matches && !is.null(committed) && nrow(committed)) {
+      cols <- c("method", "estimand", RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning")
+      sig <- function(df) {
+        if (is.null(df)) return(character())
+        df <- df[order(df$method, df$estimand), cols, drop = FALSE]
+        do.call(paste, c(lapply(df, col_text), sep = "\r"))
+      }
+      matches <- identical(sig(committed), sig(out$estimates))
     }
-    matches <- identical(sig(committed), sig(out$estimates))
   }
+  # retained artifacts are verified against their checksums before use
   data_matches <- NA
-  rep_row <- raw$replications
-  if (!is.null(rep_row)) {
-    rep_row <- rep_row[rep_row$scenario_key == key & rep_row$replication == replication &
-                         !is.na(rep_row$artifact), , drop = FALSE]
-    if (nrow(rep_row)) {
-      f <- file.path(run$path, rep_row$artifact[1])
-      if (file.exists(f)) data_matches <- identical(readRDS(f)$data, data)
+  fits <- list()
+  arts <- raw$artifacts
+  if (!is.null(arts) && nrow(arts)) {
+    arts <- arts[arts$scenario_key == key & arts$replication == replication &
+                   arts$generator_fp == gen_fp, , drop = FALSE]
+    arts <- arts[order(arts$round, decreasing = TRUE), , drop = FALSE]
+    for (i in seq_len(nrow(arts))) {
+      a <- read_artifact(run$path, arts$artifact[i])
+      if (is.null(a)) next
+      if (is.na(data_matches) && !is.null(a$data)) data_matches <- identical(a$data, data)
+      held <- if (is.null(arts$artifact_fits[i]) || is.na(arts$artifact_fits[i])) character() else
+        strsplit(arts$artifact_fits[i], ";", fixed = TRUE)[[1]]
+      for (mn in methods) {
+        if (is.null(fits[[mn]]) && paste0(mn, "=", fps[[mn]]) %in% held) fits[[mn]] <- a$fits[[mn]]
+      }
     }
   }
-  list(scenario = scenario_full, data = data, meta = meta, estimates = out$estimates,
-       attempts = out$attempts, committed = committed, matches = matches,
-       data_matches = data_matches)
+  list(scenario = scenario_full, data = data, meta = meta, generation = generation,
+       estimates = out$estimates, attempts = out$attempts, committed = committed,
+       stored_fits = fits, matches = matches, data_matches = data_matches)
 }
 
 #' Analyses available under the retention policy
@@ -119,6 +156,20 @@ sim_capabilities <- function(run) {
   study <- if (inherits(run, "adempr_run")) run$manifest$study else run
   stopifnot(inherits(study, "adempr_study"))
   r <- study$retention
+  if (inherits(run, "adempr_run")) {
+    # for a run, what was actually retained decides, not the current policy
+    raw <- read_raw_results(run$path)
+    reps <- raw$replications
+    ok <- if (is.null(reps)) character() else
+      unique(paste(reps$scenario_key[reps$generation_status == "ok"],
+                   reps$replication[reps$generation_status == "ok"]))
+    arts <- raw$artifacts
+    have <- if (is.null(arts)) character() else unique(paste(arts$scenario_key, arts$replication))
+    held <- if (is.null(arts) || is.null(arts$artifact_fits)) character() else
+      arts$artifact_fits[!is.na(arts$artifact_fits) & nzchar(arts$artifact_fits)]
+    r$data <- length(ok) > 0L && all(ok %in% have)
+    r$fits <- length(held) > 0L
+  }
   rows <- list(
     c("performance measures (built in and custom per replication)", TRUE, "estimate rows retained"),
     c("re-evaluation against a changed truth", TRUE, "estimate rows retained"),

@@ -220,3 +220,30 @@ test_that("fit and estimand checks apply to interval and test only results", {
   expect_equal(rej$n_eligible[rej$method == "nonconv"], 0)
   expect_equal(rej$n_eligible[rej$method == "fine"], 3)
 })
+
+test_that("a run where every generation failed can be summarized, piloted and reported", {
+  st <- sim_study("allfail", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) stop("boom"),
+    estimands = list(sim_estimand("m", sim_truth_exact(function(scenario) 0))),
+    methods = list(a = function(data) sim_estimate("m", 1), b = function(data) sim_estimate("m", 2)))
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  s <- as.data.frame(sim_summarise(run))
+  expect_true(all(s$status == "no_eligible"))
+  expect_s3_class(sim_compare(run, c("a", "b")), "adempr_comparison")
+  expect_s3_class(sim_pilot(st, replications = 2, seed = 1), "adempr_pilot")
+  f <- tempfile(fileext = ".html")
+  sim_report(run, f, plots = FALSE)
+  expect_true(file.exists(f))
+})
+
+test_that("attempts that run past the cooperative limit are flagged", {
+  m <- list(slow = sim_method(function(data) {
+    t0 <- Sys.time()
+    # a loop of compiled calls without R level interrupts between them
+    while (as.numeric(Sys.time() - t0) < 0.3) invisible(sum(seq_len(10)))
+    sim_estimate("mean", 1)
+  }, estimands = "mean", timeout = 0.1))
+  st <- normal_study(n = 5L, mu = 0, methods = m)
+  att <- sim_results(sim_run(st, replications = 1, seed = 1, path = run_path()))$attempts
+  expect_true(att$status == "timeout" || isTRUE(att$overrun))
+})

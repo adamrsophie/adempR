@@ -52,7 +52,7 @@ collapse_warnings <- function(w) {
 
 # `task` is a list with scenario_key, replication, seeds (list with `data`
 # and one entry per method stream component) and methods (names to run).
-execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
+execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALSE) {
   key <- task$scenario_key
   rep <- as.integer(task$replication)
   idx <- scenario_index(study$scenarios, key)
@@ -69,7 +69,8 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
                      generation_message = if (is.null(gen$error)) NA_character_ else
                        conditionMessage(gen$error),
                      generation_warnings = collapse_warnings(gen$warnings),
-                     generation_elapsed = gen$elapsed, stringsAsFactors = FALSE)
+                     generation_elapsed = gen$elapsed, data_md5 = NA_character_,
+                     stringsAsFactors = FALSE)
   artifacts <- list()
   attempts <- list()
   estimates <- list()
@@ -87,6 +88,9 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
     dtruth <- list()
     meta <- list()
   }
+  # checksum of the analysis data: identifies the data set across batches
+  # and reveals a generator that returns the same data every time
+  repl$data_md5 <- md5_bytes(serialize(data, NULL, version = 3))
   dataset_truth <- if (length(dtruth)) {
     data.frame(scenario_key = key, replication = rep, estimand = names(dtruth),
                truth = unlist(dtruth, use.names = FALSE), stringsAsFactors = FALSE)
@@ -151,7 +155,10 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
         message = message, n_warnings = length(warns),
         warnings = collapse_warnings(warns),
         elapsed = fit$elapsed + ext_elapsed, cpu = fit$cpu,
-        timeout = m$timeout %||% NA_real_, final = FALSE, stringsAsFactors = FALSE)
+        timeout = m$timeout %||% NA_real_,
+        # the limit is cooperative: compiled code can run past it unnoticed
+        overrun = !is.null(m$timeout) && status != "timeout" && fit$elapsed > m$timeout,
+        final = FALSE, stringsAsFactors = FALSE)
       if (status == "ok" || attempt > retries || status == "timeout") break
     }
     attempts[[length(attempts)]]$final <- TRUE
@@ -165,7 +172,10 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp") {
   }
   list(replication = repl, attempts = bind_rows(attempts),
        estimates = bind_rows(estimates), dataset_truth = dataset_truth,
-       artifacts = artifacts)
+       artifacts = artifacts,
+       data = if (keep_data) data, meta = if (keep_data) {
+         if (inherits(generated, "adempr_data")) generated[c("truth", "meta")] else list()
+       })
 }
 
 # Convenience used by validation and replay: computes seeds directly.

@@ -1,8 +1,15 @@
 # Operational tests 16, 17 and 18: crashes, duplicates, corruption, locks.
 
-crash_study <- function(flag = "") {
+crash_study <- function(flag = "", gen_flag = "") {
   sim_study("crash", scenarios = sim_scenarios(n = c(10L, 20L)),
-    generate = function(scenario, context) rnorm(scenario$n),
+    generate = function(scenario, context) {
+      # a kill in the middle of generating a data set
+      if (nzchar(gen_flag) && context$replication == 7 && file.exists(gen_flag)) {
+        file.remove(gen_flag)
+        tools::pskill(Sys.getpid(), tools::SIGKILL)
+      }
+      rnorm(scenario$n)
+    },
     estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
     methods = list(
       avg = function(data) sim_estimate("mean", mean(data)),
@@ -15,9 +22,9 @@ crash_study <- function(flag = "") {
       })))
 }
 
-crash_and_resume <- function(fault, flag = "") {
+crash_and_resume <- function(fault, flag = "", gen_flag = "") {
   p <- run_path()
-  st <- crash_study(flag)
+  st <- crash_study(flag, gen_flag)
   res <- tryCatch(callr::r(function(st, p, fault) {
     library(adempR)
     options(adempR.fault = fault)
@@ -49,6 +56,12 @@ test_that("killed runs resume without double counting", {
   flag <- tempfile()
   file.create(flag)
   run <- crash_and_resume("none", flag)
+  sig <- est_signature(run)
+  rownames(sig) <- NULL
+  expect_identical(sig, ref_sig)
+  gflag <- tempfile()
+  file.create(gflag)
+  run <- crash_and_resume("none", gen_flag = gflag)
   sig <- est_signature(run)
   rownames(sig) <- NULL
   expect_identical(sig, ref_sig)
@@ -112,7 +125,7 @@ test_that("a live lock blocks a second coordinator; incompatible directories are
 })
 
 test_that("an unavailable optional backend fails clearly", {
-  skip_if(requireNamespace("future.apply", quietly = TRUE), "future.apply is installed")
+  local_mocked_bindings(has_namespace = function(pkg) pkg != "future.apply")
   expect_error(sim_run(normal_study(n = 10L, mu = 0), 2, seed = 1, path = run_path(),
                        backend = "future"), "future")
 })
@@ -134,4 +147,33 @@ test_that("a stale lock is taken over once, and a fresh lock is never stolen", {
   expect_true(dir.exists(p$lock))
   adempR:::release_lock(p, tok)
   expect_false(dir.exists(p$lock))
+})
+
+test_that("a damaged manifest falls back to its backup and a bare directory restarts", {
+  st <- normal_study(n = 10L, mu = 0)
+  path <- run_path()
+  sim_run(st, replications = 2, seed = 1, path = path)
+  sim_run(st, replications = 3, seed = 1, path = path)
+  f <- file.path(path, "manifest.rds")
+  writeBin(as.raw(1:10), f)
+  expect_warning(man <- read_manifest(path), "checksum")
+  expect_equal(man$replications, 3L)
+  # a first call stopped after creating the folders but before the manifest
+  path2 <- run_path()
+  for (d in c("batches", "truth", "tmp", "quarantine")) dir.create(file.path(path2, d), recursive = TRUE)
+  expect_s3_class(sim_run(st, replications = 2, seed = 1, path = path2), "adempr_run")
+})
+
+test_that("a batch deleted with its sidecar is detected and rerun", {
+  st <- normal_study(n = 10L, mu = 0)
+  path <- run_path()
+  run <- sim_run(st, replications = 4, seed = 1, path = path, chunk_size = 1L)
+  full <- est_signature(run)
+  b <- list.files(file.path(path, "batches"), pattern = "\\.rds$", full.names = TRUE)[1]
+  unlink(c(b, sub("\\.rds$", ".md5", b)))
+  expect_warning(res <- sim_results(run), "missing from the run directory")
+  expect_true(any(grepl("missing", res$problems)))
+  run2 <- suppressWarnings(sim_run(st, replications = 4, seed = 1, path = path))
+  expect_equal(est_signature(run2), full)
+  expect_silent(sim_results(run2))
 })

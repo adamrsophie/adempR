@@ -33,8 +33,11 @@ Carlo standard errors by measure (for example \code{c(coverage = 0.005)}).}
 \item{registration}{Optional list with \code{registry}, \code{id}, \code{date} and
 \code{url} of an external registration.}
 
-\item{...}{Further named fields (for example OCTAVE fields of a
-clinical trial simulation), kept verbatim.}
+\item{...}{Further named fields, kept verbatim and shown in the report:
+for example \code{phase} (the phase of methodological research, I to IV,
+Heinze et al. 2023), \code{neutral} (whether the authors have a stake in
+any method), \code{inventor_methods}, \code{primary_measure}, or OCTAVE fields
+of a clinical trial simulation.}
 }
 \value{
 An object of class \code{adempr_protocol}.

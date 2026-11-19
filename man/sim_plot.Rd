@@ -10,6 +10,7 @@ sim_plot(
   scenario = 1L,
   estimand = NULL,
   measure = "bias",
+  reference = c("truth", "null"),
   ...
 )
 }
@@ -25,6 +26,12 @@ sim_plot(
 
 \item{measure}{Measure for \code{"precision"}.}
 
+\item{reference}{For \code{"zip"}: rank intervals against the true value
+(\code{"truth"}, a coverage zip plot) or against the declared null value
+(\code{"null"}, a power zip plot, where intervals that exclude the null are
+the rejections). The dotted lines give the Monte Carlo confidence
+interval of the proportion of intervals that contain the reference.}
+
 \item{...}{Graphical parameters passed to the main plotting call.}
 }
 \value{
@@ -36,7 +43,8 @@ Base graphics displays of a run:
 \item \code{"estimates"}: distribution of estimates by method, with the truth;
 \item \code{"est_se"}: estimates against their standard errors;
 \item \code{"zip"}: zip plot of confidence intervals ranked by their z statistic
-(Morris et al. 2019), showing which intervals miss the truth;
+(Morris et al. 2019), showing which intervals miss the truth, on the
+same rows as coverage in \code{\link[=sim_summarise]{sim_summarise()}};
 \item \code{"failures"}: proportion of usable results by method and scenario,
 with failures shown explicitly;
 \item \code{"precision"}: a performance measure with its Monte Carlo interval

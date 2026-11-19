@@ -129,15 +129,18 @@ rng_registry <- function(keys, registry = NULL) {
   }
   keys <- unique(keys[need])
   keys[] <- lapply(keys, as.character)
+  if (anyNA(keys) || any(!nzchar(as.matrix(keys)))) {
+    stopf("RNG stream identities must be complete (no missing or empty fields).")
+  }
   if (is.null(registry)) {
     registry <- data.frame(index = integer(), stage = character(),
                            scenario_key = character(), component = character(),
                            stringsAsFactors = FALSE)
   }
+  check_registry(registry)
   id_new <- paste(keys$stage, keys$scenario_key, keys$component, sep = "\r")
   id_old <- paste(registry$stage, registry$scenario_key, registry$component,
                   sep = "\r")
-  if (anyDuplicated(id_old)) stopf("The RNG registry contains duplicate identities.")
   add <- keys[!(id_new %in% id_old), , drop = FALSE]
   if (nrow(add)) {
     add <- add[order(add$stage, add$scenario_key, add$component, method = "radix"), ,
@@ -150,7 +153,29 @@ rng_registry <- function(keys, registry = NULL) {
   registry
 }
 
+# A registry maps each complete identity to its own positive integer index.
+check_registry <- function(registry) {
+  need <- c("index", "stage", "scenario_key", "component")
+  if (!is.data.frame(registry) || !all(need %in% names(registry))) {
+    stopf("An RNG registry must be a data frame with columns %s.", paste(need, collapse = ", "))
+  }
+  idx <- registry$index
+  if (!is.numeric(idx) || anyNA(idx) || any(idx < 1 | idx != round(idx))) {
+    stopf("RNG registry indices must be positive whole numbers.")
+  }
+  if (anyDuplicated(idx)) stopf("The RNG registry assigns one index to several identities.")
+  ids <- registry[c("stage", "scenario_key", "component")]
+  if (anyNA(ids) || any(!nzchar(as.matrix(ids)))) {
+    stopf("The RNG registry has an incomplete identity.")
+  }
+  if (anyDuplicated(paste(ids$stage, ids$scenario_key, ids$component, sep = "\r"))) {
+    stopf("The RNG registry contains duplicate identities.")
+  }
+  invisible(registry)
+}
+
 rng_lookup <- function(registry, stage, scenario_key, component) {
+  check_registry(registry)
   hit <- which(registry$stage == stage & registry$scenario_key == scenario_key &
                  registry$component == component)
   if (length(hit) != 1L) {
@@ -206,7 +231,10 @@ rng_substreams <- function(stream_seed, reps) {
 #' @param registry A registry from [rng_registry()] (for example
 #'   `run$manifest$rng_registry`).
 #' @param stage,scenario_key,component The stream identity.
-#' @param replication Replication number (substream).
+#' @param replication Replication number (substream), a single positive
+#'   whole number.
+#' @param domain `NULL` for the production run, or the RNG domain recorded
+#'   in the manifest (`manifest$rng_domain`, for example `"pilot"`).
 #' @return An integer vector usable as `.Random.seed`.
 #' @examples
 #' reg <- rng_registry(data.frame(stage = "dgp", scenario_key = "s1",
@@ -214,8 +242,11 @@ rng_substreams <- function(stream_seed, reps) {
 #' rng_task_seed(1, reg, "dgp", "s1", "data", replication = 3)
 #' @export
 rng_task_seed <- function(seed, registry, stage, scenario_key, component,
-                          replication) {
+                          replication, domain = NULL) {
+  if (!is_count(replication) || replication < 1) {
+    stopf("`replication` must be a single positive whole number.")
+  }
   k <- rng_lookup(registry, stage, scenario_key, component)
-  base <- rng_base_seed(seed)
+  base <- rng_base_seed(seed, domain)
   rng_substreams(rng_stream_seeds(base, k)[[1]], replication)[[1]]
 }

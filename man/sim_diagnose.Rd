@@ -9,7 +9,8 @@ sim_diagnose(run, outlier_z = 5)
 \arguments{
 \item{run}{A run or results.}
 
-\item{outlier_z}{Robust z threshold, \verb{|x - median| / (1.4826 MAD)}, above
+\item{outlier_z}{Robust z threshold, \verb{|x - median| / mad(x)} (\code{mad()}
+already includes the factor 1.4826), above
 which an estimate or standard error is flagged.}
 }
 \value{
@@ -21,7 +22,13 @@ validity counts by scenario and method, the most frequent errors and
 warnings, outlying estimates and standard errors (flagged, never
 removed, with the scenario and replication needed to replay them), the
 association between estimates and their standard errors, nonfinite
-outputs, storage problems and recorded revisions.
+outputs, storage problems and recorded revisions. It also flags data
+sets that repeat across the replications of a scenario (a generator that
+fixes the complete data removes a source of variation; Morris et al.),
+methods whose two-sided test at \code{alpha} and interval at level
+\code{1 - alpha} disagree about the null (a calibration problem), and
+degenerate estimates: constant within a cell, or identical for two
+estimands of one method in every replication.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(5L, 50L)),

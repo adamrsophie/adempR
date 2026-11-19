@@ -2,10 +2,13 @@
 #
 # Layout of a run directory:
 #   manifest.rds        study, seed, RNG registry, fingerprints, revisions
+#   manifest.rds.md5    checksum of the manifest
+#   manifest.rds.bak    previous manifest, read when the checksum fails
 #   manifest.json       human readable summary of the manifest
 #   LOCK/owner.json     coordinator lock (one active coordinator per run)
 #   batches/<id>.rds    committed results of a batch of tasks
 #   batches/<id>.md5    checksum sidecar; its presence is the commit point
+#   batches/INVENTORY   names of all committed batches (detects lost batches)
 #   truth/              computed truth values
 #   tmp/                files being written; never read as results
 #   quarantine/         corrupt or uncommitted files moved aside
@@ -52,8 +55,10 @@ file_md5 <- function(f) unname(tools::md5sum(f))
 
 # Atomically write an R object with a checksum sidecar.
 atomic_save <- function(obj, dir, name, tmpdir) {
-  tmp_data <- file.path(tmpdir, paste0(name, ".rds"))
-  tmp_side <- file.path(tmpdir, paste0(name, ".md5"))
+  # unique temporary names: two writers never rename each other's files
+  stem <- basename(tempfile(paste0(name, "-")))
+  tmp_data <- file.path(tmpdir, paste0(stem, ".rds"))
+  tmp_side <- file.path(tmpdir, paste0(stem, ".md5"))
   saveRDS(obj, tmp_data)
   fault_point("after_data_write")
   writeLines(file_md5(tmp_data), tmp_side)
@@ -97,6 +102,22 @@ read_committed <- function(dir, quarantine, repair = FALSE) {
       next
     }
     out[[basename(f)]] <- obj
+  }
+  inv <- file.path(dir, "INVENTORY")
+  if (file.exists(inv)) {
+    listed <- unique(readLines(inv, warn = FALSE))
+    listed <- listed[nzchar(listed)]
+    present <- sub("\\.rds$", "", names(out))
+    gone <- setdiff(listed, sub("\\.md5$", "", basename(side)))
+    for (g in gone) {
+      problems <- c(problems, sprintf("committed batch %s is missing from the run directory; %s",
+                                      g, if (repair) "its tasks will be rerun" else
+                                        "resume the run to rerun its tasks"))
+    }
+    if (repair) {
+      keep <- intersect(listed, present)
+      writeLines(keep, inv)
+    }
   }
   if (length(problems)) warning(paste(problems, collapse = "\n"), call. = FALSE)
   list(objects = out, problems = problems)
@@ -278,10 +299,20 @@ environment_signature <- function(env) {
   env[c("r_version", "platform", "os", "packages", "blas", "lapack")]
 }
 
+# The manifest is written to a temporary file and renamed into place, with
+# an md5 sidecar; the previous manifest is kept as manifest.rds.bak. This
+# survives process death at any point, not power loss (nothing is flushed).
 write_manifest <- function(p, manifest) {
-  tmp <- file.path(p$tmp, "manifest.rds")
+  if (!dir.exists(p$tmp)) dir.create(p$tmp, recursive = TRUE, showWarnings = FALSE)
+  tmp <- tempfile("manifest-", tmpdir = p$tmp, fileext = ".rds")
   saveRDS(manifest, tmp)
-  file.rename(tmp, p$manifest)
+  md5 <- file_md5(tmp)
+  if (file.exists(p$manifest)) file.copy(p$manifest, paste0(p$manifest, ".bak"), overwrite = TRUE)
+  if (!file.rename(tmp, p$manifest)) {
+    unlink(tmp)
+    stopf("Could not commit the manifest of %s.", p$root)
+  }
+  writeLines(md5, paste0(p$manifest, ".md5"))
   js <- list(
     schema_version = manifest$schema_version, study = manifest$study$name,
     label = manifest$label, seed = manifest$seed,
@@ -292,8 +323,14 @@ write_manifest <- function(p, manifest) {
     revisions = manifest$revisions, environment = manifest$environment,
     sequential = manifest$sequential
   )
-  jsonlite::write_json(js, p$manifest_json, auto_unbox = TRUE, pretty = TRUE,
+  tmpj <- tempfile("manifest-", tmpdir = p$tmp, fileext = ".json")
+  jsonlite::write_json(js, tmpj, auto_unbox = TRUE, pretty = TRUE,
                        digits = NA, null = "null", na = "null")
+  if (!file.rename(tmpj, p$manifest_json)) {
+    unlink(tmpj)
+    stopf("Could not write %s.", p$manifest_json)
+  }
+  invisible(TRUE)
 }
 
 # Change a stored manifest under the run lock.
@@ -308,7 +345,15 @@ update_manifest <- function(path, f) {
 read_manifest <- function(path) {
   p <- run_paths(path)
   if (!file.exists(p$manifest)) stopf("No adempR run found at %s.", path)
-  m <- readRDS(p$manifest)
+  side <- paste0(p$manifest, ".md5")
+  ok <- !file.exists(side) || identical(readLines(side, warn = FALSE)[1], file_md5(p$manifest))
+  m <- if (ok) tryCatch(readRDS(p$manifest), error = function(e) NULL)
+  if (is.null(m)) {
+    bak <- paste0(p$manifest, ".bak")
+    m <- if (file.exists(bak)) tryCatch(readRDS(bak), error = function(e) NULL)
+    if (is.null(m)) stopf("The manifest of %s is damaged and has no readable backup.", path)
+    warnf("The manifest of %s failed its checksum; using the previous manifest (manifest.rds.bak). Results committed after it are still read from their batches.", path)
+  }
   if (!identical(m$schema_version, SCHEMA_VERSION)) {
     stopf("The run at %s uses result schema %s; this version of adempR reads schema %s.",
           path, m$schema_version, SCHEMA_VERSION)

@@ -17,8 +17,14 @@ sim_replay(run, scenario, replication, methods = NULL)
 }
 \value{
 A list with \code{scenario} (the full scenario), \code{data} (the analysis
-data), \code{meta} (protected metadata), \code{estimates} (replayed), \code{committed}
-(stored rows), \code{attempts}, and logical \code{matches} and \code{data_matches}.
+data, \code{NULL} when generation failed), \code{meta} (protected metadata),
+\code{generation} (recorded and replayed generation status and message),
+\code{estimates} (replayed), \code{committed} (stored rows), \code{attempts},
+\code{stored_fits} (retained fits of the current method versions, when
+kept), and logical \code{matches} (same generation outcome, raw outputs,
+attempt statuses and warning flags) and \code{data_matches} (replayed data
+identical to the retained copy). A retained artifact whose checksum
+does not match stops with an error.
 }
 \description{
 Regenerates the data set of one replication from its recorded random

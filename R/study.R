@@ -22,8 +22,11 @@ PURPOSES <- c("unspecified", "exploratory", "confirmatory", "method_comparison",
 #'   Carlo standard errors by measure (for example `c(coverage = 0.005)`).
 #' @param registration Optional list with `registry`, `id`, `date` and
 #'   `url` of an external registration.
-#' @param ... Further named fields (for example OCTAVE fields of a
-#'   clinical trial simulation), kept verbatim.
+#' @param ... Further named fields, kept verbatim and shown in the report:
+#'   for example `phase` (the phase of methodological research, I to IV,
+#'   Heinze et al. 2023), `neutral` (whether the authors have a stake in
+#'   any method), `inventor_methods`, `primary_measure`, or OCTAVE fields
+#'   of a clinical trial simulation.
 #' @return An object of class `adempr_protocol`.
 #' @examples
 #' sim_protocol(purpose = "method_comparison",
@@ -250,6 +253,14 @@ sim_fingerprint <- function(study) {
 #' @param smoke Run the smoke test.
 #' @param seed Seed for the smoke test.
 #' @param error If `TRUE`, stop when problems are found.
+#' @param large_n Optional named list of scenario fields to override for a
+#'   large sample sanity run, for example `list(n = 1e5)`. One data set per
+#'   scenario is generated with the overrides and every method is run once;
+#'   an estimate more than 4 of its standard errors (or, without a standard
+#'   error, more than 10% of the absolute truth plus 0.01) away from an
+#'   exact or numerical truth is reported as a warning. A consistent method
+#'   should be close to its estimand in a large sample; a large gap often
+#'   means the estimand and the method target different quantities.
 #' @return An object of class `adempr_validation`: a data frame of checks
 #'   with columns `check`, `status` (`"ok"`, `"warning"`, `"error"`) and
 #'   `message`.
@@ -260,7 +271,7 @@ sim_fingerprint <- function(study) {
 #'   methods = list(avg = function(data) sim_estimate("mean", mean(data))))
 #' sim_validate(study, smoke = TRUE, seed = 1)
 #' @export
-sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE) {
+sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n = NULL) {
   stopifnot(inherits(study, "adempr_study"))
   out <- list()
   add <- function(check, status, message) {
@@ -345,6 +356,12 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE) {
     })
     out[[length(out) + 1L]] <- smk
   }
+  if (!is.null(large_n)) {
+    if (!is.list(large_n) || is.null(names(large_n)) || !all(nzchar(names(large_n)))) {
+      stopf("`large_n` must be a named list of scenario fields, for example list(n = 1e5).")
+    }
+    out[[length(out) + 1L]] <- large_n_check(study, seed, large_n)
+  }
   res <- bind_rows(out) %||% data.frame(check = character(), status = character(),
                                          message = character(), stringsAsFactors = FALSE)
   if (!nrow(res)) {
@@ -357,6 +374,48 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE) {
     stopf("Study validation failed with %d error(s).", sum(res$status == "error"))
   }
   res
+}
+
+large_n_check <- function(study, seed, overrides) {
+  big <- study
+  big$scenarios$values <- lapply(study$scenarios$values, function(v) {
+    v[names(overrides)] <- overrides
+    v
+  })
+  keys <- data.frame(stage = "large_n", scenario_key = study$scenarios$keys,
+                     component = "data", stringsAsFactors = FALSE)
+  mkeys <- expand.grid(stage = "large_n_method", scenario_key = study$scenarios$keys,
+                       component = method_stream_components(study), stringsAsFactors = FALSE)
+  ctx <- list(seed = seed, registry = rng_registry(rbind(keys, mkeys)),
+              cache = new.env(parent = emptyenv()), dgp_stage = "large_n",
+              method_stage = "large_n_method")
+  rows <- list()
+  for (i in seq_along(big$scenarios$values)) {
+    sc <- big$scenarios$values[[i]]
+    res <- execute_task(big, ctx, study$scenarios$keys[i], 1L, names(study$methods))
+    est <- res$estimates
+    lab <- paste0("large_n:", study$scenarios$labels[i])
+    if (res$replication$generation_status != "ok" || is.null(est)) {
+      rows[[length(rows) + 1L]] <- data.frame(check = lab, status = "warning",
+        message = "no estimates from the large sample run", stringsAsFactors = FALSE)
+      next
+    }
+    for (j in seq_len(nrow(est))) {
+      tr <- study$estimands[[est$estimand[j]]]$truth
+      if (!(tr$kind %in% c("exact", "numeric")) || !is.finite(est$estimate[j])) next
+      truth <- compute_truth_one(tr, sc)$truth
+      gap <- abs(est$estimate[j] - truth)
+      se <- est$se[j]
+      far <- if (is.finite(se) && se > 0) gap > 4 * se else gap > 0.1 * abs(truth) + 0.01
+      rows[[length(rows) + 1L]] <- data.frame(check = paste0(lab, ":", est$method[j], ":",
+                                                            est$estimand[j]),
+        status = if (far) "warning" else "ok",
+        message = sprintf("estimate %.4g, truth %.4g%s", est$estimate[j], truth,
+                          if (far) ": far from the truth in a large sample (different estimand, or not consistent?)" else ""),
+        stringsAsFactors = FALSE)
+    }
+  }
+  bind_rows(rows)
 }
 
 smoke_test <- function(study, seed) {
@@ -453,7 +512,15 @@ sim_completeness <- function(study) {
     item("Reproducibility", "retention policy stated", has(p$retention)),
     item("Reporting", "reporting plan", has(p$reporting)),
     item("Registration", "external registration", has(p$registration),
-         "a frozen protocol hash is not a registration")
+         "a frozen protocol hash is not a registration"),
+    item("Aims", "phase of methodological research (I to IV)", has(p$extra$phase),
+         "sim_protocol(phase = ...)"),
+    # reported by adempR for every run
+    item("Performance measures", "Monte Carlo standard error for every measure", TRUE,
+         "reported by adempR"),
+    item("Failures", "failures and exclusions reported", TRUE, "flow table in the report"),
+    item("Reproducibility", "code archived", TRUE,
+         "code in the report and in sim_export() bundles")
   )
   bind_rows(rows)
 }

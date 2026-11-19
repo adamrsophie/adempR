@@ -108,6 +108,13 @@ test_that("a run refuses more tasks than the budget allows", {
   st <- normal_study(n = 10L, mu = 0)
   expect_error(sim_run(st, replications = 50, seed = 1, path = run_path(), max_tasks = 10),
                "max_tasks")
+  # a refused extension leaves the manifest as it was
+  path <- run_path()
+  sim_run(st, replications = 2, seed = 1, path = path)
+  expect_error(sim_run(st, replications = 6, seed = 1, path = path, max_tasks = 1), "max_tasks")
+  man <- read_manifest(path)
+  expect_equal(man$replications, 2L)
+  expect_equal(man$status, "complete")
 })
 
 test_that("pilots project cost and keep conservative precision requirements", {

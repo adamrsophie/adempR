@@ -4,7 +4,15 @@
 \alias{rng_task_seed}
 \title{Look up the random number state of a task}
 \usage{
-rng_task_seed(seed, registry, stage, scenario_key, component, replication)
+rng_task_seed(
+  seed,
+  registry,
+  stage,
+  scenario_key,
+  component,
+  replication,
+  domain = NULL
+)
 }
 \arguments{
 \item{seed}{The run's base seed.}
@@ -14,7 +22,11 @@ rng_task_seed(seed, registry, stage, scenario_key, component, replication)
 
 \item{stage, scenario_key, component}{The stream identity.}
 
-\item{replication}{Replication number (substream).}
+\item{replication}{Replication number (substream), a single positive
+whole number.}
+
+\item{domain}{\code{NULL} for the production run, or the RNG domain recorded
+in the manifest (\code{manifest$rng_domain}, for example \code{"pilot"}).}
 }
 \value{
 An integer vector usable as \code{.Random.seed}.

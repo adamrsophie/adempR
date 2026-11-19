@@ -4,7 +4,7 @@
 \alias{sim_validate}
 \title{Validate a study before running it}
 \usage{
-sim_validate(study, smoke = FALSE, seed = 1L, error = TRUE)
+sim_validate(study, smoke = FALSE, seed = 1L, error = TRUE, large_n = NULL)
 }
 \arguments{
 \item{study}{A \code{\link[=sim_study]{sim_study()}}.}
@@ -14,6 +14,15 @@ sim_validate(study, smoke = FALSE, seed = 1L, error = TRUE)
 \item{seed}{Seed for the smoke test.}
 
 \item{error}{If \code{TRUE}, stop when problems are found.}
+
+\item{large_n}{Optional named list of scenario fields to override for a
+large sample sanity run, for example \code{list(n = 1e5)}. One data set per
+scenario is generated with the overrides and every method is run once;
+an estimate more than 4 of its standard errors (or, without a standard
+error, more than 10\% of the absolute truth plus 0.01) away from an
+exact or numerical truth is reported as a warning. A consistent method
+should be close to its estimand in a large sample; a large gap often
+means the estimand and the method target different quantities.}
 }
 \value{
 An object of class \code{adempr_validation}: a data frame of checks
