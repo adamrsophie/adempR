@@ -448,7 +448,48 @@ smoke_test <- function(study, seed) {
                               if (any(att$status != "ok")) "warning" else "ok",
                             message = msg, stringsAsFactors = FALSE)
   }
-  bind_rows(rows)
+  bind_rows(c(rows, list(rng_reset_check(study))))
+}
+
+# Code that calls set.seed() (or changes the generator kind) ends in the
+# same random state whatever state it started from. Each generator and
+# method is run from two different states; identical end states mean the
+# code reseeds itself and breaks the stream guarantees.
+rng_reset_check <- function(study) {
+  s1 <- rng_base_seed(1L, "rng_check_a")
+  s2 <- rng_base_seed(1L, "rng_check_b")
+  sc <- study$scenarios$values[[1]]
+  gctx <- list(replication = 1L, scenario_key = study$scenarios$keys[1], stage = "validation")
+  end_state <- function(seed, f) {
+    with_rng_state(seed, {
+      v <- tryCatch(f(), error = function(e) NULL)
+      list(value = v, state = get0(".Random.seed", envir = globalenv(), inherits = FALSE))
+    })
+  }
+  out <- list()
+  gen <- function() study$generator$fun(sc, gctx)
+  g1 <- end_state(s1, gen)
+  g2 <- end_state(s2, gen)
+  if (identical(g1$state, g2$state)) {
+    out[[length(out) + 1L]] <- data.frame(check = "rng:generator", status = "warning",
+      message = "the generator ends in the same random state from different streams: it (or a helper it calls) resets the seed with set.seed()",
+      stringsAsFactors = FALSE)
+  }
+  data <- g1$value
+  if (inherits(data, "adempr_data")) data <- data$data
+  if (is.null(data)) return(bind_rows(out))
+  for (mn in names(study$methods)) {
+    m <- study$methods[[mn]]
+    pub <- if (m$oracle) sc else sc[intersect(m$scenario_fields, names(sc))]
+    f <- function() call_flexible(m$fun, list(data = isolate_data(data), scenario = pub,
+                                             context = list(replication = 1L, method = mn)))
+    if (identical(end_state(s1, f)$state, end_state(s2, f)$state)) {
+      out[[length(out) + 1L]] <- data.frame(check = paste0("rng:", mn), status = "warning",
+        message = "the method ends in the same random state from different streams: it (or a helper it calls) resets the seed with set.seed()",
+        stringsAsFactors = FALSE)
+    }
+  }
+  bind_rows(out)
 }
 
 #' @export

@@ -250,3 +250,23 @@ rng_task_seed <- function(seed, registry, stage, scenario_key, component,
   base <- rng_base_seed(seed, domain)
   rng_substreams(rng_stream_seeds(base, k)[[1]], replication)[[1]]
 }
+
+# Streams for parallel or resampling work inside one method fit. They are
+# derived from the method's own task state through a hash into a separate
+# region of the L'Ecuyer-CMRG cycle, so they never coincide with a
+# registered stream, and they are the same at every replay of the task.
+inner_seed_fun <- function(task_seed) {
+  force(task_seed)
+  function(k) {
+    if (!is_count(k, 1)) stopf("`k` must be a positive whole number.")
+    base <- task_seed
+    base[2:7] <- domain_state(paste(task_seed, collapse = ","), "inner")
+    out <- vector("list", k)
+    cur <- base
+    for (i in seq_len(k)) {
+      cur <- parallel::nextRNGStream(cur)
+      out[[i]] <- cur
+    }
+    out
+  }
+}

@@ -198,7 +198,11 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
     m <- study$methods[[mn]]
     data.frame(method = mn, estimands = paste(m$estimands, collapse = ", "),
                visible_scenario_fields = paste(m$scenario_fields, collapse = ", "),
-               oracle = m$oracle, version = m$version %||% "",
+               role = m$role %||% "method", oracle = m$oracle, version = m$version %||% "",
+               settings_source = m$settings_source %||% "",
+               known_performance = if (is.null(m$reference)) "" else
+                 paste(names(m$reference), m$reference, sep = " = ", collapse = "; "),
+               fallback = !is.null(m$fallback),
                timeout = m$timeout %||% NA_real_, coupling = m$coupling %||% "",
                fingerprint = short_hash(res$manifest$fingerprints$methods[[mn]] %||% ""),
                description = m$description %||% "", stringsAsFactors = FALSE)
@@ -209,6 +213,8 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
     add("<details><summary>Code of ", html_escape(mn), "</summary><pre>",
         html_escape(fun_source(m$fun)),
         if (!is.null(m$extract)) paste0("\n\n# extract\n", html_escape(fun_source(m$extract))),
+        if (!is.null(m$fallback)) paste0("\n\n# fallback\n", html_escape(fun_source(m$fallback))),
+        if (!is.null(m$diagnostics)) paste0("\n\n# diagnostics\n", html_escape(fun_source(m$diagnostics))),
         "</pre></details>")
   }
   add("<h2>5. Performance measures and failure handling</h2>")
@@ -316,6 +322,13 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE) {
                          "mcse", "lower", "upper", "n_common", "status", "note")]))
   }
   add("<h2>9. Diagnostics</h2>")
+  if (NROW(diag$records)) {
+    add("<h3>Realized properties of the generated data sets</h3>", html_table(diag$records))
+  }
+  if (NROW(diag$reference_check)) {
+    add("<h3>Methods with known performance</h3><p>z is (value minus known value) / MCSE; |z| above 3 points to Monte Carlo noise or a bug.</p>",
+        html_table(diag$reference_check))
+  }
   for (nm in c("repeated_data", "test_interval_disagreement", "degenerate")) {
     x <- diag[[nm]]
     if (NROW(x)) {

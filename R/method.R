@@ -34,6 +34,14 @@
 #'   lasts, an attached package can mask a function of the same name from a
 #'   package attached earlier; call such functions with `pkg::fun()`.
 #' @param description Free text for the protocol.
+#' @param record Optional function `function(data, meta)` returning a named
+#'   numeric vector of realized properties of each generated data set (for
+#'   example the realized sample size, the censoring or missingness
+#'   fraction, the number of events, whether a covariate has support in
+#'   both arms). Values are stored per replication, returned by
+#'   [sim_results()] as `records` and summarized by [sim_diagnose()], so a
+#'   mechanism that drifts from its intended targets is visible. The record
+#'   function is not part of the generator fingerprint.
 #' @return An object of class `adempr_generator`.
 #' @examples
 #' sim_generator(function(scenario, context) {
@@ -41,11 +49,12 @@
 #' }, description = "independent normal outcomes")
 #' @export
 sim_generator <- function(fun, check = NULL, version = NULL, depends = list(),
-                          packages = character(), description = NULL) {
+                          packages = character(), description = NULL, record = NULL) {
   check_function(fun, "fun", c("scenario", "context"))
   if (!is.null(check)) check_function(check, "check", "scenario")
+  if (!is.null(record)) check_function(record, "record")
   structure(list(fun = fun, check = check, version = version, depends = depends,
-                 packages = packages, description = description),
+                 packages = packages, description = description, record = record),
             class = "adempr_generator")
 }
 
@@ -118,8 +127,8 @@ isolate_data <- function(x) {
 #' called as `fun(data, scenario, context)`; it may omit `scenario` and
 #' `context` from its arguments. `scenario` is a *public view* containing
 #' only the fields named in `scenario_fields`, and `context` contains only
-#' the replication number, the method identifier and an opaque scenario
-#' key. Privileged data-generating parameters and truth are visible only to
+#' the replication number, the method identifier, an opaque scenario
+#' key and `inner_seeds()`. Privileged data-generating parameters and truth are visible only to
 #' methods declared as `oracle = TRUE`.
 #'
 #' Separating fitting from extraction: if `extract` is supplied, `fun`
@@ -131,6 +140,15 @@ isolate_data <- function(x) {
 #' or reordering methods does not change any other method's randomness.
 #' Methods listed in the same `coupling` group share one stream; this is an
 #' explicit policy for sharing, for example, bootstrap samples or folds.
+#'
+#' Parallel or resampling work inside a method should not set seeds. Call
+#' `context$inner_seeds(k)` for `k` independent L'Ecuyer-CMRG states (for
+#' example `future.apply::future_lapply(..., future.seed = context$inner_seeds(k))`,
+#' or assign one to `.Random.seed` per worker). They are derived from the
+#' method's task state, never coincide with the study's registered streams,
+#' and are the same at every replay, so any inner resample can be
+#' reproduced; storing the resample indices or frequency weights in the fit
+#' (with `sim_retention(fits = TRUE)`) keeps them inspectable.
 #'
 #' @param fun Function analyzing one data set.
 #' @param estimands Character vector of estimand identifiers the method
@@ -159,6 +177,27 @@ isolate_data <- function(x) {
 #' @param coupling Optional name of a group of methods sharing one random
 #'   number stream.
 #' @param description Free text for the protocol.
+#' @param fallback Optional function with the same arguments as `fun`,
+#'   returning estimates to use when every attempt of `fun` failed (for
+#'   example a simpler model, or the unadjusted estimate). Its rows are
+#'   stored with `fallback = TRUE` next to the failed attempt; whether they
+#'   count is decided at evaluation by `sim_failure_policy(fallback = )`,
+#'   so the choice needs no refitting.
+#' @param role `"method"` (default), `"benchmark"` (a comparator with known
+#'   behavior, such as a correctly specified model) or `"reference"`.
+#'   Shown in reports.
+#' @param reference Optional named numeric vector of known performance, for
+#'   example `c(bias = 0, coverage = 0.95)` for a method whose behavior is
+#'   known exactly. [sim_diagnose()] flags cells where the estimated
+#'   measure is more than 3 Monte Carlo standard errors from it: either
+#'   Monte Carlo noise or a bug in the generator or the evaluation.
+#' @param settings_source Where the tuning settings of the method come from
+#'   (for example "package defaults", "the authors' recommendations",
+#'   "tuned on pilot data"); shown in the report.
+#' @param diagnostics Optional function `function(fit, data)` returning a
+#'   named list or vector of numbers about each successful fit (iterations,
+#'   effective sample size, a convergence criterion). They are stored per
+#'   fit and returned by [sim_results()] as `diagnostics`.
 #' @return An object of class `adempr_method`.
 #' @examples
 #' sim_method(function(data) {
@@ -169,7 +208,18 @@ isolate_data <- function(x) {
 sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
                        oracle = FALSE, extract = NULL, declares = list(),
                        version = NULL, depends = list(), packages = character(),
-                       timeout = NULL, coupling = NULL, description = NULL) {
+                       timeout = NULL, coupling = NULL, description = NULL,
+                       fallback = NULL, role = c("method", "benchmark", "reference"),
+                       reference = NULL, settings_source = NULL, diagnostics = NULL) {
+  role <- match.arg(role)
+  if (!is.null(fallback)) check_function(fallback, "fallback")
+  if (!is.null(diagnostics)) check_function(diagnostics, "diagnostics")
+  if (!is.null(reference)) {
+    if (!is.numeric(reference) || is.null(names(reference)) ||
+        !all(names(reference) %in% MEASURE_INFO$measure) || anyNA(reference)) {
+      stopf("`reference` must be a named numeric vector of built in measures, for example c(bias = 0, coverage = 0.95).")
+    }
+  }
   check_function(fun, "fun")
   fa <- names(formals(fun))
   if (!length(fa)) stopf("A method function must accept at least the `data` argument.")
@@ -189,13 +239,21 @@ sim_method <- function(fun, estimands = NULL, scenario_fields = character(),
   structure(list(fun = fun, estimands = estimands, scenario_fields = scenario_fields,
                  oracle = oracle, extract = extract, declares = declares,
                  version = version, depends = depends, packages = packages,
-                 timeout = timeout, coupling = coupling, description = description),
+                 timeout = timeout, coupling = coupling, description = description,
+                 fallback = fallback, role = role, reference = reference,
+                 settings_source = settings_source, diagnostics = diagnostics),
             class = "adempr_method")
 }
 
 method_fingerprint <- function(m) {
+  # the fallback and the diagnostics change what is stored, so they are part
+  # of the fingerprint when present
+  if (is.null(m$fallback) && is.null(m$diagnostics)) {
+    return(fingerprint(m$fun, m$extract, m$estimands, m$scenario_fields, m$oracle,
+                       m$declares, m$version, m$depends, m$coupling))
+  }
   fingerprint(m$fun, m$extract, m$estimands, m$scenario_fields, m$oracle,
-              m$declares, m$version, m$depends, m$coupling)
+              m$declares, m$version, m$depends, m$coupling, m$fallback, m$diagnostics)
 }
 
 call_flexible <- function(f, args) {
@@ -303,6 +361,11 @@ print.adempr_estimate <- function(x, ...) {
 #' @param infinite `"include"` (default) keeps infinite estimates as
 #'   legitimate extended real results, so error based metrics can be
 #'   infinite; `"invalid"` makes them unusable.
+#' @param fallback `"exclude"` (default) treats the fallback values of a
+#'   method whose fit failed as a failure; `"use"` evaluates them in place
+#'   of the failed fit (estimate status `"valid"`, column `used_fallback`).
+#'   Report which one was used: a fallback changes the method being
+#'   evaluated into a composite procedure.
 #' @param retries Number of infrastructure retries after an error. A retry
 #'   reuses the same data set and random number state; it is not a new
 #'   replication. Use it only for transient infrastructure faults: a
@@ -315,11 +378,11 @@ sim_failure_policy <- function(nonconverged = c("invalid", "valid"),
                                warnings = c("record", "invalid"),
                                boundary = c("record", "invalid"),
                                infinite = c("include", "invalid"),
-                               retries = 0L) {
+                               retries = 0L, fallback = c("exclude", "use")) {
   if (!is_count(retries)) stopf("`retries` must be a nonnegative whole number.")
   structure(list(nonconverged = match.arg(nonconverged), warnings = match.arg(warnings),
                  boundary = match.arg(boundary), infinite = match.arg(infinite),
-                 retries = as.integer(retries)),
+                 retries = as.integer(retries), fallback = match.arg(fallback)),
             class = "adempr_failure_policy")
 }
 
@@ -387,7 +450,10 @@ classify_rows <- function(est, estimands, policy) {
   # only result from a nonconverged fit must not count toward coverage.
   status <- rep(NA_character_, n)
   set <- function(cond, value) status[is.na(status) & cond] <<- value
-  set(est$attempt_status != "ok", est$attempt_status[is.na(status) & est$attempt_status != "ok"])
+  fb <- if (is.null(est$fallback)) rep(FALSE, n) else est$fallback %in% TRUE
+  use_fb <- fb & identical(policy$fallback %||% "exclude", "use")
+  failed <- est$attempt_status != "ok" & !use_fb
+  set(failed, est$attempt_status[is.na(status) & failed])
   set(incompatible, "incompatible")
   if (policy$nonconverged == "invalid") set(est$converged %in% FALSE, "nonconverged")
   if (policy$boundary == "invalid") set(est$boundary %in% TRUE, "boundary")
@@ -396,6 +462,7 @@ classify_rows <- function(est, estimands, policy) {
   set(is.infinite(e), if (policy$infinite == "include") "infinite" else "invalid_infinite")
   set(TRUE, "valid")
   est$estimate_status <- status
+  est$used_fallback <- use_fb
   est$valid <- status %in% c("valid", "infinite")
   est$se_status <- ifelse(is.na(est$se), "missing",
                    ifelse(!is.finite(est$se) | est$se < 0, "invalid", "valid"))

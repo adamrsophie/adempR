@@ -10,7 +10,8 @@ sim_generator(
   version = NULL,
   depends = list(),
   packages = character(),
-  description = NULL
+  description = NULL,
+  record = NULL
 )
 }
 \arguments{
@@ -40,6 +41,15 @@ lasts, an attached package can mask a function of the same name from a
 package attached earlier; call such functions with \code{pkg::fun()}.}
 
 \item{description}{Free text for the protocol.}
+
+\item{record}{Optional function \verb{function(data, meta)} returning a named
+numeric vector of realized properties of each generated data set (for
+example the realized sample size, the censoring or missingness
+fraction, the number of events, whether a covariate has support in
+both arms). Values are stored per replication, returned by
+\code{\link[=sim_results]{sim_results()}} as \code{records} and summarized by \code{\link[=sim_diagnose]{sim_diagnose()}}, so a
+mechanism that drifts from its intended targets is visible. The record
+function is not part of the generator fingerprint.}
 }
 \value{
 An object of class \code{adempr_generator}.

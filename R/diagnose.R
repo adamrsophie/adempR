@@ -165,8 +165,29 @@ sim_diagnose <- function(run, outlier_z = 5) {
       bind_rows(out)
     }))
   }
+  # methods with known performance: a miss beyond Monte Carlo error points
+  # to noise or a bug in the generator or the evaluation
+  ref_check <- NULL
+  refm <- Filter(function(m) !is.null(m$reference), study$methods)
+  if (length(refm) && !is.null(est) && nrow(est)) {
+    ms <- unique(unlist(lapply(refm, function(m) names(m$reference))))
+    s <- as.data.frame(sim_summarise(res, measures = ms))
+    rows <- list()
+    for (mn in names(refm)) {
+      ref <- refm[[mn]]$reference
+      r <- s[s$method == mn & s$measure %in% names(ref), , drop = FALSE]
+      if (!nrow(r)) next
+      r$reference <- unname(ref[r$measure])
+      r$z <- (r$value - r$reference) / r$mcse
+      rows[[length(rows) + 1L]] <- r[c("scenario_id", "method", "estimand", "measure", "value",
+                                       "mcse", "reference", "z")]
+    }
+    ref_check <- bind_rows(rows)
+    if (!is.null(ref_check)) ref_check$flag <- is.finite(ref_check$z) & abs(ref_check$z) > 3
+  }
   structure(list(
     failures = failure_table(res), messages = msgs, generation_failures = gen_fail,
+    reference_check = ref_check, records = record_summary(res, lab),
     repeated_data = repeated, test_interval_disagreement = disagree,
     degenerate = degenerate,
     outliers = bind_rows(outliers), association = bind_rows(assoc),
@@ -196,6 +217,14 @@ print.adempr_diagnosis <- function(x, ...) {
                                    "value", "robust_z")], 10L), row.names = FALSE)
   } else {
     cat("\nNo outlying estimates or standard errors.\n")
+  }
+  if (NROW(x$records)) {
+    cat("\nRealized properties of the generated data sets:\n")
+    print(x$records, row.names = FALSE)
+  }
+  if (NROW(x$reference_check) && any(x$reference_check$flag)) {
+    cat("\nMethods with known performance that miss it by more than 3 MCSE (Monte Carlo noise or a bug):\n")
+    print(x$reference_check[x$reference_check$flag, ], row.names = FALSE)
   }
   if (NROW(x$repeated_data)) {
     cat("\nScenarios where data sets repeat across replications (fixed rather than redrawn data?):\n")
@@ -447,4 +476,22 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
                       xlab = "", col = "grey92", ...)
   }
   invisible(NULL)
+}
+
+# Summary of the realized properties recorded for each generated data set.
+record_summary <- function(res, lab) {
+  r <- res$records
+  if (is.null(r) || !nrow(r)) return(NULL)
+  grp <- unique(r[c("scenario_key", "name")])
+  out <- lapply(seq_len(nrow(grp)), function(i) {
+    v <- r$value[r$scenario_key == grp$scenario_key[i] & r$name == grp$name[i]]
+    ok <- is.finite(v)
+    data.frame(scenario_id = lab(grp$scenario_key[i]), name = grp$name[i], n = sum(ok),
+               mean = if (any(ok)) mean(v[ok]) else NA_real_,
+               sd = if (sum(ok) > 1) stats::sd(v[ok]) else NA_real_,
+               min = if (any(ok)) min(v[ok]) else NA_real_,
+               max = if (any(ok)) max(v[ok]) else NA_real_,
+               missing = sum(!ok), stringsAsFactors = FALSE)
+  })
+  bind_rows(out)
 }

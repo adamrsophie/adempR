@@ -82,14 +82,20 @@ read_raw_results <- function(path, repair = FALSE) {
                                   c("status", "failed_stage", "message", "n_warnings", "warnings"),
                                   "method attempt"), task_keys)
   est <- latest_round(dedup_table(get("estimates"), c(task_keys, "estimand", "round"),
-                                  c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning"),
+                                  c(RAW_ESTIMATE_COLUMNS, "attempt_status", "had_warning",
+                                    "fallback"),
                                   "estimate"), task_keys)
   dtr <- latest_round(dedup_table(get("dataset_truth"),
                                   c("scenario_key", "replication", "estimand", "round"),
                                   "truth", "data set truth"),
                       c("scenario_key", "replication", "estimand"))
+  dgn <- latest_round(dedup_table(get("diagnostics"), c(task_keys, "name", "round"), "value",
+                                  "fit diagnostic"), task_keys)
+  rcd <- latest_round(dedup_table(get("records"), c("scenario_key", "replication", "name", "round"),
+                                  "value", "data set record"),
+                      c("scenario_key", "replication", "name"))
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,
-       artifacts = arts, problems = rc$problems)
+       diagnostics = dgn, records = rcd, artifacts = arts, problems = rc$problems)
 }
 
 # Read a retained artifact after checking it against its checksum sidecar;
@@ -224,6 +230,7 @@ sim_results <- function(run) {
   if (!is.null(reps)) reps <- reps[reps$generator_fp == gen_fp, , drop = FALSE]
   att <- keep_meth(raw$attempts)
   est <- keep_meth(raw$estimates)
+  dgn <- keep_meth(raw$diagnostics)
   truth <- sim_truth(run)
   if (!is.null(est) && nrow(est)) {
     common <- truth[truth$truth_status == "ok", c("scenario_key", "estimand", "truth",
@@ -253,6 +260,7 @@ sim_results <- function(run) {
   sc <- as.data.frame(study$scenarios)
   structure(list(scenarios = sc, replications = reps, attempts = att, estimates = est,
                  truth = truth, manifest = man, path = run$path,
+                 diagnostics = dgn, records = keep_rep(raw$records),
                  artifacts = raw$artifacts, problems = raw$problems),
             class = "adempr_results")
 }
@@ -267,6 +275,7 @@ empty_estimates <- function(study) {
                missing_row(en))
   row$attempt_status <- "ok"
   row$had_warning <- FALSE
+  row$fallback <- FALSE
   row$method_fp <- NA_character_
   row$round <- 0L
   row$truth <- NA_real_

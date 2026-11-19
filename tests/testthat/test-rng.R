@@ -191,3 +191,22 @@ test_that("declared packages are attached only while study code runs", {
   sim_validate(st, smoke = TRUE)
   expect_identical(search(), before)
 })
+
+test_that("methods get reproducible inner streams that differ between tasks", {
+  m <- list(inner = sim_method(function(data, context) {
+    s <- context$inner_seeds(3)
+    draws <- vapply(s, function(st) {
+      assign(".Random.seed", st, envir = globalenv())
+      runif(1)
+    }, numeric(1))
+    sim_estimate("mean", sum(draws))
+  }, estimands = "mean"))
+  st <- normal_study(n = 10L, mu = 0, methods = m)
+  run <- sim_run(st, replications = 3, seed = 1, path = run_path())
+  e <- sim_results(run)$estimates$estimate
+  expect_equal(length(unique(e)), 3L)
+  expect_true(sim_replay(run, scenario = 1, replication = 2)$matches)
+  f <- adempR:::inner_seed_fun(adempR:::rng_base_seed(1))
+  expect_identical(f(2), f(2))
+  expect_false(identical(f(2)[[1]], f(2)[[2]]))
+})

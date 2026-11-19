@@ -16,7 +16,12 @@ sim_method(
   packages = character(),
   timeout = NULL,
   coupling = NULL,
-  description = NULL
+  description = NULL,
+  fallback = NULL,
+  role = c("method", "benchmark", "reference"),
+  reference = NULL,
+  settings_source = NULL,
+  diagnostics = NULL
 )
 }
 \arguments{
@@ -58,6 +63,32 @@ session language. Any elapsed time limit set by the caller with
 number stream.}
 
 \item{description}{Free text for the protocol.}
+
+\item{fallback}{Optional function with the same arguments as \code{fun},
+returning estimates to use when every attempt of \code{fun} failed (for
+example a simpler model, or the unadjusted estimate). Its rows are
+stored with \code{fallback = TRUE} next to the failed attempt; whether they
+count is decided at evaluation by \code{sim_failure_policy(fallback = )},
+so the choice needs no refitting.}
+
+\item{role}{\code{"method"} (default), \code{"benchmark"} (a comparator with known
+behavior, such as a correctly specified model) or \code{"reference"}.
+Shown in reports.}
+
+\item{reference}{Optional named numeric vector of known performance, for
+example \code{c(bias = 0, coverage = 0.95)} for a method whose behavior is
+known exactly. \code{\link[=sim_diagnose]{sim_diagnose()}} flags cells where the estimated
+measure is more than 3 Monte Carlo standard errors from it: either
+Monte Carlo noise or a bug in the generator or the evaluation.}
+
+\item{settings_source}{Where the tuning settings of the method come from
+(for example "package defaults", "the authors' recommendations",
+"tuned on pilot data"); shown in the report.}
+
+\item{diagnostics}{Optional function \verb{function(fit, data)} returning a
+named list or vector of numbers about each successful fit (iterations,
+effective sample size, a convergence criterion). They are stored per
+fit and returned by \code{\link[=sim_results]{sim_results()}} as \code{diagnostics}.}
 }
 \value{
 An object of class \code{adempr_method}.
@@ -67,8 +98,8 @@ Wraps an ordinary R function that analyzes one data set. The function is
 called as \code{fun(data, scenario, context)}; it may omit \code{scenario} and
 \code{context} from its arguments. \code{scenario} is a \emph{public view} containing
 only the fields named in \code{scenario_fields}, and \code{context} contains only
-the replication number, the method identifier and an opaque scenario
-key. Privileged data-generating parameters and truth are visible only to
+the replication number, the method identifier, an opaque scenario
+key and \code{inner_seeds()}. Privileged data-generating parameters and truth are visible only to
 methods declared as \code{oracle = TRUE}.
 }
 \details{
@@ -81,6 +112,15 @@ Each method has its own random number stream per replication, so adding
 or reordering methods does not change any other method's randomness.
 Methods listed in the same \code{coupling} group share one stream; this is an
 explicit policy for sharing, for example, bootstrap samples or folds.
+
+Parallel or resampling work inside a method should not set seeds. Call
+\code{context$inner_seeds(k)} for \code{k} independent L'Ecuyer-CMRG states (for
+example \code{future.apply::future_lapply(..., future.seed = context$inner_seeds(k))},
+or assign one to \code{.Random.seed} per worker). They are derived from the
+method's task state, never coincide with the study's registered streams,
+and are the same at every replay, so any inner resample can be
+reproduced; storing the resample indices or frequency weights in the fit
+(with \code{sim_retention(fits = TRUE)}) keeps them inspectable.
 }
 \examples{
 sim_method(function(data) {

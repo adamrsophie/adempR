@@ -475,8 +475,12 @@ commit_chunk <- function(study, results, p) {
     if (!is.null(df) && nrow(df)) df$round <- as.integer(p$round)
     df
   }
+  dg <- bind_rows(lapply(results, `[[`, "diagnostics"))
+  if (!is.null(dg)) dg$method_fp <- unname(fps[dg$method])
   batch <- list(schema_version = SCHEMA_VERSION, created = now_utc(),
                 replications = rnd(bind_rows(reps)), attempts = rnd(att), estimates = rnd(est),
+                diagnostics = rnd(dg),
+                records = rnd(bind_rows(lapply(results, `[[`, "records"))),
                 dataset_truth = rnd(bind_rows(lapply(results, `[[`, "dataset_truth"))))
   nm <- paste0("b-", new_uuid())
   atomic_save(batch, p$batches, nm, p$tmp)

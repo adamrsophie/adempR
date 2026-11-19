@@ -74,9 +74,10 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   artifacts <- list()
   attempts <- list()
   estimates <- list()
+  diagnostics <- list()
   if (!is.null(gen$error)) {
     return(list(replication = repl, attempts = NULL, estimates = NULL,
-                dataset_truth = NULL, artifacts = artifacts))
+                dataset_truth = NULL, artifacts = artifacts, diagnostics = NULL))
   }
   generated <- gen$value
   if (inherits(generated, "adempr_data")) {
@@ -91,6 +92,20 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   # checksum of the analysis data: identifies the data set across batches
   # and reveals a generator that returns the same data every time
   repl$data_md5 <- md5_bytes(serialize(data, NULL, version = 3))
+  records <- NULL
+  if (!is.null(study$generator$record)) {
+    rc <- with_rng_state(task$seeds$data, run_captured(function() {
+      call_flexible(study$generator$record, list(data = isolate_data(data), meta = meta))
+    }))
+    v <- if (is.null(rc$error)) unlist(rc$value) else NULL
+    records <- if (length(v) && !is.null(names(v))) {
+      data.frame(scenario_key = key, replication = rep, name = names(v),
+                 value = suppressWarnings(as.numeric(v)), stringsAsFactors = FALSE)
+    } else {
+      data.frame(scenario_key = key, replication = rep, name = ".record_error",
+                 value = NA_real_, stringsAsFactors = FALSE)
+    }
+  }
   dataset_truth <- if (length(dtruth)) {
     data.frame(scenario_key = key, replication = rep, estimand = names(dtruth),
                truth = unlist(dtruth, use.names = FALSE), stringsAsFactors = FALSE)
@@ -103,7 +118,8 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
     comp <- method_component(m, mn)
     seed <- task$seeds[[comp]]
     pub_scenario <- if (m$oracle) scenario else scenario[intersect(m$scenario_fields, names(scenario))]
-    mctx <- list(replication = rep, method = mn, scenario_key = key)
+    mctx <- list(replication = rep, method = mn, scenario_key = key,
+                 inner_seeds = inner_seed_fun(seed))
     if (m$oracle) {
       mctx$truth <- dtruth
       mctx$meta <- meta
@@ -135,8 +151,8 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
       warns <- fit$warnings
       ext_elapsed <- 0
       if (!is.null(fit$error)) {
-        status <- if (fit$timed_out) "timeout" else "error"
         message <- conditionMessage(fit$error)
+        status <- if (fit$timed_out) "timeout" else if (is_memory_error(message)) "memory" else "error"
       } else {
         stage <- "extract"
         ext_elapsed <- ext$elapsed
@@ -162,7 +178,31 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
       if (status == "ok" || attempt > retries || status == "timeout") break
     }
     attempts[[length(attempts)]]$final <- TRUE
+    used_fallback <- FALSE
+    if (status != "ok" && !is.null(m$fallback)) {
+      fb <- with_rng_state(seed, run_captured(function() {
+        out <- call_flexible(m$fallback, list(data = isolate_data(data), scenario = pub_scenario,
+                                              context = mctx))
+        outputs_to_rows(out, m$estimands)
+      }, m$timeout))
+      if (is.null(fb$error)) {
+        rows <- fb$value
+        used_fallback <- TRUE
+      }
+    }
+    if (status == "ok" && !is.null(m$diagnostics)) {
+      dg <- with_rng_state(seed, run_captured(function() {
+        call_flexible(m$diagnostics, list(fit = fit$value, data = mdata))
+      }))
+      v <- if (is.null(dg$error)) unlist(dg$value) else NULL
+      if (length(v) && !is.null(names(v))) {
+        diagnostics[[length(diagnostics) + 1L]] <- data.frame(
+          scenario_key = key, replication = rep, method = mn, name = names(v),
+          value = suppressWarnings(as.numeric(v)), stringsAsFactors = FALSE)
+      }
+    }
     if (is.null(rows)) rows <- do.call(rbind, lapply(m$estimands, missing_row))
+    rows$fallback <- used_fallback
     rows$attempt_status <- status
     rows$had_warning <- length(warns) > 0L
     rows <- cbind(data.frame(scenario_key = key, replication = rep, method = mn,
@@ -172,7 +212,7 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   }
   list(replication = repl, attempts = bind_rows(attempts),
        estimates = bind_rows(estimates), dataset_truth = dataset_truth,
-       artifacts = artifacts,
+       artifacts = artifacts, diagnostics = bind_rows(diagnostics), records = records,
        data = if (keep_data) data, meta = if (keep_data) {
          if (inherits(generated, "adempr_data")) generated[c("truth", "meta")] else list()
        })
@@ -204,4 +244,11 @@ task_seeds <- function(ctx, key, reps, study, methods) {
     for (cp in comps) s[[cp]] <- comp_seeds[[cp]][[j]]
     s
   })
+}
+
+# Memory exhaustion is a failure class of its own: it says more about the
+# computing environment than about the method.
+is_memory_error <- function(msg) {
+  grepl("cannot allocate|memory exhausted|vector memory limit|std::bad_alloc", msg,
+        ignore.case = TRUE)
 }

@@ -9,7 +9,8 @@ sim_failure_policy(
   warnings = c("record", "invalid"),
   boundary = c("record", "invalid"),
   infinite = c("include", "invalid"),
-  retries = 0L
+  retries = 0L,
+  fallback = c("exclude", "use")
 )
 }
 \arguments{
@@ -30,6 +31,12 @@ infinite; \code{"invalid"} makes them unusable.}
 reuses the same data set and random number state; it is not a new
 replication. Use it only for transient infrastructure faults: a
 statistical method's own restarts belong inside the method.}
+
+\item{fallback}{\code{"exclude"} (default) treats the fallback values of a
+method whose fit failed as a failure; \code{"use"} evaluates them in place
+of the failed fit (estimate status \code{"valid"}, column \code{used_fallback}).
+Report which one was used: a fallback changes the method being
+evaluated into a composite procedure.}
 }
 \value{
 An object of class \code{adempr_failure_policy}.
