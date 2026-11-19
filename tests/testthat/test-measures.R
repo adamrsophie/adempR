@@ -111,3 +111,26 @@ test_that("replication planning reproduces the textbook numbers", {
   # a pilot that saw no failures is not taken at face value
   expect_gt(adempR:::conservative_pq(0, 20), 0)
 })
+
+test_that("rejection uses p <= alpha, validated metadata and the eligible rows", {
+  expect_error(sim_estimate("mean", 1, alpha = -1), "alpha")
+  expect_error(sim_estimate("mean", 1, level = 2), "level")
+  m <- list(
+    edge = sim_method(function(data) sim_estimate("mean", 0, p_value = 0.05, null = 0,
+                                                  lower = -1, upper = 1, level = 0.9),
+                      estimands = "mean"),
+    mixed = sim_method(function(data, context) {
+      sim_estimate("mean", 0, lower = -1, upper = 1,
+                   level = if (context$replication == 1) 0.5 else 0.95)
+    }, estimands = "mean"))
+  st <- normal_study(n = 10L, mu = 0, methods = m, measures = c("coverage", "rejection"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 3, seed = 1, path = run_path())))
+  rj <- s[s$method == "edge" & s$measure == "rejection", ]
+  expect_equal(rj$value, 1)
+  expect_identical(rj$label, "type_i_error")
+  expect_match(s$note[s$method == "edge" & s$measure == "coverage"], "nominal level 0.9")
+  expect_match(s$note[s$method == "mixed" & s$measure == "coverage"], "several nominal levels")
+  # an approximate truth close to the null gets the neutral label
+  rows <- data.frame(truth = 0.01, truth_se = 0.2, null = 0, alternative = "two.sided")
+  expect_identical(adempR:::rejection_label(rows, list(null = 0)), "rejection")
+})

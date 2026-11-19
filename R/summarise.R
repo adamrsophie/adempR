@@ -2,15 +2,21 @@
 
 USABLE_FOR_INTERVAL <- c("valid", "infinite", "missing")
 
+# Reject when p <= alpha (Morris, White and Crowther 2019, Table 6); the
+# equality matters for discrete tests.
 reject_indicator <- function(rows, alpha) {
   a <- ifelse(is.na(rows$alpha), alpha, rows$alpha)
-  ifelse(!is.na(rows$reject), rows$reject, rows$p_value < a)
+  ifelse(!is.na(rows$reject), rows$reject, rows$p_value <= a)
 }
 
 rejection_label <- function(rows, estimand) {
   h0 <- ifelse(is.na(rows$null), estimand$null %||% NA_real_, rows$null)
   if (all(is.na(rows$truth)) || all(is.na(h0))) return("rejection")
   alt <- ifelse(is.na(rows$alternative), "two.sided", rows$alternative)
+  # A Monte Carlo truth within 3 standard errors of the null cannot tell
+  # whether the null holds: use the neutral label.
+  tse <- rows$truth_se
+  if (any(!is.na(tse) & tse > 0 & abs(rows$truth - h0) <= 3 * tse)) return("rejection")
   nt <- null_true(rows$truth, h0, alt)
   if (anyNA(nt)) return("rejection")
   if (all(nt)) "type_i_error" else if (!any(nt)) "power" else "rejection"
@@ -75,7 +81,14 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
     se_ratio = k_se_ratio(rows$estimate[usable & se_ok], rows$se[usable & se_ok], level),
     coverage = {
       sel <- int_ok & has_truth
-      k_prop(rows$lower[sel] <= truth[sel] & truth[sel] <= rows$upper[sel], level)
+      r <- k_prop(rows$lower[sel] <= truth[sel] & truth[sel] <= rows$upper[sel], level)
+      lv <- sort(unique(rows$level[sel][!is.na(rows$level[sel])]))
+      r$note <- paste(c(if (length(lv) == 1L) paste("nominal level", format(lv)),
+                        if (length(lv) > 1L) paste("intervals at several nominal levels:",
+                                                   paste(format(lv), collapse = ", ")),
+                        if (!is.na(r$note)) r$note), collapse = "; ")
+      if (!nzchar(r$note)) r$note <- NA_character_
+      r
     },
     noncoverage_lower = {
       sel <- int_ok & has_truth
@@ -204,7 +217,9 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
             measure_cell(m, rows, study, estimand)
           }
           label <- if (identical(m, "rejection") && nrow(rows)) {
-            rejection_label(rows[rows$test_status == "valid", , drop = FALSE], estimand)
+            # the label uses exactly the rows the rejection rate uses
+            rejection_label(rows[rows$estimate_status %in% USABLE_FOR_INTERVAL &
+                                   rows$test_status == "valid", , drop = FALSE], estimand)
           } else mid
           sens_lo <- sens_hi <- mcse_total <- NA_real_
           if (needs_truth && !is.na(tse) && tse > 0 && tkind == "mc" &&

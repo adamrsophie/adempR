@@ -253,13 +253,20 @@ sim_estimate <- function(estimand, estimate, se = NA_real_, lower = NA_real_,
     }
     as.logical(x)
   }
+  unit <- function(x, nm) {
+    x <- num1(x, nm)
+    if (!is.na(x) && (x <= 0 || x >= 1)) {
+      stopf("`%s` must be in (0, 1) (estimand `%s`); got %s.", nm, estimand, format(x))
+    }
+    x
+  }
   structure(list(
     estimand = estimand, estimate = num1(estimate, "estimate"),
     se = num1(se, "se"), lower = num1(lower, "lower"), upper = num1(upper, "upper"),
-    level = num1(level, "level"),
+    level = unit(level, "level"),
     interval_type = as.character(interval_type %||% NA_character_)[1],
     p_value = num1(p_value, "p_value"), null = num1(null, "null"),
-    alternative = alternative, alpha = num1(alpha, "alpha"),
+    alternative = alternative, alpha = unit(alpha, "alpha"),
     reject = lgl1(reject, "reject"), df = num1(df, "df"),
     converged = lgl1(converged, "converged"), boundary = lgl1(boundary, "boundary"),
     effect = effect, scale = scale, note = as.character(note %||% NA)[1]
