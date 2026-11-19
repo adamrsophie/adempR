@@ -73,7 +73,7 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
       changed_m <- c(changed_m, mn)
     }
   }
-  if (length(changed_m) && !update) {
+  if (length(changed_m) && isFALSE(update)) {
     stopf("Method(s) %s changed since their results were computed. Rerun with `update = TRUE` to refit them (earlier fits are kept but superseded), or use a new run directory.",
           paste(changed_m, collapse = ", "))
   }
@@ -113,6 +113,14 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
     # (A sequential run analyzes its look prefix, so no warning there.)
     warnf("This run directory holds %d replications per scenario; %d were requested. All %d are kept and summarized.",
              man$replications, as.integer(replications), man$replications)
+  }
+  # A production run is the record of the study: changes that supersede or
+  # re-evaluate its results need an explicit confirmation. Extensions (more
+  # replications, added scenarios or methods) do not.
+  altering <- changes[grepl("re-evaluate|refit|removed", changes)]
+  if (length(altering) && identical(man$label, "production") && !identical(update, "production")) {
+    stopf("This is a production run; these changes would alter its results: %s. Use `update = \"production\"` to confirm, or a new run directory.",
+          paste(altering, collapse = "; "))
   }
   if (length(changes)) {
     man$revisions <- c(man$revisions, list(list(time = now_utc(), changes = changes,
@@ -209,7 +217,11 @@ check_frozen <- function(study) {
 #'   (scenario x replication x method) in one call; a guard against
 #'   unintentionally enormous designs. It is checked before the manifest
 #'   is changed or any task is built.
-#' @param update Allow refitting methods whose definition changed.
+#' @param update Allow refitting methods whose definition changed. In a
+#'   run labeled `"production"`, any change that supersedes or re-evaluates
+#'   committed results (a changed method, truth, estimand, measure, failure
+#'   policy or design, or a removed method or scenario) is refused unless
+#'   `update = "production"`; extensions are always allowed.
 #' @param retry_failed Rerun replications whose data generation failed and
 #'   method fits that ended in an error or a timeout, with their original
 #'   random number streams. Use it after fixing a failure caused by the
@@ -224,6 +236,12 @@ check_frozen <- function(study) {
 #'   uses the same stream of every scenario, method and truth even when the
 #'   original run was extended with new methods or scenarios over time.
 #'   Ignored when the directory already holds a run.
+#' @param cost Optional function of the scenario returning the relative cost
+#'   of one task (for example `function(scenario) scenario$n^2`, or times
+#'   per scenario from [sim_pilot()]). Tasks are then scheduled longest
+#'   first (LPT), which shortens the total time with parallel workers when
+#'   scenarios differ in cost. Scheduling never changes results: every task
+#'   has its own preassigned streams.
 #' @return An object of class `adempr_run`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -240,9 +258,12 @@ check_frozen <- function(study) {
 sim_run <- function(study, replications, seed, path, backend = c("sequential", "future"),
                     chunk_size = 25L, workers = NULL, max_tasks = 1e6,
                     update = FALSE, retry_failed = FALSE, label = NULL,
-                    progress = interactive(), rng_registry = NULL) {
+                    progress = interactive(), rng_registry = NULL, cost = NULL) {
   stopifnot(inherits(study, "adempr_study"))
   backend <- match.arg(backend)
+  if (!(isTRUE(update) || isFALSE(update) || identical(update, "production"))) {
+    stopf("`update` must be TRUE, FALSE or \"production\".")
+  }
   if (!is_count(replications, 1)) stopf("`replications` must be a positive whole number.")
   if (!is_count(seed)) stopf("`seed` must be a nonnegative whole number.")
   if (missing(path) || !is_scalar_character(path)) {
@@ -304,6 +325,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
               dgp_stage = "dgp", method_stage = "method")
   if (nrow(todo)) {
     tasks <- build_tasks(study, ctx, todo)
+    if (!is.null(cost)) tasks <- lpt_order(study, tasks, cost)
     chunks <- split(tasks, ceiling(seq_along(tasks) / chunk_size))
     if (progress) {
       message(sprintf("Running %d task(s) in %d batch(es) with the %s backend.",
@@ -685,4 +707,18 @@ warn_patched <- function(pkgs) {
                            "production run."), paste(bad, collapse = ", ")), call. = FALSE)
   }
   invisible(bad)
+}
+
+# Longest processing time first: tasks of costly scenarios start first, so
+# workers finish close together instead of waiting on a late costly chunk.
+lpt_order <- function(study, tasks, cost) {
+  check_function(cost, "cost", "scenario")
+  keys <- unique(vapply(tasks, `[[`, character(1), "scenario_key"))
+  w <- vapply(keys, function(k) {
+    v <- call_flexible(cost, list(scenario = study$scenarios$values[[scenario_index(study$scenarios, k)]]))
+    if (!is_scalar_number(v) || v < 0) stopf("`cost` must return one nonnegative number per scenario.")
+    as.numeric(v)
+  }, numeric(1))
+  tk <- vapply(tasks, `[[`, character(1), "scenario_key")
+  tasks[order(-w[tk], seq_along(tasks))]
 }

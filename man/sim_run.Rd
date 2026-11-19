@@ -18,7 +18,8 @@ sim_run(
   retry_failed = FALSE,
   label = NULL,
   progress = interactive(),
-  rng_registry = NULL
+  rng_registry = NULL,
+  cost = NULL
 )
 
 sim_resume(path, ...)
@@ -44,7 +45,11 @@ sim_resume(path, ...)
 unintentionally enormous designs. It is checked before the manifest
 is changed or any task is built.}
 
-\item{update}{Allow refitting methods whose definition changed.}
+\item{update}{Allow refitting methods whose definition changed. In a
+run labeled \code{"production"}, any change that supersedes or re-evaluates
+committed results (a changed method, truth, estimand, measure, failure
+policy or design, or a removed method or scenario) is refused unless
+\code{update = "production"}; extensions are always allowed.}
 
 \item{retry_failed}{Rerun replications whose data generation failed and
 method fits that ended in an error or a timeout, with their original
@@ -63,6 +68,13 @@ an earlier run (\code{res$manifest$rng_registry}), so that a regeneration
 uses the same stream of every scenario, method and truth even when the
 original run was extended with new methods or scenarios over time.
 Ignored when the directory already holds a run.}
+
+\item{cost}{Optional function of the scenario returning the relative cost
+of one task (for example \code{function(scenario) scenario$n^2}, or times
+per scenario from \code{\link[=sim_pilot]{sim_pilot()}}). Tasks are then scheduled longest
+first (LPT), which shortens the total time with parallel workers when
+scenarios differ in cost. Scheduling never changes results: every task
+has its own preassigned streams.}
 
 \item{...}{Further arguments passed to \code{sim_run()}.}
 }

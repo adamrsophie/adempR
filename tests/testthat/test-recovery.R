@@ -177,3 +177,33 @@ test_that("a batch deleted with its sidecar is detected and rerun", {
   expect_equal(est_signature(run2), full)
   expect_silent(sim_results(run2))
 })
+
+test_that("LPT scheduling leaves results unchanged and orders costly scenarios first", {
+  st <- normal_study(n = c(10L, 40L), mu = 0, methods = stochastic_methods())
+  a <- sim_run(st, replications = 6, seed = 3, path = run_path(), chunk_size = 2)
+  b <- sim_run(st, replications = 6, seed = 3, path = run_path(), chunk_size = 2,
+               cost = function(scenario) scenario$n^2)
+  expect_identical(est_signature(a), est_signature(b))
+  ctx <- list(seed = 3, domain = NULL, registry = a$manifest$rng_registry,
+              cache = new.env(parent = emptyenv()), dgp_stage = "dgp", method_stage = "method")
+  todo <- adempR:::plan_tasks(st, 2L, NULL)
+  tasks <- adempR:::lpt_order(st, adempR:::build_tasks(st, ctx, todo), function(scenario) scenario$n)
+  first <- st$scenarios$values[[adempR:::scenario_index(st$scenarios, tasks[[1]]$scenario_key)]]
+  expect_equal(first$n, 40L)
+  expect_error(sim_run(st, replications = 1, seed = 3, path = run_path(), cost = function(scenario) -1),
+               "nonnegative")
+})
+
+test_that("changes that alter a production run need explicit confirmation", {
+  st <- normal_study(n = 10L, mu = 0, methods = stochastic_methods(), measures = "bias")
+  p <- run_path()
+  sim_run(st, replications = 3, seed = 1, path = p, label = "production")
+  # an extension is allowed
+  expect_silent(sim_run(st, replications = 4, seed = 1, path = p))
+  m2 <- stochastic_methods()
+  m2$jitter_a <- function(data) sim_estimate("mean", mean(data$y) + rnorm(1, 0, 0.02))
+  st2 <- normal_study(n = 10L, mu = 0, methods = m2, measures = "bias")
+  expect_error(sim_run(st2, replications = 4, seed = 1, path = p, update = TRUE), "production run")
+  expect_s3_class(sim_run(st2, replications = 4, seed = 1, path = p, update = "production"), "adempr_run")
+  expect_error(sim_run(st2, replications = 4, seed = 1, path = p, update = "yes"), "must be TRUE")
+})
