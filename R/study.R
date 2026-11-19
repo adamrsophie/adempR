@@ -311,11 +311,22 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
       }
       d <- m$declares[[en]]
       e <- study$estimands[[en]]
-      for (fld in intersect(names(d), c("effect", "scale"))) {
-        if (!identical(d[[fld]], e[[fld]])) {
+      # every declared field is compared with the estimand's definition
+      known <- c("effect", "scale", "population", "conditioning", "quantity", "units",
+                 "horizon", "type")
+      odd <- setdiff(names(d), known)
+      if (length(odd)) {
+        add(paste0("method:", mn), "error",
+            sprintf("declares unknown field(s) %s for estimand %s; declarable fields are %s",
+                    paste(odd, collapse = ", "), en, paste(known, collapse = ", ")))
+      }
+      norm <- function(v) if (is.null(v)) "(none)" else sort(as.character(unlist(v)))
+      for (fld in intersect(names(d), known)) {
+        if (!identical(norm(d[[fld]]), norm(e[[fld]]))) {
           add(paste0("method:", mn), "error",
               sprintf("declares %s `%s` for estimand `%s`, whose %s is `%s`; the method does not estimate this estimand",
-                      fld, d[[fld]], en, fld, e[[fld]]))
+                      fld, paste(norm(d[[fld]]), collapse = "; "), en, fld,
+                      paste(norm(e[[fld]]), collapse = "; ")))
         }
       }
     }

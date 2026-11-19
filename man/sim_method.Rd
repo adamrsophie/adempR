@@ -41,7 +41,10 @@ protected metadata of \code{\link[=sim_data]{sim_data()}} in \code{context$meta}
 \item{extract}{Optional extraction function.}
 
 \item{declares}{Optional named list, by estimand, of declared metadata
-(\code{effect}, \code{scale}) that must match the estimand.}
+that must match the estimand: any of \code{effect}, \code{scale}, \code{population},
+\code{conditioning} (compared as a set), \code{quantity}, \code{units}, \code{horizon} and
+\code{type}. \code{\link[=sim_validate]{sim_validate()}} reports a mismatch, or an unknown field, as an
+error.}
 
 \item{version}{Optional version label; part of the fingerprint.}
 

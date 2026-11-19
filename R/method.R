@@ -221,7 +221,10 @@ isolate_data <- function(x) {
 #'   `context$truth`. Use only for oracle benchmarks.
 #' @param extract Optional extraction function.
 #' @param declares Optional named list, by estimand, of declared metadata
-#'   (`effect`, `scale`) that must match the estimand.
+#'   that must match the estimand: any of `effect`, `scale`, `population`,
+#'   `conditioning` (compared as a set), `quantity`, `units`, `horizon` and
+#'   `type`. [sim_validate()] reports a mismatch, or an unknown field, as an
+#'   error.
 #' @param version Optional version label; part of the fingerprint.
 #' @param depends Optional list of objects the method depends on; part of
 #'   the fingerprint.

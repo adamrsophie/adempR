@@ -197,3 +197,24 @@ test_that("a Monte Carlo truth can be shared across scenarios through its factor
   expect_equal(length(list.files(file.path(run$path, "truth"), pattern = "rds$")), 2L)
   expect_error(sim_truth_mc(function(scenario, n) 1, factors = 3), "factors")
 })
+
+test_that("declared population, conditioning and other fields must match the estimand", {
+  mk <- function(declares) {
+    sim_study("decl", scenarios = sim_scenarios(n = 5L),
+      generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+      estimands = list(sim_estimand("m", sim_truth_exact(function(scenario) 0),
+                                    population = "adults", conditioning = c("age", "sex"),
+                                    effect = "marginal")),
+      methods = list(a = sim_method(function(data) sim_estimate("m", mean(data$y)),
+                                    declares = list(m = declares))))
+  }
+  ok <- sim_validate(mk(list(population = "adults", conditioning = c("sex", "age"),
+                             effect = "marginal")), error = FALSE)
+  expect_false(any(ok$status == "error"))
+  bad_pop <- sim_validate(mk(list(population = "children")), error = FALSE)
+  expect_true(any(bad_pop$status == "error" & grepl("declares population `children`", bad_pop$message)))
+  bad_cond <- sim_validate(mk(list(conditioning = "age")), error = FALSE)
+  expect_true(any(bad_cond$status == "error" & grepl("conditioning", bad_cond$message)))
+  odd <- sim_validate(mk(list(estimator = "x")), error = FALSE)
+  expect_true(any(odd$status == "error" & grepl("unknown field", odd$message)))
+})
