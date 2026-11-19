@@ -97,8 +97,20 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
     width = k_mean((rows$upper - rows$lower)[int_ok], level),
     rejection = k_prop(reject_indicator(rows[test_ok, , drop = FALSE], study$alpha), level),
     usable = k_prop(usable, level),
-    usable_coverage = k_prop(int_ok & has_truth & rows$lower <= truth & truth <= rows$upper,
-                             level),
+    usable_coverage = {
+      hit <- int_ok & has_truth & rows$lower <= truth & truth <= rows$upper
+      unknown <- int_ok & !has_truth
+      if (!any(unknown)) k_prop(hit, level) else {
+        # A usable interval whose truth is missing is neither a hit nor a
+        # miss: report bounds that count it both ways, and no point value.
+        lo <- k_prop(hit, level)
+        hi <- k_prop(hit | unknown, level)
+        kernel_result(lower = lo$lower, upper = hi$upper, n = length(hit),
+                      status = "indeterminate",
+                      note = sprintf("truth missing for %d usable interval(s); bounds count them as misses and as hits",
+                                     sum(unknown)))
+      }
+    },
     stopf("Unknown measure %s.", m)
   )
 }

@@ -132,3 +132,27 @@ test_that("data set specific truth comes from the generator and stays hidden fro
   expect_equal(s$value[s$method == "avg" & s$measure == "mse"], 0)
   expect_identical(s$truth_kind[1], "dataset")
 })
+
+test_that("a usable interval with missing data set truth is indeterminate, not a miss", {
+  st <- sim_study("partial_truth",
+    scenarios = sim_scenarios(n = 20L),
+    generate = function(scenario, context) {
+      y <- rnorm(scenario$n)
+      tr <- if (context$replication %% 2 == 0) list(m = 0) else list()
+      sim_data(data.frame(y = y), truth = tr)
+    },
+    estimands = list(sim_estimand("m", truth = sim_truth_dataset())),
+    methods = list(wide = function(data) {
+      sim_estimate("m", mean(data$y), lower = -10, upper = 10, level = 0.95)
+    }),
+    measures = c("coverage", "usable_coverage"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 4, seed = 1, path = run_path())))
+  cov <- s[s$measure == "coverage", ]
+  expect_equal(cov$value, 1)
+  expect_equal(cov$n_eligible, 2)
+  uc <- s[s$measure == "usable_coverage", ]
+  expect_identical(uc$status, "indeterminate")
+  expect_true(is.na(uc$value))
+  expect_lt(uc$lower, 0.5)
+  expect_equal(uc$upper, 1)
+})
