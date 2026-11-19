@@ -7,8 +7,9 @@ new_manifest <- function(study, seed, replications, label, registry = NULL) {
        study_fingerprint = sim_fingerprint(study),
        rng_registry = rng_registry(rng_keys(study), registry),
        revisions = list(), environment = environment_info(study_packages(study)),
-       # Pilot directories draw from their own stream family (fixed at creation).
-       rng_domain = if (identical(label, "pilot")) "pilot" else NULL,
+       # Pilot and calibration directories draw from their own stream
+       # families (fixed at creation), never from the production streams.
+       rng_domain = if (isTRUE(label %in% c("pilot", "calibration"))) label else NULL,
        status = "created")
 }
 

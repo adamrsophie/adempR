@@ -167,24 +167,7 @@ sim_diagnose <- function(run, outlier_z = 5) {
   }
   # methods with known performance: a miss beyond Monte Carlo error points
   # to noise or a bug in the generator or the evaluation
-  ref_check <- NULL
-  refm <- Filter(function(m) !is.null(m$reference), study$methods)
-  if (length(refm) && !is.null(est) && nrow(est)) {
-    ms <- unique(unlist(lapply(refm, function(m) names(m$reference))))
-    s <- as.data.frame(sim_summarise(res, measures = ms))
-    rows <- list()
-    for (mn in names(refm)) {
-      ref <- refm[[mn]]$reference
-      r <- s[s$method == mn & s$measure %in% names(ref), , drop = FALSE]
-      if (!nrow(r)) next
-      r$reference <- unname(ref[r$measure])
-      r$z <- (r$value - r$reference) / r$mcse
-      rows[[length(rows) + 1L]] <- r[c("scenario_id", "method", "estimand", "measure", "value",
-                                       "mcse", "reference", "z")]
-    }
-    ref_check <- bind_rows(rows)
-    if (!is.null(ref_check)) ref_check$flag <- is.finite(ref_check$z) & abs(ref_check$z) > 3
-  }
+  ref_check <- if (!is.null(est) && nrow(est)) sim_check_reference(res) else NULL
   structure(list(
     failures = failure_table(res), messages = msgs, generation_failures = gen_fail,
     reference_check = ref_check, records = record_summary(res, lab),
@@ -494,4 +477,45 @@ record_summary <- function(res, lab) {
                missing = sum(!ok), stringsAsFactors = FALSE)
   })
   bind_rows(out)
+}
+
+#' Check methods with known performance against Monte Carlo error
+#'
+#' A method declared with `sim_method(reference = list(bias = 0, coverage =
+#' 0.95))` has performance known from theory (for example the sample mean
+#' under a normal model). Its estimated performance must agree with the
+#' declared value within Monte Carlo error; a miss beyond `threshold` MCSE
+#' points to Monte Carlo noise larger than reported, or to a bug in the
+#' generator, the truth or the evaluation. `sim_diagnose()` runs this
+#' check.
+#'
+#' @param run A run or results.
+#' @param threshold Absolute z above which a cell is flagged.
+#' @return A data frame with one row per scenario, reference method and
+#'   declared measure: `value`, `mcse`, `reference`, `z` and `flag`; `NULL`
+#'   when no method declares a reference.
+#' @export
+sim_check_reference <- function(run, threshold = 3) {
+  res <- sim_results(run)
+  study <- res$manifest$study
+  refm <- Filter(function(m) !is.null(m$reference), study$methods)
+  if (!length(refm)) return(NULL)
+  ms <- unique(unlist(lapply(refm, function(m) names(m$reference))))
+  s <- as.data.frame(sim_summarise(res, measures = ms))
+  rows <- list()
+  for (mn in names(refm)) {
+    ref <- refm[[mn]]$reference
+    r <- s[s$method == mn & s$measure %in% names(ref), , drop = FALSE]
+    if (!nrow(r)) next
+    r$reference <- unname(unlist(ref)[r$measure])
+    r$z <- (r$value - r$reference) / r$mcse
+    rows[[length(rows) + 1L]] <- r[c("scenario_id", "method", "estimand", "measure", "value",
+                                     "mcse", "reference", "z")]
+  }
+  out <- bind_rows(rows)
+  if (!is.null(out)) {
+    out$flag <- is.finite(out$z) & abs(out$z) > threshold
+    rownames(out) <- NULL
+  }
+  out
 }

@@ -36,6 +36,11 @@ test_that("memory failures, fit diagnostics and reference checks are recorded", 
   expect_equal(nrow(res$diagnostics), 30L)
   d <- sim_diagnose(run)
   expect_true(d$reference_check$flag[d$reference_check$method == "known"])
+  rc <- sim_check_reference(run, threshold = 1e6)
+  expect_false(any(rc$flag))
+  expect_equal(rc$reference, 0.5)
+  expect_null(sim_check_reference(sim_run(normal_study(n = 10L, mu = 0), replications = 2,
+                                          seed = 1, path = run_path())))
   expect_error(sim_method(function(data) 1, reference = c(nope = 1)), "reference")
 })
 
