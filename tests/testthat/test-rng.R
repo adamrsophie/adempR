@@ -174,3 +174,20 @@ test_that("registry lookups refuse aliased indices and fractional replications",
   expect_false(identical(rng_task_seed(1, reg, "dgp", "a", "data", 1),
                          rng_task_seed(1, reg, "dgp", "a", "data", 1, domain = "pilot")))
 })
+
+test_that("declared packages are attached only while study code runs", {
+  skip_if_not_installed("tools")
+  skip_if("package:tools" %in% search(), "tools already attached")
+  m <- list(uses = sim_method(function(data) {
+    sim_estimate("mean", nchar(file_ext("a.txt")))
+  }, estimands = "mean", packages = "tools"))
+  st <- normal_study(n = 10L, mu = 0, methods = m)
+  before <- search()
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  expect_equal(sim_results(run)$estimates$estimate, c(3, 3))
+  expect_identical(search(), before)
+  expect_true(sim_replay(run, scenario = 1, replication = 1)$matches)
+  expect_identical(search(), before)
+  sim_validate(st, smoke = TRUE)
+  expect_identical(search(), before)
+})

@@ -485,14 +485,35 @@ commit_chunk <- function(study, results, p) {
   cat(nm, "\n", sep = "", file = file.path(p$batches, "INVENTORY"), append = TRUE)
 }
 
-# Declared packages are attached before any study function runs, in the
-# coordinator for the sequential backend and on every worker for the future
-# backend, so an unqualified call resolves the same way in both.
+# Declared packages are attached while study code runs, in the coordinator
+# for the sequential backend, replay and validation, and on every worker for
+# the future backend, so an unqualified call resolves the same way
+# everywhere. Packages attached for the call are detached afterwards, so the
+# caller's search path is the same before and after.
 attach_packages <- function(pkgs) {
   for (pkg in pkgs) {
     suppressPackageStartupMessages(library(pkg, character.only = TRUE))
   }
   invisible(pkgs)
+}
+
+with_packages <- function(pkgs, code) {
+  restore <- local_packages(pkgs)
+  on.exit(restore(), add = TRUE)
+  force(code)
+}
+
+# Attach `pkgs` and return a function that detaches what was attached.
+local_packages <- function(pkgs) {
+  before <- search()
+  attach_packages(pkgs)
+  function() {
+    for (a in setdiff(search(), before)) {
+      if (startsWith(a, "package:")) {
+        try(detach(a, character.only = TRUE, unload = FALSE), silent = TRUE)
+      }
+    }
+  }
 }
 
 # Functions defined at top level refer to helpers in the global environment,
@@ -577,17 +598,15 @@ unshipped_globals <- function(study) {
 # The worker function lives in a minimal environment so that a future
 # carries only its own chunk and the study, not the coordinator's frame.
 chunk_worker <- local(function(chunk, study, packages) {
-  attach_packages(packages)
-  run_chunk(study, chunk)
+  with_packages(packages, run_chunk(study, chunk))
 }, envir = new.env(parent = asNamespace("adempR")))
 
 run_chunks <- function(study, chunks, p, backend, workers, progress) {
   if (backend == "sequential") {
-    attach_packages(study_packages(study))
-    for (i in seq_along(chunks)) {
+    with_packages(study_packages(study), for (i in seq_along(chunks)) {
       commit_chunk(study, run_chunk(study, chunks[[i]]), p)
       if (progress) message(sprintf("  batch %d/%d committed", i, length(chunks)))
-    }
+    })
     return(invisible(NULL))
   }
   for (pkg in c("future", "future.apply")) {

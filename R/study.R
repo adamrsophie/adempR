@@ -350,7 +350,7 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
     }
   }
   if (smoke) {
-    smk <- tryCatch(smoke_test(study, seed), error = function(e) {
+    smk <- tryCatch(with_packages(study_packages(study), smoke_test(study, seed)), error = function(e) {
       data.frame(check = "smoke", status = "error", message = conditionMessage(e),
                  stringsAsFactors = FALSE)
     })
@@ -360,7 +360,8 @@ sim_validate <- function(study, smoke = FALSE, seed = 1L, error = TRUE, large_n 
     if (!is.list(large_n) || is.null(names(large_n)) || !all(nzchar(names(large_n)))) {
       stopf("`large_n` must be a named list of scenario fields, for example list(n = 1e5).")
     }
-    out[[length(out) + 1L]] <- large_n_check(study, seed, large_n)
+    out[[length(out) + 1L]] <- with_packages(study_packages(study),
+                                             large_n_check(study, seed, large_n))
   }
   res <- bind_rows(out) %||% data.frame(check = character(), status = character(),
                                          message = character(), stringsAsFactors = FALSE)

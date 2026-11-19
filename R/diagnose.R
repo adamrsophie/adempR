@@ -250,6 +250,8 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
   stopifnot(inherits(study, "adempr_study"))
   check_function(summaries, "summaries")
   check_function(targets, "targets", "scenario")
+  restore <- local_packages(study_packages(study))
+  on.exit(restore(), add = TRUE)
   keys <- data.frame(stage = "dgp_check", scenario_key = study$scenarios$keys,
                      component = "data", stringsAsFactors = FALSE)
   reg <- rng_registry(keys)

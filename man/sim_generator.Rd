@@ -31,9 +31,13 @@ variables are fingerprinted automatically, but code in files, options
 and package implementations are not; declare what matters here.}
 
 \item{packages}{Packages the mechanism uses. They are checked by
-\code{\link[=sim_validate]{sim_validate()}} and attached before study code runs, in the main
-process for the sequential backend and on every worker for the future
-backend, so unqualified calls resolve the same way in both.}
+\code{\link[=sim_validate]{sim_validate()}} and attached only while study code runs (in the main
+process for the sequential backend, replay and validation, and on every
+worker for the future backend), so unqualified calls resolve the same
+way everywhere. Packages attached for the call are detached afterwards:
+the search path of the session is unchanged after a run. While the run
+lasts, an attached package can mask a function of the same name from a
+package attached earlier; call such functions with \code{pkg::fun()}.}
 
 \item{description}{Free text for the protocol.}
 }
