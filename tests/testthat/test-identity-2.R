@@ -125,7 +125,7 @@ test_that("a method's declared packages do not mask functions for other methods"
   skip_if_not_installed("dplyr")
   ms <- list(
     uses_stats = function(data) sim_estimate("mean", sum(filter(1:3, 1))),
-    declares_dplyr = sim_method(function(data) sim_estimate("mean", nrow(dplyr::tibble(a = 1))),
+    declares_dplyr = sim_method(function(data) sim_estimate("mean", nrow(getExportedValue("dplyr", "tibble")(a = 1))),
                                 packages = "dplyr"))
   st <- normal_study(n = 5L, mu = 0, methods = ms)
   r <- sim_run(st, replications = 2, seed = 1, path = run_path())
