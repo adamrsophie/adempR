@@ -5,9 +5,9 @@
 \alias{sim_summarize}
 \title{Summarize performance}
 \usage{
-sim_summarise(run, measures = NULL, weighted = FALSE)
+sim_summarise(run, measures = NULL, weighted = FALSE, by = NULL)
 
-sim_summarize(run, measures = NULL, weighted = FALSE)
+sim_summarize(run, measures = NULL, weighted = FALSE, by = NULL)
 }
 \arguments{
 \item{run}{A run, or results from \code{\link[=sim_results]{sim_results()}}.}
@@ -21,7 +21,13 @@ weight 0 are left out). When a scenario has a boundary proportion, the
 weighted interval comes from exact per scenario intervals with a
 Bonferroni split. An average over data generating mechanisms hides
 where a method works and where it fails; report it next to the
-scenario results, never instead of them.}
+scenario results, never instead of them. Each weighted row's note
+gives the number of scenarios and the range of their values.}
+
+\item{by}{Optional scenario fields within whose levels the weighted
+averages are formed (weights renormalized within each level), for
+example a treatment arm or design factor that must not be averaged
+over.}
 }
 \value{
 An object of class \code{adempr_summary}: a data frame with one row

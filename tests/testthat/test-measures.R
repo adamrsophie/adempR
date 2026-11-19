@@ -251,3 +251,14 @@ test_that("diagnostics flag fixed data, test and interval disagreement, degenera
   expect_null(sim_diagnose(sim_run(normal_study(n = 10L, mu = 0), replications = 6, seed = 1,
                                    path = run_path()))$repeated_data)
 })
+
+test_that("weighted averages can be formed within levels of a factor and show their range", {
+  st <- normal_study(n = c(10L, 20L), mu = c(0, 1), measures = "bias")
+  st$scenarios$weights <- rep(0.25, 4)
+  run <- sim_run(st, replications = 20, seed = 1, path = run_path())
+  s <- as.data.frame(sim_summarise(run, weighted = TRUE, by = "mu"))
+  w <- s[grepl("^weighted", s$scenario_key) & s$measure == "bias", ]
+  expect_equal(nrow(w), 2L)
+  expect_true(all(grepl("2 scenarios, values from", w$note)))
+  expect_error(sim_summarise(run, weighted = TRUE, by = "nope"), "Unknown")
+})

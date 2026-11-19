@@ -145,7 +145,8 @@ sim_truth <- function(run) {
       sc <- study$scenarios$values[[i]]
       row <- NULL
       if (tr$kind == "mc") {
-        nm <- paste0("t-", md5_string(c(tfp, key, en, man$seed)))
+        tk <- truth_key(tr, sc, key)
+        nm <- paste0("t-", md5_string(c(tfp, tk, en, man$seed)))
         f <- file.path(p$truth, paste0(nm, ".rds"))
         sidecar <- file.path(p$truth, paste0(nm, ".md5"))
         if (file.exists(f) && file.exists(sidecar) &&
@@ -153,7 +154,7 @@ sim_truth <- function(run) {
           row <- readRDS(f)
         } else {
           if (is.null(base)) base <- rng_base_seed(man$seed, man$rng_domain)
-          k <- rng_lookup(man$rng_registry, "truth", key, en)
+          k <- rng_lookup(man$rng_registry, "truth", tk, en)
           seed <- rng_substreams(rng_stream_seeds(base, k, cache)[[1]], 1L)[[1]]
           t0 <- proc.time()[["elapsed"]]
           row <- compute_truth_one(tr, sc, seed)

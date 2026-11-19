@@ -12,7 +12,7 @@ sim_truth_exact(fun, version = NULL, depends = list())
 
 sim_truth_numeric(fun, error = NA_real_, version = NULL, depends = list())
 
-sim_truth_mc(fun, n = 1e+05, version = NULL, depends = list())
+sim_truth_mc(fun, n = 1e+05, version = NULL, depends = list(), factors = NULL)
 
 sim_truth_dataset()
 
@@ -36,6 +36,12 @@ constants), included in its fingerprint.}
 \code{fun} returns a bare number.}
 
 \item{n}{Monte Carlo sample size passed to \code{fun}.}
+
+\item{factors}{For \code{sim_truth_mc()}, optional names of the scenario
+fields the truth depends on. Scenarios with the same values of these
+fields share one Monte Carlo truth (computed once, from one stream),
+for example when the truth does not depend on the sample size. \code{fun}
+then must use only these fields.}
 }
 \value{
 An object of class \code{adempr_truth}.

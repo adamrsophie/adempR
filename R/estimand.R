@@ -108,6 +108,11 @@ new_truth <- function(kind, ..., version = NULL, depends = list()) {
 #'   truth.
 #' @param depends Optional list of objects the truth depends on (data,
 #'   constants), included in its fingerprint.
+#' @param factors For `sim_truth_mc()`, optional names of the scenario
+#'   fields the truth depends on. Scenarios with the same values of these
+#'   fields share one Monte Carlo truth (computed once, from one stream),
+#'   for example when the truth does not depend on the sample size. `fun`
+#'   then must use only these fields.
 #' @return An object of class `adempr_truth`.
 #' @examples
 #' sim_truth_exact(function(scenario) scenario$mu)
@@ -139,11 +144,26 @@ sim_truth_numeric <- function(fun, error = NA_real_, version = NULL,
 
 #' @rdname sim_truth_exact
 #' @export
-sim_truth_mc <- function(fun, n = 1e5, version = NULL, depends = list()) {
+sim_truth_mc <- function(fun, n = 1e5, version = NULL, depends = list(), factors = NULL) {
   check_function(fun, "fun", c("scenario", "n"))
   if (!is_count(n, 2)) stopf("`n` must be a whole number of at least 2.")
-  new_truth("mc", fun = fun, n = as.integer(n), version = version,
-            depends = depends)
+  if (!is.null(factors) && (!is.character(factors) || !length(factors) || anyNA(factors))) {
+    stopf("`factors` must name the scenario fields the truth depends on.")
+  }
+  tr <- new_truth("mc", fun = fun, n = as.integer(n), version = version,
+                  depends = depends)
+  if (!is.null(factors)) tr$factors <- sort(unique(factors))
+  tr
+}
+
+# Identity of the truth computation for one scenario: the scenario key, or,
+# when the truth depends only on some factors, a key of their values, so
+# scenarios that share them share one truth value and one stream.
+truth_key <- function(truth, scenario, key) {
+  if (is.null(truth$factors)) return(key)
+  miss <- setdiff(truth$factors, names(scenario))
+  if (length(miss)) stopf("The truth depends on unknown scenario field(s): %s.", paste(miss, collapse = ", "))
+  paste0("factors-", fingerprint(truth$factors, scenario[truth$factors]))
 }
 
 #' @rdname sim_truth_exact
@@ -175,8 +195,12 @@ sim_truth_value <- function(value, se, method = "user supplied") {
 }
 
 truth_fingerprint <- function(truth) {
+  if (is.null(truth$factors)) {
+    return(fingerprint(truth$kind, truth$fun, truth$n, truth$error, truth$version,
+                       truth$depends))
+  }
   fingerprint(truth$kind, truth$fun, truth$n, truth$error, truth$version,
-              truth$depends)
+              truth$depends, truth$factors)
 }
 
 #' @export

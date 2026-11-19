@@ -24,8 +24,7 @@ rng_keys <- function(study, dgp_stage = "dgp", method_stage = "method") {
                stringsAsFactors = FALSE),
     expand.grid(stage = method_stage, scenario_key = keys, component = comps,
                 stringsAsFactors = FALSE),
-    expand.grid(stage = "truth", scenario_key = keys, component = names(study$estimands),
-                stringsAsFactors = FALSE)
+    truth_stream_keys(study)
   )
 }
 
@@ -643,4 +642,20 @@ run_chunks <- function(study, chunks, p, backend, workers, progress) {
                                   length(chunks)))
   }
   invisible(NULL)
+}
+
+# Streams of the truth stage: one per scenario and estimand, or one per
+# distinct value of the declared factors of a shared Monte Carlo truth.
+truth_stream_keys <- function(study) {
+  keys <- study$scenarios$keys
+  rows <- list()
+  for (en in names(study$estimands)) {
+    tr <- study$estimands[[en]]$truth
+    tk <- vapply(seq_along(keys), function(i) {
+      truth_key(tr, study$scenarios$values[[i]], keys[i])
+    }, character(1))
+    rows[[length(rows) + 1L]] <- data.frame(stage = "truth", scenario_key = unique(tk),
+                                            component = en, stringsAsFactors = FALSE)
+  }
+  bind_rows(rows)
 }

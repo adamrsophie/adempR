@@ -223,7 +223,12 @@ measure_needs_truth <- function(m) {
 #'   weighted interval comes from exact per scenario intervals with a
 #'   Bonferroni split. An average over data generating mechanisms hides
 #'   where a method works and where it fails; report it next to the
-#'   scenario results, never instead of them.
+#'   scenario results, never instead of them. Each weighted row's note
+#'   gives the number of scenarios and the range of their values.
+#' @param by Optional scenario fields within whose levels the weighted
+#'   averages are formed (weights renormalized within each level), for
+#'   example a treatment arm or design factor that must not be averaged
+#'   over.
 #' @return An object of class `adempr_summary`: a data frame with one row
 #'   per scenario, method, estimand and measure, and attributes `failures`
 #'   and `runtime`.
@@ -239,7 +244,7 @@ measure_needs_truth <- function(m) {
 #' run <- sim_run(study, replications = 50, seed = 1, path = tempfile("adempR-run-"))
 #' sim_summarise(run)
 #' @export
-sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
+sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
   res <- sim_results(run)
   man <- res$manifest
   study <- man$study
@@ -307,7 +312,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE) {
   }
   summ <- bind_rows(out)
   if (weighted && !is.null(study$scenarios$weights)) {
-    summ <- rbind(summ, weighted_rows(summ, study))
+    summ <- rbind(summ, weighted_rows(summ, study, by))
   }
   attr(summ, "failures") <- failure_table(res)
   attr(summ, "runtime") <- runtime_table(res)
@@ -324,7 +329,29 @@ sim_summarize <- sim_summarise
 PROPORTION_MEASURES <- c("coverage", "noncoverage_lower", "noncoverage_upper", "rejection",
                          "usable")
 
-weighted_rows <- function(summ, study) {
+weighted_rows <- function(summ, study, by = NULL) {
+  if (!is.null(by)) {
+    sc <- as.data.frame(study$scenarios)
+    miss <- setdiff(by, names(sc))
+    if (length(miss)) stopf("Unknown scenario field(s) in `by`: %s.", paste(miss, collapse = ", "))
+    lev <- do.call(paste, c(lapply(sc[by], as.character), sep = ", "))
+    lab <- do.call(paste, c(Map(function(n, v) paste0(n, "=", v), by, lapply(sc[by], as.character)),
+                            sep = ", "))
+    out <- lapply(unique(lev), function(l) {
+      keys <- study$scenarios$keys[lev == l]
+      sub <- summ[summ$scenario_key %in% keys, , drop = FALSE]
+      st <- study
+      w <- study$scenarios$weights[lev == l]
+      if (!sum(w)) return(NULL)
+      st$scenarios$keys <- keys
+      st$scenarios$weights <- w / sum(w)
+      r <- weighted_rows(sub, st)
+      r$scenario_key <- paste0("weighted: ", lab[lev == l][1])
+      r$scenario_id <- paste("prespecified weighted average over scenarios with", lab[lev == l][1])
+      r
+    })
+    return(bind_rows(out))
+  }
   w <- stats::setNames(study$scenarios$weights, study$scenarios$keys)
   grp <- unique(summ[c("method", "estimand", "measure")])
   z <- stats::qnorm(1 - (1 - study$level) / 2)
@@ -375,7 +402,9 @@ weighted_rows <- function(summ, study) {
          "n_generation_failed")] <- NA
     s1$truth_se <- s1$mcse_total <- s1$truth_sens_lower <- s1$truth_sens_upper <- NA_real_
     s1$status <- status
-    s1$note <- note
+    rngv <- range(s$value[have])
+    s1$note <- if (any(have)) sprintf("%s; %d scenarios, values from %s to %s", note, nrow(s),
+                                      format(rngv[1], digits = 4), format(rngv[2], digits = 4)) else note
     s1
   })
   bind_rows(rows)

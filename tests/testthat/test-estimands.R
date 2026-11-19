@@ -180,3 +180,19 @@ test_that("truth providers report their real precision", {
   bad <- sim_truth_numeric(function(scenario) list(value = 1, error = -1))
   expect_error(adempR:::compute_truth_one(bad, list()), "nonnegative")
 })
+
+test_that("a Monte Carlo truth can be shared across scenarios through its factors", {
+  tr <- sim_truth_mc(function(scenario, n) rnorm(n, scenario$mu), n = 1000, factors = "mu")
+  st <- sim_study("shared", scenarios = sim_scenarios(n = c(10L, 20L), mu = c(0, 1)),
+    generate = function(scenario, context) rnorm(scenario$n, scenario$mu),
+    estimands = list(sim_estimand("mean", tr)),
+    methods = list(m = function(data) sim_estimate("mean", mean(data))))
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path())
+  t <- sim_truth(run)
+  sc <- as.data.frame(st$scenarios)
+  t$mu <- sc$mu[match(t$scenario_key, st$scenarios$keys)]
+  expect_equal(length(unique(t$truth[t$mu == 0])), 1L)
+  expect_equal(length(unique(t$truth)), 2L)
+  expect_equal(length(list.files(file.path(run$path, "truth"), pattern = "rds$")), 2L)
+  expect_error(sim_truth_mc(function(scenario, n) 1, factors = 3), "factors")
+})
