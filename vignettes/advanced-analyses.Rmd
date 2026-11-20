@@ -343,3 +343,132 @@ head(readLines(f), 5)
 reopened <- sim_open(run$path)
 sim_capabilities(reopened)
 ```
+
+## Further options of the core functions
+
+Several capabilities are arguments of functions described elsewhere.
+
+**Fallback values.** `sim_method(fallback = )` gives a function that is
+run when every attempt of the method failed, for example an unadjusted
+estimate. Its rows are stored next to the failed attempt and count only
+under `sim_failure_policy(fallback = "use")`, decided at evaluation, so
+the choice needs no refitting. A method with a fallback is a composite
+procedure; report which policy was used.
+
+```{r}
+fragile <- sim_study("fragile", scenarios = sim_scenarios(n = 8L),
+  generate = function(scenario, context) rnorm(scenario$n),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(trimmed = sim_method(function(data) {
+    if (min(data) < -1.5) stop("outlier")
+    sim_estimate("mean", mean(data, trim = 0.25))
+  }, fallback = function(data) sim_estimate("mean", median(data)),
+     role = "method", settings_source = "trim of 0.25 from the authors"),
+  mean = sim_method(function(data) sim_estimate("mean", mean(data)), role = "benchmark")),
+  measures = c("bias", "usable"),
+  failure = sim_failure_policy(fallback = "use"))
+run_fragile <- sim_run(fragile, replications = 40, seed = 3, path = tempfile("adempR-run-"))
+s <- as.data.frame(sim_summarise(run_fragile))
+s[, c("method", "measure", "value", "n_eligible")]
+# replications where the fallback stood in for a failed fit
+sum(sim_results(run_fragile)$estimates$used_fallback)
+```
+
+`role` marks a method as a `"benchmark"` (a comparator with known
+behavior) or a `"reference"`, and `settings_source` records where its
+tuning settings came from; both appear in the report.
+
+**What a method may know.** A method sees a public view of the scenario
+that holds only the fields named in `sim_method(scenario_fields = )`;
+other fields (the true effect, the data-generating parameters) read as
+`NULL`. Each method also gets its own copy of the data, including
+`data.table` objects modified by reference, so one method cannot change
+what the next one sees.
+
+**Monte Carlo truths shared across scenarios.** With
+`sim_truth_mc(factors = )`, scenarios that agree on the named fields share
+one Monte Carlo truth, computed once from one stream, for example when
+the truth does not depend on the sample size.
+
+```{r}
+shared <- sim_truth_mc(function(scenario, n) {
+  sim_truth_value(mean(rexp(n, scenario$rate)), se = sd(rexp(n, scenario$rate)) / sqrt(n), n = n)
+}, n = 1e4, factors = "rate")
+```
+
+**Large sample sanity run.** `sim_validate(large_n = )` generates one
+large data set per scenario with the given overrides and runs every
+method once; an estimate far from an exact or numerical truth is a
+warning, which catches a method that is not consistent for the declared
+estimand before the study runs.
+
+```{r}
+sim_validate(scored, large_n = list(n = 1e5), error = FALSE)
+```
+
+**Weighted summaries within levels.** With design weights,
+`sim_summarise(weighted = TRUE)` adds prespecified weighted averages over
+scenarios; `by` forms them within the levels of named scenario fields, so
+a factor that must not be averaged over (for example an arm) is kept
+apart.
+
+```{r}
+wdes <- sim_scenarios(n = c(10L, 40L), sd = c(1, 3), .weights = c(1, 3, 1, 3))
+wstudy <- sim_study("weighted", scenarios = wdes, generate = study$generator,
+  estimands = study$estimands, methods = study$methods["mean"], measures = "bias")
+run_w <- sim_run(wstudy, replications = 30, seed = 1, path = tempfile("adempR-run-"))
+w <- as.data.frame(sim_summarise(run_w, measures = "bias", weighted = TRUE, by = "sd"))
+w[grepl("weighted", w$scenario_id), c("scenario_id", "measure", "value", "mcse")]
+```
+
+**Plots.** Besides the zip plot, `sim_plot()` draws estimates by method,
+estimate against SE, failures, precision, runtimes, Bland-Altman
+agreement between two methods and intervals by true value (including
+unbounded limits).
+
+```{r, fig.width = 6, fig.height = 4}
+sim_plot(run, type = "bland_altman", methods = c("mean", "median"))
+```
+
+**Blinded reports.** `sim_report(blind_methods = TRUE)` replaces method
+names, descriptions, code and fingerprints with codes, so the report can
+be read before the methods are unblinded.
+
+```{r}
+f <- tempfile(fileext = ".html")
+sim_report(run, f, plots = FALSE, blind_methods = TRUE, blind_seed = 1)
+file.exists(f)
+```
+
+**Execution controls.** `sim_run(max_tasks = )` refuses a run that would
+schedule more method fits than the budget, before anything is written;
+`scenario_replications` gives some scenarios more replications than the
+others (counts only increase, and every summary uses them); a run frozen
+with the label `"production"` refuses changes that would supersede or
+re-evaluate committed results unless `update = "production"`; and
+`retry_failed = TRUE` reruns failed generations and fits with their
+original streams after a fix, recording a retry round.
+
+```{r}
+try(sim_run(study, replications = 1e6, seed = 1, path = tempfile("adempR-run-"),
+            max_tasks = 1000))
+more <- sim_run(study, replications = 60, seed = 1, path = run$path,
+                scenario_replications = c("n=10, sd=3" = 80))
+reps <- sim_results(more)$replications
+table(more$manifest$study$scenarios$labels[match(reps$scenario_key, more$manifest$study$scenarios$keys)])
+```
+
+**GPU methods.** A method declared with `sim_method(gpu = TRUE)` is given
+one device per batch when `sim_run(gpus = )` lists device identifiers;
+`CUDA_VISIBLE_DEVICES` holds that device while the method runs, and the
+device is recorded with each attempt. Random numbers drawn on the device
+are outside adempR's streams, so seed device generators from
+`context$inner_seeds` and check reproducibility with `sim_verify()`.
+
+```{r, eval = FALSE}
+gpu_method <- sim_method(function(data, context) {
+  # torch::torch_manual_seed(context$inner_seeds[[1]][2])
+  sim_estimate("mean", mean(data))
+}, gpu = TRUE)
+sim_run(study, replications = 100, seed = 1, path = "gpu-run", gpus = c("0", "1"))
+```

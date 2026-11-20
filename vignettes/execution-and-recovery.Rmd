@@ -91,6 +91,24 @@ The run directory records fingerprints of each part of the study, and
   reruns fits that failed under the old settings.
 * Requesting fewer replications than the directory holds gives a warning;
   all committed replications are kept and summarized.
+* A refit regenerates each data set from its stored stream and checks it
+  against the stored checksum. When the data set cannot be regenerated
+  (the generator now fails, or produces other data), the refit stops and
+  the committed results stay as they were. A failed regeneration never
+  hides the committed generation of the same replication.
+* A Monte Carlo truth is cached in the run with a checksum. A missing or
+  damaged cache entry is recomputed only from the definition the run
+  used; if the truth function, or a value it references, changed since,
+  it is an error rather than a different value under the stored
+  identity. Restore the original definition, or evaluate the changed
+  truth in a new run.
+* The packages a generator declares are part of the data identity, since
+  they decide what unqualified calls resolve to. Runs made by earlier
+  development versions, where they were not, have another generator
+  fingerprint: they can still be read and summarized, but extending them
+  is refused as a changed data-generating mechanism; rerun them in a new
+  directory. Failed regeneration rows written by those versions are read
+  together with the committed generation, which takes precedence.
 
 Fingerprints are built from the deparsed code of each function and the
 values of the free variables it uses (and from `depends`, for anything the

@@ -97,15 +97,22 @@ jackknife that re-estimates the shift, with a normal interval.
 Each measure has its own denominator: bias needs a usable estimate and a
 truth; mean SE needs a valid SE; coverage needs a valid interval; rejection
 needs a valid test; the usable proportion and `usable_coverage` use all
-generated data sets. The summary reports `n_eligible` for each cell, and a
-`status`:
+generated data sets. The summary reports `n_eligible` for each cell,
+`n_units`, the number of independent units behind it (replications, or
+antithetic pairs; see below), and a `status`:
 
 * `ok`
 * `no_eligible`: no replication qualified
 * `insufficient`: one replication, so no MCSE
 * `degenerate`: all values equal, so a ratio or SE is undefined
 * `infinite`: an infinite estimate entered the mean
-* `boundary`: a proportion of 0 or 1
+* `boundary`: a proportion of 0 or 1, or with antithetic pairs a
+  proportion whose pair means are all equal
+* `overflow`: the empirical SE or its MCSE is not representable in double
+  precision (the moments are computed on a common scale, so this happens
+  only for spreads near the largest double)
+* `unstable`: a ratio whose denominator is small relative to its Monte
+  Carlo error (relative bias near a zero truth)
 * `undefined`: for example relative bias with zero truth
 * `unavailable`: the truth is unknown
 * `incomplete`: for `usable` and `usable_coverage`, some generated data
@@ -114,6 +121,18 @@ generated data sets. The summary reports `n_eligible` for each cell, and a
 * `mcse_unavailable`: no known MCSE, for a custom measure without one or
   when the jackknife is undefined (for the SE ratio, leaving one
   replication out can leave estimates that are all equal)
+
+## Antithetic pairs
+
+With `sim_generator(antithetic = TRUE)` the two replications of a pair
+are dependent, so the pair is the unit. For a measure that is a mean of
+one contribution per replication the MCSE is computed in closed form from
+the pair sums (the delete-one-pair jackknife, without refitting); for
+other measures the delete-one-pair jackknife refits the measure. A
+proportion whose pair means are all equal would get an MCSE of 0; its
+interval is then the exact interval from the number of pairs with both
+members at 1 and with at least one member above 0, out of `n_units`
+pairs, and the status is `boundary`.
 
 ## Monte Carlo truth
 
