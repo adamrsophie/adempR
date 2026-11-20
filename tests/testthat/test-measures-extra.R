@@ -77,6 +77,10 @@ test_that("the interval score matches a hand computation", {
   h <- sim_measure_interval_score("s", scale = "se")$contribution
   expect_true(is.na(h(rows)[3]))
   expect_error(sim_measure_interval_score("s", scale = "nope")$contribution(rows), "not a column")
+  # scaled by the truth, at a truth other than 1
+  tr <- sim_measure_interval_score("s", scale = "truth")$contribution
+  expect_equal(tr(data.frame(level = 0.95, truth = 2, lower = -1, upper = 1)),
+               (2 + 40 * (2 - 1)) / 2)
   # a one sided interval that misses on its bounded side
   rows2 <- data.frame(level = 0.9, truth = 2, lower = -Inf, upper = 1)
   expect_identical(f(rows2), Inf)

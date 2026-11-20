@@ -259,6 +259,11 @@ test_that("weighted averages can be formed within levels of a factor and show th
   s <- as.data.frame(sim_summarise(run, weighted = TRUE, by = "mu"))
   w <- s[grepl("^weighted", s$scenario_key) & s$measure == "bias", ]
   expect_equal(nrow(w), 2L)
+  # each level averages its own two scenarios with equal weights
+  plain <- s[!grepl("^weighted", s$scenario_key) & s$measure == "bias", ]
+  mu <- as.data.frame(st$scenarios)$mu[match(plain$scenario_key, st$scenarios$keys)]
+  expect_equal(sort(w$value), sort(as.vector(tapply(plain$value, mu, mean))))
+  expect_equal(sort(w$mcse), sort(as.vector(tapply(plain$mcse, mu, function(m) sqrt(sum((m / 2)^2))))))
   expect_true(all(grepl("2 scenarios, values from", w$note)))
   expect_error(sim_summarise(run, weighted = TRUE, by = "nope"), "Unknown")
 })

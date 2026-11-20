@@ -55,6 +55,13 @@ test_that("the report is self-contained and escapes text", {
   # self-contained: no external scripts, stylesheets or images
   expect_false(grepl("<script[^>]*src=|<link[^>]*href=|<img[^>]*src=\"http", h))
   expect_error(sim_report(run, f), "exists")
+  # with plots, every image is embedded in the file
+  f2 <- tempfile(fileext = ".html")
+  sim_report(run, f2)
+  h2 <- paste(readLines(f2), collapse = "\n")
+  imgs <- regmatches(h2, gregexpr("<img[^>]*src=\"[^\"]*", h2))[[1]]
+  expect_gt(length(imgs), 0L)
+  expect_true(all(grepl("src=\"data:image/", imgs)))
 })
 
 test_that("the report shows every protocol field, code and comparisons", {

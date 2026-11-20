@@ -145,3 +145,20 @@ test_that("every summary, comparison and ranking of antithetic runs uses the pai
   expect_s3_class(sim_rank(run, "mse", B = 20), "data.frame")
   expect_error(sim_confidence_sequence(run, "coverage"), "independent replications")
 })
+
+test_that("antithetic summaries use the spread of nonzero pair means", {
+  # the pair members are not exact mirrors, so the pair means vary
+  st <- vr_study(sim_generator(function(scenario, context) {
+    z <- rnorm(scenario$n)
+    if (context$antithetic) z <- -z
+    data.frame(y = scenario$mu + z + rnorm(scenario$n, 0, 0.5))
+  }, antithetic = TRUE), scen = sim_scenarios(n = 20L, mu = 0))
+  run <- sim_run(st, replications = 20, seed = 6, path = run_path())
+  e <- sim_results(run)$estimates
+  e <- e[order(e$replication), ]
+  pm <- tapply(e$estimate - e$truth, (e$replication + 1L) %/% 2L, mean)
+  a <- sim_summarise_antithetic(run, "bias")
+  expect_gt(sd(pm), 0)
+  expect_equal(a$value, mean(pm))
+  expect_equal(a$mcse, sd(pm) / sqrt(10))
+})

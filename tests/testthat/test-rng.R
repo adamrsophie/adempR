@@ -256,3 +256,13 @@ test_that("inner seeds form a fixed sequence per named stage, and registry indic
   reg$index <- 2^40
   expect_error(adempR:::check_registry(reg), "no larger than")
 })
+
+test_that("a numerical truth must be deterministic", {
+  st <- sim_study("numrng", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+    estimands = list(sim_estimand("m", sim_truth_numeric(function(scenario) mean(rnorm(10))))),
+    methods = list(a = function(data) sim_estimate("m", mean(data$y))))
+  v <- sim_validate(st, error = FALSE)
+  expect_true(any(grepl("random", v$message)))
+  expect_error(sim_run(st, replications = 1, seed = 1, path = run_path()), "validation failed")
+})
