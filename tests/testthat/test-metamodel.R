@@ -44,3 +44,40 @@ test_that("factor influence does not depend on factor order, names or the weight
   # the constrained design has no cell with n = 40 and shift = 1
   expect_equal(inter$anova$df[inter$anova$term == "n:shift"], 0)
 })
+
+test_that("factor influence reports levels and factors lost to exclusions", {
+  st <- sim_study("fi_fail", scenarios = sim_scenarios(n = c(10L, 20L), sd = c(1, 2, 3), arm = c("a", "b")),
+    generate = function(scenario, context) data.frame(y = stats::rnorm(scenario$n, 0, scenario$sd),
+                                                       sd = scenario$sd, arm = scenario$arm),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = function(data) {
+      if (data$sd[1] == 3) stop("fails")
+      sim_estimate("mean", mean(data$y))
+    }), measures = "empse")
+  run <- sim_run(st, 5, 1, run_path(), progress = FALSE)
+  fi <- sim_factor_influence(run, "empse", interactions = TRUE)
+  expect_equal(fi$status, "reduced")
+  expect_equal(fi$removed_levels$level, "3")
+  expect_equal(fi$excluded, 4L)
+  expect_match(fi$note, "retained cells only")
+  expect_output(print(fi), "Reduced analysis")
+  # failing all of one arm leaves the arm without variation: dropped
+  st2 <- st
+  st2$methods$m$fun <- function(data) {
+    if (data$arm[1] == "b") stop("fails")
+    sim_estimate("mean", mean(data$y))
+  }
+  fi2 <- sim_factor_influence(sim_run(st2, 5, 1, run_path(), progress = FALSE), "empse")
+  expect_equal(fi2$dropped, "arm")
+  expect_false(any(grepl("arm", fi2$anova$term)))
+  # only one retained cell: no model
+  st3 <- st
+  st3$methods$m$fun <- function(data) {
+    if (!(data$arm[1] == "a" && data$sd[1] == 1 && nrow(data) == 10L)) stop("fails")
+    sim_estimate("mean", mean(data$y))
+  }
+  fi3 <- sim_factor_influence(sim_run(st3, 5, 1, run_path(), progress = FALSE), "empse")
+  expect_equal(fi3$status, "unavailable")
+  expect_null(fi3$anova)
+  expect_output(print(fi3), "unavailable")
+})

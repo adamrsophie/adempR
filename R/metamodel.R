@@ -13,6 +13,11 @@
 #' Carlo standard error, all cells are weighted equally and the output says
 #' so; cells without a finite value are excluded and counted, and
 #' coefficients that the cells cannot estimate (aliasing) are counted.
+#' Variation is judged on the retained cells: a level without any retained
+#' cell is reported, a factor left with one level is dropped, and the
+#' result is marked `reduced`, since it then describes the retained cells
+#' and not the full design; with fewer than two retained cells or no
+#' varying factor there is no model (`unavailable`).
 #' The result is descriptive: it summarizes the cells that were run, it
 #' does not predict performance in scenarios that were not run, and a
 #' misspecified model attributes its own lack of fit to the factors (Morris
@@ -28,7 +33,10 @@
 #' @return A list of class `adempr_factor_influence` with `anova` (term,
 #'   degrees of freedom, type II sum of squares, share), `cells` (the cell
 #'   estimates used), `r_squared`, `weighting`, `excluded` (cells without a
-#'   finite value) and `aliased` (inestimable coefficients).
+#'   finite value), `aliased` (inestimable coefficients), `status`
+#'   (`"ok"`, `"reduced"` when exclusions removed cells, levels or factors,
+#'   or `"unavailable"` when no model can be fitted), `dropped` (factors
+#'   that no longer vary), `removed_levels` and `note`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L), sd = c(1, 3)),
 #'   generate = function(scenario, context) rnorm(scenario$n, 0, scenario$sd),
@@ -58,6 +66,33 @@ sim_factor_influence <- function(run, measure, method = NULL, estimand = NULL, f
     stopf("`factors` must name scenario factors that vary: %s.", paste(facs, collapse = ", "))
   }
   d <- merge(s[c("scenario_key", "value", "mcse")], sc[c("scenario_key", factors)], by = "scenario_key")
+  # The cells left after exclusions (failed cells, no finite value) can
+  # lack whole factor levels. Variation is judged again on them: levels
+  # that are gone are reported, factors left with one level are dropped,
+  # and the analysis is labeled as reduced, because it no longer answers
+  # the question about the full design.
+  removed <- bind_rows(lapply(factors, function(f) {
+    gone <- setdiff(unique(as.character(sc[[f]])), unique(as.character(d[[f]])))
+    if (length(gone)) data.frame(factor = f, level = gone, stringsAsFactors = FALSE)
+  }))
+  if (is.null(removed)) removed <- data.frame(factor = character(), level = character())
+  keep_f <- factors[vapply(factors, function(f) length(unique(d[[f]])) > 1L, logical(1))]
+  dropped <- setdiff(factors, keep_f)
+  status <- if (length(dropped) || nrow(removed) || nrow(d) < n_cells) "reduced" else "ok"
+  note <- c(if (nrow(d) < n_cells) sprintf("%d of %d cells excluded (no finite value)", n_cells - nrow(d), n_cells),
+            if (nrow(removed)) paste("levels without any retained cell:",
+                                     paste(paste0(removed$factor, "=", removed$level), collapse = ", ")),
+            if (length(dropped)) paste("factors that no longer vary, dropped:", paste(dropped, collapse = ", ")))
+  if (nrow(d) < 2L || !length(keep_f)) {
+    return(structure(list(anova = NULL, cells = d, r_squared = NA_real_, measure = measure,
+                          method = method, estimand = estimand, weighted = FALSE,
+                          weighting = NA_character_, excluded = n_cells - nrow(d), aliased = NA_integer_,
+                          status = "unavailable", dropped = dropped, removed_levels = removed,
+                          note = paste(c(note, "too few retained cells or no varying factor; no model"),
+                                       collapse = "; ")),
+                     class = "adempr_factor_influence"))
+  }
+  factors <- keep_f
   # syntactic stand-ins, so any factor name (with spaces or symbols) works
   # in a formula
   vars <- paste0(".f", seq_along(factors))
@@ -104,12 +139,21 @@ sim_factor_influence <- function(run, measure, method = NULL, estimand = NULL, f
   d <- d[setdiff(names(d), vars)]
   structure(list(anova = tab, cells = d, r_squared = r2, measure = measure, method = method,
                  estimand = estimand, weighted = nrow(d) > 0 && all(ok_w), weighting = weighting,
-                 excluded = n_cells - nrow(d), aliased = aliased),
+                 excluded = n_cells - nrow(d), aliased = aliased, status = status,
+                 dropped = dropped, removed_levels = removed,
+                 note = if (length(note)) paste(c(note, "the model describes the retained cells only, not the full design"),
+                                                collapse = "; ") else NA_character_),
             class = "adempr_factor_influence")
 }
 
 #' @export
 print.adempr_factor_influence <- function(x, ...) {
+  if (identical(x$status, "unavailable")) {
+    cat(sprintf("Descriptive meta-model of %s for %s (%s): unavailable. %s.\n",
+                x$measure, x$method, x$estimand, x$note))
+    return(invisible(x))
+  }
+  if (identical(x$status, "reduced")) cat(sprintf("Reduced analysis: %s.\n", x$note))
   cat(sprintf("Descriptive meta-model of %s for %s (%s), %d cells, weighting %s; R^2 = %.3f.\n",
               x$measure, x$method, x$estimand, nrow(x$cells),
               x$weighting %||% (if (x$weighted) "inverse squared MCSE" else "equal"), x$r_squared))

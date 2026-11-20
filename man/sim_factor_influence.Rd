@@ -30,7 +30,10 @@ sim_factor_influence(
 A list of class \code{adempr_factor_influence} with \code{anova} (term,
 degrees of freedom, type II sum of squares, share), \code{cells} (the cell
 estimates used), \code{r_squared}, \code{weighting}, \code{excluded} (cells without a
-finite value) and \code{aliased} (inestimable coefficients).
+finite value), \code{aliased} (inestimable coefficients), \code{status}
+(\code{"ok"}, \code{"reduced"} when exclusions removed cells, levels or factors,
+or \code{"unavailable"} when no model can be fitted), \code{dropped} (factors
+that no longer vary), \code{removed_levels} and \code{note}.
 }
 \description{
 Fits a linear model of the cell values of one measure on the scenario
@@ -44,6 +47,11 @@ add up to the explained part. When a cell has no positive finite Monte
 Carlo standard error, all cells are weighted equally and the output says
 so; cells without a finite value are excluded and counted, and
 coefficients that the cells cannot estimate (aliasing) are counted.
+Variation is judged on the retained cells: a level without any retained
+cell is reported, a factor left with one level is dropped, and the
+result is marked \code{reduced}, since it then describes the retained cells
+and not the full design; with fewer than two retained cells or no
+varying factor there is no model (\code{unavailable}).
 The result is descriptive: it summarizes the cells that were run, it
 does not predict performance in scenarios that were not run, and a
 misspecified model attributes its own lack of fit to the factors (Morris
