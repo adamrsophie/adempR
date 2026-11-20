@@ -28,14 +28,22 @@ sim_factor_influence(
 }
 \value{
 A list of class \code{adempr_factor_influence} with \code{anova} (term,
-degrees of freedom, sum of squares, share of the explained sum of
-squares), \code{cells} (the cell estimates used) and \code{r_squared}.
+degrees of freedom, type II sum of squares, share), \code{cells} (the cell
+estimates used), \code{r_squared}, \code{weighting}, \code{excluded} (cells without a
+finite value) and \code{aliased} (inestimable coefficients).
 }
 \description{
 Fits a linear model of the cell values of one measure on the scenario
 factors (treated as categorical, main effects and optionally two-way
 interactions), weighted by the inverse squared Monte Carlo standard
-error, and reports each term's share of the explained sum of squares.
+error, and reports each term's sum of squares given every term that
+does not contain it (type II) and its share of the total of these. The
+attribution does not depend on the order of the factors, also in
+unbalanced, constrained or weighted designs, where the shares need not
+add up to the explained part. When a cell has no positive finite Monte
+Carlo standard error, all cells are weighted equally and the output says
+so; cells without a finite value are excluded and counted, and
+coefficients that the cells cannot estimate (aliasing) are counted.
 The result is descriptive: it summarizes the cells that were run, it
 does not predict performance in scenarios that were not run, and a
 misspecified model attributes its own lack of fit to the factors (Morris
