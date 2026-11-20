@@ -36,8 +36,10 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
   int_ok <- rows$estimate_status %in% USABLE_FOR_INTERVAL & rows$interval_status == "valid"
   test_ok <- rows$estimate_status %in% USABLE_FOR_INTERVAL & rows$test_status == "valid"
   e <- rows$estimate - truth
-  tt <- truth[has_truth]
-  varying_truth <- length(tt) > 1L && any(tt != tt[1])
+  # A data set truth (declared, not inferred from the values seen) makes
+  # the precision measures use the errors, whose spread excludes the
+  # spread of the truth.
+  varying_truth <- identical(estimand$truth$kind, "dataset")
   if (inherits(m, "adempr_measure")) {
     elig <- rep(TRUE, nrow(rows))
     if ("estimate" %in% m$requires) elig <- elig & usable
@@ -109,7 +111,7 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
     # estimates includes the spread of the truth; the errors are used.
     empse = if (varying_truth) {
       r <- k_empse(e[usable & has_truth], level)
-      r$note <- paste(c("SD of the errors (truth varies between data sets)",
+      r$note <- paste(c("SD of the errors (data set truth)",
                         if (!is.na(r$note)) r$note), collapse = "; ")
       r
     } else k_empse(rows$estimate[usable], level),

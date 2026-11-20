@@ -245,14 +245,19 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
   xa <- a$estimate[common]
   xb <- b$estimate[common]
   ta <- a$truth[common]
+  # with a data set truth the precision comparisons use the errors, as the
+  # empirical SE of sim_summarise() does
+  ds <- identical(study$estimands[[a$estimand[1]]]$truth$kind, "dataset")
+  pa <- if (ds) xa - ta else xa
+  pb <- if (ds) xb - b$truth[common] else xb
   stat <- function(ia) {
     switch(ms,
-      relative_precision = 100 * (stats::var(xa[ia]) / stats::var(xb[ia]) - 1),
-      empse_ratio = stats::sd(xb[ia]) / stats::sd(xa[ia]),
+      relative_precision = 100 * (stats::var(pa[ia]) / stats::var(pb[ia]) - 1),
+      empse_ratio = stats::sd(pb[ia]) / stats::sd(pa[ia]),
       rmse_ratio = sqrt(mean((xb[ia] - ta[ia])^2) / mean((xa[ia] - ta[ia])^2)))
   }
   base$value <- stat(seq_len(n))
-  base$rho <- suppressWarnings(stats::cor(xa, xb))
+  base$rho <- suppressWarnings(stats::cor(pa, pb))
   base$contrast <- switch(ms,
     relative_precision = "percent increase in precision of method vs reference",
     empse_ratio = "ratio EmpSE(method) / EmpSE(reference)",

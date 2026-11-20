@@ -184,7 +184,7 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
   for (k in keys) for (mn in names(study$methods)) for (en in study$methods[[mn]]$estimands) {
     cl <- paste(k, mn, en, sep = "\r")
     meta <- acc[[paste(cl, ".meta", sep = "\r")]]
-    varying <- !is.null(meta) && is.finite(meta$tmin) && meta$tmax > meta$tmin
+    varying <- identical(study$estimands[[en]]$truth$kind, "dataset")
     for (m in measures) {
       what <- if (m == "empse" && varying) "empse_err" else m
       a <- acc[[paste(cl, what, sep = "\r")]]
@@ -196,7 +196,7 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
       } else switch(m,
         empse = {
           r <- k_empse_moments(n, st$var_x, st$m4_x, if (is.null(a)) 0 else a$pos + a$neg + a$other, level)
-          if (varying) r$note <- paste(c("SD of the errors (truth varies between data sets)",
+          if (varying) r$note <- paste(c("SD of the errors (data set truth)",
                                          if (!is.na(r$note)) r$note), collapse = "; ")
           r
         },

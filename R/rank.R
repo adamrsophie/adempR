@@ -2,8 +2,8 @@
 
 RANK_MEASURES <- c("bias", "mae", "mse", "rmse", "empse", "coverage", "width")
 
-# With a truth that varies between data sets, the empirical SE is the SD of
-# the errors, as in sim_summarise().
+# With a data set truth, the empirical SE is the SD of the errors, as in
+# sim_summarise().
 rank_value <- function(measure, e, t, lo, up, varying = FALSE) {
   switch(measure,
          bias = mean(e - t), mae = mean(abs(e - t)), mse = mean((e - t)^2),
@@ -117,8 +117,7 @@ sim_rank <- function(run, measure = "mse", methods = NULL, estimand = NULL, B = 
     cols <- lapply(methods, function(m) {
       cc <- list(e = get(m, "estimate"), t = get(m, "truth"), lo = get(m, "lower"),
                  up = get(m, "upper"), lv = get(m, "level"))
-      tt <- cc$t[!is.na(cc$t)]
-      cc$varying <- length(tt) > 1L && any(tt != tt[1])
+      cc$varying <- identical(study$estimands[[estimand]]$truth$kind, "dataset")
       cc
     })
     names(cols) <- methods

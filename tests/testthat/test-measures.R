@@ -401,3 +401,27 @@ test_that("relative bias stays finite near the largest double and only exact zer
   expect_true(is.finite(r$value))
   expect_identical(r$status, "unstable")
 })
+
+test_that("precision measures follow the declared truth kind, not the values seen", {
+  # data set truths that happen to be constant (and one missing) still
+  # make EmpSE the SD of the errors over the rows with a truth
+  st <- sim_study("dskind", scenarios = sim_scenarios(n = 10L),
+    generate = function(scenario, context) {
+      y <- rnorm(scenario$n)
+      sim_data(data.frame(y = y), truth = list(m = if (context$replication == 1L) NA_real_ else 0))
+    },
+    estimands = list(sim_estimand("m", sim_truth_dataset())),
+    methods = list(a = function(data) sim_estimate("m", mean(data$y)),
+                   b = function(data) sim_estimate("m", median(data$y))),
+    measures = c("empse"))
+  run <- sim_run(st, replications = 12, seed = 1, path = run_path())
+  e <- sim_results(run)$estimates
+  ea <- e[e$method == "a", ]
+  s <- as.data.frame(sim_summarise(run))
+  v <- s$value[s$measure == "empse" & s$method == "a"]
+  expect_equal(v, sd(ea$estimate[!is.na(ea$truth)] - ea$truth[!is.na(ea$truth)]))
+  ss <- as.data.frame(sim_summarise_stream(run, measures = "empse"))
+  expect_equal(ss$value[ss$method == "a"], v)
+  rk <- sim_rank(run, "empse", B = 20)
+  expect_equal(rk$value[rk$method == "a"], v)
+})
