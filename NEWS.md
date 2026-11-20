@@ -43,14 +43,18 @@ First release.
   exact intervals for proportions, Monte Carlo truth uncertainty, paired
   method comparisons, Pareto views, precision planning, pilots, sequential
   stopping with error spending over looks and cells (stored with the run
-  and analyzed on the look prefix), and mergeable accumulators.
+  and analyzed on the look prefix), and mergeable accumulators. Each
+  measure states the replications it uses and a status when its value or
+  MCSE is not defined, or when unattempted work leaves it incomplete
+  (reported with bounds).
 * Accounting: `sim_flow()` follows every planned replication to a usable
   result or the reason it is not one; `sim_acceptable()` judges a measure
-  against an acceptable range with its Monte Carlo interval; a large
+  against an acceptable range with its Monte Carlo interval, or with the
+  monitoring interval of a sequential run; a large
   sample sanity run in `sim_validate()`.
 * Diagnostics flag outliers, data sets that repeat across replications,
-  tests and intervals that disagree, and degenerate estimates. Zip plots
-  show the Monte Carlo band and have a power version.
+  tests and intervals that disagree at the study's alpha, and degenerate
+  estimates. Zip plots show the Monte Carlo band and have a null version.
 * A self contained HTML report (protocol, code, flow of replications,
   results, paired comparisons, diagnostics) and reproducible export
   bundles.
@@ -66,17 +70,20 @@ First release.
   resampling of real covariates, a Gaussian copula with arbitrary margins,
   and calibration of a censoring rate to a target proportion.
 * Analysis: method rankings with bootstrap probabilities, a leaderboard,
-  bias decomposition against a secondary reference value, identity checks
-  between estimands, a descriptive meta-model of factor influence, the
+  bias decomposition against a secondary reference value with MCSEs of
+  every part, identity checks between estimands with relative tolerances
+  and pass, fail or unavailable statuses, a descriptive meta-model of factor influence, the
   interval score, weighted summaries within factor levels, time-uniform
   confidence sequences, simulation-based calibration of Bayesian methods,
   and batch by batch summaries for runs larger than memory.
 * Variance reduction and allocation: common random numbers across
-  scenarios, antithetic pairs, control variates from recorded quantities,
+  scenarios, antithetic pairs analyzed by pair, control variates from
+  recorded quantities,
   and adaptive allocation of replications to the scenarios that need them.
 * Workflow: protocol export in the ADEMP-PreReg section order, blinded
-  evaluation (coded data export, external results imported as a method, a
-  report with blinded method names), reproduction and seed sensitivity
+  evaluation (coded export of the committed data with the key stored
+  apart, external results joined by scenario and replication, a report
+  with blinded method names), reproduction and seed sensitivity
   checks between runs, sharded runs for cluster array jobs, living
   benchmarks that add methods to an existing run, longest first
   scheduling, and protection of production runs from changes that alter

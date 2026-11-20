@@ -32,12 +32,12 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Factorial scenarios with content keys, independent of order | verified | test-design.R, test-rng.R |
 | Exclusion and invalid configuration constraints | verified | test-design.R |
 | Nested (bound) and sampled designs, scenario weights | verified | test-design.R |
-| Estimand metadata and method declarations, with validation of mismatches | verified | test-estimands.R |
+| Estimand metadata and method declarations, with validation of declared mismatches (effect, scale, population, conditioning) | verified | test-estimands.R; a method that declares nothing is not checked |
 | Exact truth | verified | test-normal-mean.R |
 | Monte Carlo truth with standard error, cached, carried into MCSE | verified | test-estimands.R |
 | Data set specific truth hidden from non-oracle methods | verified | test-estimands.R |
 | Unknown truth (truth based measures unavailable) | verified | test-estimands.R |
-| Numerical (quadrature) truth with stated error | implemented | estimands vignette (agrees with the Monte Carlo truth); deterministic call enforced in test-rng.R |
+| Numerical (quadrature) truth with stated error, carried into null labels and sensitivity ranges | implemented | estimands vignette (agrees with the Monte Carlo truth); a numerical truth that draws random numbers is refused (test-rng.R); error bound in labels and ranges (test-flow.R, test-measures.R) |
 | Public scenario views and oracle methods | verified | test-isolation.R |
 | Validation and smoke test | verified | test-design.R |
 | Large sample sanity run (`sim_validate(large_n = )`) | verified | test-flow.R |
@@ -45,9 +45,9 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Protocol export in ADEMP-PreReg section order (`sim_protocol_export()`) | verified | test-protocol-export.R |
 | Truth shared by scenarios that agree on given factors (`sim_truth_mc(factors = )`) | verified | test-estimands.R |
 | Vector and function valued estimands as scalar components on a grid, with grid averaged performance | verified | test-measures-extra.R (grid truths; grid mean equals the mean of pointwise values; MCSE from replication level averages) |
-| Categorical estimands with selection proportions and accuracy | verified | test-measures-extra.R (hand calculation) |
+| Categorical estimands with selection proportions and accuracy, applied only to categorical estimands | verified | test-measures-extra.R (hand calculation, scoping by estimand type) |
 | Per replication generator records (realized sample size, censoring fraction) | verified | test-methods-extra.R |
-| Plasmode helper, Gaussian copula generator, censoring rate calibration | verified | test-generators-extra.R (achieved censoring proportion, Spearman correlation against the closed form, traced rows) |
+| Plasmode helper, Gaussian copula generator, censoring rate calibration | verified | test-generators-extra.R (achieved censoring proportion including never-events, Spearman correlation against the closed form, traced rows, refused overwriting and recycling) |
 
 ## Failures and validity
 
@@ -59,12 +59,12 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Generation failures recorded, never redrawn | verified | test-failures.R |
 | Failure policy applied at evaluation without refitting | verified | test-failures.R |
 | Composite measures over all generated data sets | verified | test-failures.R |
-| Retries with the same seed; retry of failures after a fix (`retry_failed`) | verified | test-failures.R |
+| Retries with the same seed; retry of failures after a fix (`retry_failed`), including memory failures | verified | test-failures.R, test-methods-extra.R |
 | Timeout overruns flagged; execution settings changes recorded as revisions | verified | test-failures.R, test-replay-invalidation.R |
-| Flow of replications (planned to usable) in the report | verified | test-flow.R |
+| Flow of replications (planned to usable) in the report, nonnegative with fallbacks | verified | test-flow.R, test-fallback-2.R |
 | Fallback values for failed fits, counted only under `sim_failure_policy(fallback = "use")` | verified | test-methods-extra.R |
-| Memory exhaustion as its own failure class; per fit diagnostics | verified | test-methods-extra.R |
-| Methods with known performance checked against Monte Carlo error (`sim_check_reference()`) | verified | test-methods-extra.R |
+| Memory exhaustion as its own failure class; per fit diagnostics | verified for classification | test-methods-extra.R raises an allocation error message; no real exhaustion is provoked |
+| Methods with known performance checked against Monte Carlo error (`sim_check_reference()`), with zero MCSE and boundary proportions | verified | test-methods-extra.R |
 
 ## Reproducibility and execution
 
@@ -77,7 +77,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Pilots, DGP checks and validation use their own stream families | verified | test-design.R |
 | `future` backend identical to sequential for top-level helper functions and declared packages; nested closures that reach global objects are refused | verified locally with multisession, two workers | test-rng.R |
 | Data isolation between methods, including `data.table` | verified | test-isolation.R |
-| Atomic commits; crash at each commit stage, inside a method and inside data generation, then resume | verified on Linux and macOS | test-recovery.R (SIGKILL in a child process; installed package only) |
+| Atomic commits; crash at each commit stage, inside a method and inside data generation, then resume | verified on Linux and macOS at named points | test-recovery.R (SIGKILL in a child process at named fault points between commit steps; installed package only) |
 | Manifest checksum with backup; restart after an interrupted first call | verified | test-recovery.R |
 | Lost batch (with its sidecar) detected through the batch inventory and rerun | verified | test-recovery.R |
 | Stale lock recovery on the same host, with token ownership | verified | test-recovery.R |
@@ -92,14 +92,14 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Batch by batch summaries for runs larger than memory (`sim_summarise_stream()`) | verified | test-stream.R (values, MCSEs, statuses and cells agree with `sim_summarise()` for bias, MSE, EmpSE, mean SE and coverage, including data set truths, boundaries and conflicting duplicates); memory still grows with the number of tasks |
 | A substream for resampling inside a method (`context$inner_seeds`) | verified | test-rng.R |
 | Warning for code that resets the seed and for packages loaded from source or traced | verified | test-methods-extra.R, test-rng.R |
-| Reproduction and seed sensitivity checks between two runs (`sim_verify()`) | verified | test-verify.R |
-| Method settings tuned on calibration streams (`sim_calibrate_method()`) | verified | test-calibrate.R |
+| Reproduction and seed sensitivity checks between two runs (`sim_verify()`) | verified | test-verify.R (complete key sets, all outcomes, infinite limits, boundary proportions) |
+| Method settings tuned on calibration streams (`sim_calibrate_method()`), with MCSE, weights and failing settings | verified | test-calibrate.R |
 | Longest first scheduling (`sim_run(cost = )`) without changing results | verified | test-recovery.R |
 | Production runs protected from changes that alter results | verified | test-recovery.R |
-| Common random numbers across scenarios, antithetic pairs, control variates | verified | test-variance-reduction.R (shared draws, exact antithetic negation, variance reduction of a control variate) |
-| Adaptive allocation of replications across scenarios (`sim_run_adaptive()`) | verified | test-adaptive.R (extra replications equal those of a plain run) |
-| Blinded evaluation: coded data export, external results as a method, blinded report | verified | test-blind.R |
-| Living benchmarks: methods added to an existing run, leaderboard | verified | test-living.R |
+| Common random numbers across scenarios, antithetic pairs, control variates | verified | test-variance-reduction.R (shared draws, antithetic negation, pair means that vary, incomplete pairs counted, variance reduction of a control variate, no adjustment on a selected subset) |
+| Adaptive allocation of replications across scenarios (`sim_run_adaptive()`) | verified | test-adaptive.R (extra replications equal those of a plain run; zero and undefined MCSEs unresolved) |
+| Blinded evaluation: coded data export of the committed cohort, key kept apart, external results joined by task, blinded report | verified | test-blind.R (identical data sets keep their own answers; names absent from the report) |
+| Living benchmarks: methods added to an existing run, leaderboard | verified | test-living.R (repeated additions from a stale handle) |
 | GPU device assignment (`sim_method(gpu = TRUE)`, `sim_run(gpus = )`) | experimental | test-gpu.R checks the device variable and its restoration; no GPU hardware was used |
 
 ## Performance measures and analysis
@@ -107,24 +107,24 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Capability | Status | Evidence |
 |---|---|---|
 | Bias, MAE, MSE, RMSE, empirical SE, mean SE, RMVAR and their MCSEs | verified | test-measures.R (hand calculations) |
-| Relative error in model SE (Morris et al. Table 6 MCSE) | verified | test-measures.R, agreement with rsimsum in test-normal-mean.R |
+| Relative error in model SE (jackknife MCSE; the normal theory MCSE of Morris et al. Table 6 in the note) | verified | test-measures.R; point estimate and normal theory MCSE agree with rsimsum in test-normal-mean.R |
 | Coverage, noncoverage, rejection, usable proportion with exact intervals | verified | test-measures.R, test-normal-mean.R |
-| Bias-eliminated coverage (jackknife MCSE) | verified for the value; MCSE implemented | test-measures.R |
-| Width, relative bias (with unstable status near a zero truth) | implemented; edge cases tested | test-measures.R |
-| Type I error and power labels from the declared null | verified | test-normal-mean.R |
+| Bias-eliminated coverage (jackknife over whole replications), also for a fixed unknown truth | verified | test-measures.R (hand computed jackknife) |
+| Width, relative bias (on a common scale; unstable status near a zero truth) | verified | test-measures.R (values near the largest double, tiny truths) |
+| Type I error and power labels from the declared null, neutral when the truth's error reaches the null | verified | test-normal-mean.R, test-flow.R |
 | Custom measures; no MCSE claimed for nonlinear aggregates | verified | test-measures.R |
 | Paired comparisons with MCSE | verified | test-compare.R |
 | Relative precision with analytic MCSE and paired bootstrap | verified | test-compare.R |
 | Equivalence margins, ratio margins around 1 | implemented; validation and boundary cases tested | test-compare.R |
 | Pareto view | verified | test-compare.R |
-| Weighted summaries over scenarios (Bonferroni exact bounds at the boundary), overall or within factor levels | verified | test-measures.R |
+| Weighted summaries over scenarios (Bonferroni exact bounds at the boundary), overall or within factor levels | verified | test-measures.R (hand computed averages and MCSEs within levels) |
 | Ranking of methods with paired bootstrap probabilities and Kendall distance (`sim_rank()`) | verified | test-rank.R |
-| Interval score (Gneiting and Raftery), optionally scaled | verified | test-measures-extra.R (hand calculation) |
-| Bias decomposition against a secondary reference value | verified | test-decompose.R |
-| Algebraic identity checks between estimands on truths and estimates | verified | test-decompose.R |
+| Interval score (Gneiting and Raftery), optionally scaled by a number or a positive column | verified | test-measures-extra.R (hand calculation, scaled at a truth other than 1, unbounded sides) |
+| Bias decomposition against a secondary reference value evaluated as a truth, with MCSEs of every part | verified | test-decompose.R |
+| Algebraic identity checks between estimands on truths and estimates, with relative tolerance, truth errors and unavailable units | verified | test-decompose.R |
 | Descriptive meta-model of factor influence (`sim_factor_influence()`) | implemented | test-metamodel.R (attribution to the driving factor, shares sum to one); descriptive only |
 | Simulation-based calibration of Bayesian methods (`sim_method_sbc()`, `sim_sbc()`) | verified | test-sbc.R (exact posterior accepted, overconfident posterior rejected, point mass ties and exact discrete bin probabilities) |
-| Acceptability against a range, with the Monte Carlo interval (`sim_acceptable()`) | verified | test-flow.R |
+| Acceptability against a range, with the Monte Carlo interval or a sequential run's monitoring interval (`sim_acceptable()`); the default type I error range only where the null holds | verified | test-flow.R |
 | Mergeable accumulators | verified | test-measures.R |
 
 ## Planning, stopping and reporting
@@ -132,12 +132,12 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Capability | Status | Evidence |
 |---|---|---|
 | Replication planning formulas | verified | test-measures.R |
-| Pilot studies with cost and precision projections | implemented; targets and requirement bounds tested | test-design.R |
+| Pilot studies with cost and precision projections, scheduled for the eligible share | implemented; targets, requirement bounds and eligibility tested | test-design.R |
 | Sequential stopping with error spending over looks and cells | verified | test-nested-sequential.R (simultaneous coverage by simulation; runner intervals recomputed with `binom.test()` for four cells and two looks; stored design and prefix) |
-| Time-uniform confidence sequences (`sim_confidence_sequence()`) | verified | test-confseq.R (exact sequences contain fixed sample intervals; time uniform error below alpha by simulation) |
+| Time-uniform confidence sequences (`sim_confidence_sequence()`) | verified for the exact sequence | test-confseq.R (exact sequences contain fixed sample intervals; time uniform error below alpha by simulation with the tuning fixed at the first look); the asymptotic sequence is implemented |
 | DGP checks | verified | test-generators.R |
 | Diagnostics: outliers, repeated data sets, test and interval disagreement, degenerate estimates | verified | test-measures.R |
-| Plots (zip plot with Monte Carlo band and power version, Bland-Altman agreement, intervals by true value) | implemented; caller state and eligibility tested | test-report-plots.R |
+| Plots (zip plot with Monte Carlo band and null version, Bland-Altman agreement, intervals by true value including unbounded limits) | implemented; caller state, distinct methods and eligible levels tested | test-report-plots.R |
 | HTML report: self contained, escaped, all protocol fields, code, comparisons | verified | test-bundle.R |
 | Export bundle, checksums, import in a clean process | verified | test-bundle.R |
 | Software environment record: package versions, sources and system requirements, repositories, BLAS, LAPACK, threads, RNG kinds, locale, time zone, renv state | verified | test-provenance.R |

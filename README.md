@@ -27,7 +27,8 @@ visible:
 
 - **Estimands are first class.** Each estimand declares its population,
   conditioning set, effect type and scale; methods declare what they target,
-  and mismatches are validation errors. Truth can be exact, numerical, Monte
+  and declared mismatches of effect, scale, population or conditioning are
+  validation errors (a method that does not declare them is not checked). Truth can be exact, numerical, Monte
   Carlo (with its own standard error carried into the summary), data set
   specific, or unknown.
 - **Each measure has its own denominator.** Estimate, standard error,
@@ -37,15 +38,20 @@ visible:
 - **Random numbers are tied to content, not position.** L'Ecuyer-CMRG streams
   are keyed by stage, scenario content and component, so results do not
   change when scenarios or methods are reordered, chunks are resized, the
-  backend changes, or replications and methods are added.
+  backend changes, or replications and methods are added (for methods that
+  draw only from the stream they are given).
 - **Runs are recoverable and auditable.** Atomic commits with checksums,
   quarantine of corrupt files, duplicate and conflict detection, stale lock
   recovery, selective invalidation by fingerprint, protocol freezing and
-  amendments, and replay of any single replication.
-- **Every measure comes with its Monte Carlo error.** Seventeen built in
-  measures with MCSEs, exact intervals for proportions, paired method
-  comparisons, precision planning, pilots, and sequential stopping with
-  intervals that stay valid after optional stopping.
+  amendments, and replay of any single replication. Recovery is tested by
+  interrupting runs at named points between commits; a crash elsewhere is
+  covered by the same commit protocol but not by a dedicated test.
+- **Every measure comes with its Monte Carlo error where one is defined.**
+  Seventeen built in measures with MCSEs, exact intervals for proportions,
+  paired method comparisons, precision planning, pilots, and sequential
+  stopping with intervals that stay valid after optional stopping for
+  independent replications. A cell whose MCSE is undefined says so in its
+  status instead of reporting a number.
 
 ## Installation
 
@@ -165,22 +171,23 @@ another machine.
 | Measure | Eligible replications | MCSE |
 |---------|-----------------------|------|
 | `bias`, `mae`, `mse` | usable estimate and truth | sample SD of contributions over sqrt(n) |
-| `relbias` | usable estimate, nonzero truth | delta method for varying truth |
+| `relbias` | usable estimate, nonzero truth | MCSE(bias) / truth; delta method for varying truth |
 | `rmse` | usable estimate and truth | delta method |
-| `empse` | usable estimate | kurtosis based variance of the sample variance |
-| `mean_se`, `rmvar` | valid standard error | mean, or delta method |
-| `se_ratio` | valid standard error | Morris et al. (2019) Table 6 |
+| `empse` | usable estimate (errors, for a data set truth) | kurtosis based variance of the sample variance |
+| `mean_se`, `rmvar` | usable estimate with a valid standard error | mean, or delta method |
+| `se_ratio` | usable estimate with a valid standard error | jackknife (the normal theory value of Morris et al. 2019 is in the note) |
 | `coverage`, `noncoverage_lower`, `noncoverage_upper` | valid interval and truth | binomial, with Clopper-Pearson interval |
-| `be_coverage` | valid interval | binomial |
+| `be_coverage` | valid interval and usable estimate | grouped jackknife over replications |
 | `width` | valid interval | sample SD over sqrt(n) |
-| `rejection` | valid test | binomial; labeled type I error or power |
-| `usable`, `usable_coverage` | all generated data sets | binomial |
+| `rejection` | valid test | binomial; labeled type I error or power only when the truth settles the null |
+| `usable`, `usable_coverage` | all generated data sets | binomial; status `incomplete` while some are not analyzed, bounds when truths are missing |
 
 Custom measures are defined with `sim_measure()`; measure factories add
 selection proportions for categorical estimands
-(`sim_measures_categorical()`) and the interval score
-(`sim_measure_interval_score()`). No MCSE is claimed for a
-nonlinear aggregate unless one is supplied. Comparisons add paired
+(`sim_measures_categorical()`, applied only to categorical estimands) and
+the interval score (`sim_measure_interval_score()`, optionally divided by a
+fixed scale or a positive column such as the truth). No MCSE is claimed for
+a nonlinear aggregate unless one is supplied. Comparisons add paired
 differences of bias, MAE, MSE, coverage, width, rejection and the usable
 proportion, and relative precision (paired bootstrap MCSE, with the
 normal theory value in the note). Printed summaries show each value to
@@ -214,7 +221,8 @@ manual and these articles:
 - Built in measures and their MCSEs are tested against hand calculations
   from the formulas, and against
   [rsimsum](https://CRAN.R-project.org/package=rsimsum) where the
-  definitions agree.
+  definitions agree (for `se_ratio`, rsimsum's point estimate and the
+  normal theory MCSE given in the note; the reported MCSE is a jackknife).
 - Scientific tests check known results: the t interval for a normal mean,
   informative failures and conditional versus composite denominators, the
   noncollapsible marginal odds ratio with Monte Carlo truth, paired
@@ -228,7 +236,8 @@ manual and these articles:
   that the resumed run equals an uninterrupted one; and check corruption
   quarantine, lost batches, manifest damage, duplicate and conflict
   detection, stale locks, replay, selective invalidation, retention,
-  regeneration from a bundle and bundle import in a clean process.
+  regeneration from a bundle, and reanalysis of an imported bundle in a
+  clean process.
 - Continuous integration runs `R CMD check` on Ubuntu (R release, devel,
   the previous release and R 4.2), Windows and macOS.
 
