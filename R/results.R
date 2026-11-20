@@ -212,6 +212,14 @@ sim_truth <- function(run) {
             identical(file_md5(f), readLines(sidecar, warn = FALSE)[1])) {
           row <- readRDS(f)
         } else {
+          # a missing or damaged cache entry is recomputed only from the
+          # definition the run used: a truth whose code or referenced
+          # values changed since would publish a different value under the
+          # stored identity
+          if (!identical(truth_fingerprint(tr), tfp)) {
+            stopf("The cached truth of estimand %s is missing or damaged, and its definition changed since the run computed it (the truth function or a value it references). Restore the original definition to recompute it, or evaluate the changed truth in a new run.",
+                  en)
+          }
           seed <- NULL
           if (tr$kind == "mc") {
             if (is.null(base)) base <- rng_base_seed(man$seed, man$rng_domain)
