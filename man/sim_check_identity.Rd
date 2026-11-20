@@ -10,7 +10,8 @@ sim_check_identity(
   target = c("truth", "estimate"),
   tolerance = 1e-08,
   estimands = NULL,
-  z = 3
+  z = 3,
+  scale = 1
 )
 }
 \arguments{
@@ -24,16 +25,21 @@ when one of them is a data set truth); \code{"estimate"} checks every
 method that targets all the estimands involved, per replication, using
 usable estimates only.}
 
-\item{tolerance}{Residual allowed, relative to the scale of the values.}
+\item{tolerance}{Residual allowed, as a multiple of \code{scale}.}
 
 \item{estimands}{Estimands the identity uses. Defaults to the
 estimands named among its arguments, or all when it takes \code{values}.}
 
 \item{z}{Number of residual standard errors added to the tolerance.}
+
+\item{scale}{Reference size of the residual, in its units: a positive
+number, or a function of the estimand values (as named arguments or
+\code{values}) and optionally \code{scenario} returning one.}
 }
 \value{
 A data frame with one row per scenario (and per method or
 replication where applicable): \code{residual}, \code{residual_se}, \code{status},
+\code{residual_error} (certified bound from numerical truths), \code{allowed},
 \code{flag} (\code{TRUE} for a failure, \code{NA} when unavailable) and \code{note}.
 }
 \description{
@@ -45,11 +51,18 @@ a function of the estimand values (named as the estimands) and of the
 scenario, returning a residual that should be zero.
 }
 \details{
-A residual fails when its absolute value exceeds \code{tolerance} times the
-scale of the values involved (at least 1), plus \code{z} standard errors of
-the residual. The standard error comes from the standard errors of
-Monte Carlo truths, propagated through the identity by numerical
-differentiation; exact truths and estimates have none. Every checked
+A residual fails when its absolute value exceeds \code{tolerance} times
+\code{scale}, plus the residual's certified numerical error bound, plus \code{z}
+standard errors of the residual. All three terms are in the units of the
+residual: \code{scale} (1 by default) is a reference size for the residual,
+given as a number or as a function of the estimand values (and the
+scenario), for example the size of one side of the identity when its
+values are large; it is never taken from the raw inputs, because a
+residual such as \code{log(or) - log_or} does not share their scale. The
+standard error comes from the standard errors of Monte Carlo truths,
+and the error bound from the error bounds of numerical truths, each
+propagated through the identity by numerical differentiation; exact
+truths and estimates have neither. Every checked
 unit gets a row: \code{status} is \code{pass}, \code{fail} or \code{unavailable} (a value
 is missing, not usable or not computed), with the reason in \code{note}.
 }

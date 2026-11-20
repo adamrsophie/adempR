@@ -95,7 +95,50 @@ test_that("identity checks use truth errors, usable estimates and report unavail
   v <- sim_check_identity(run, function(values) values$a - values$a, estimands = "a")
   expect_identical(v$status, c("pass", "pass"))
   expect_error(sim_check_identity(run, function(values) 0, estimands = "zz"), "Unknown estimand")
-  # the tolerance is relative to the scale of the values (at least 1)
-  rel <- sim_check_identity(run, function(a) 0.015, tolerance = 0.01)
+  # the tolerance is in residual units: 1 by default, or a declared scale
+  expect_identical(sim_check_identity(run, function(a) 0.015, tolerance = 0.01)$status,
+                   c("fail", "fail"))
+  rel <- sim_check_identity(run, function(a) 0.015, tolerance = 0.01,
+                            scale = function(a) max(1, abs(a)))
   expect_identical(rel$status, c("fail", "pass"))
+})
+
+test_that("identity tolerances are in the units of the residual", {
+  mk <- function(or, log_or, est_or = or, est_log = log_or, numeric_error = NULL) {
+    tr_log <- if (is.null(numeric_error)) sim_truth_exact(function(scenario) log_or) else
+      sim_truth_numeric(function(scenario) log_or, error = numeric_error)
+    sim_study("ident_units", scenarios = sim_scenarios(n = 1L),
+      generate = function(scenario, context) 0,
+      estimands = list(sim_estimand("or", sim_truth_exact(function(scenario) or)),
+                       sim_estimand("log_or", tr_log)),
+      methods = list(m = function(data) list(sim_estimate("or", est_or), sim_estimate("log_or", est_log))))
+  }
+  chk <- function(st, ...) sim_check_identity(sim_run(st, 2, 1, run_path(), progress = FALSE),
+                                              function(or, log_or) log(or) - log_or, ...)
+  # an exactly false log identity with a huge raw input fails
+  r <- chk(mk(1e10, 0))
+  expect_identical(r$status, "fail")
+  expect_equal(r$residual, log(1e10))
+  # a true one with huge inputs passes
+  expect_identical(chk(mk(1e10, log(1e10)))$status, "pass")
+  # a numerical truth's error bound widens the allowance by its effect on
+  # the residual, not by the raw value
+  r <- chk(mk(exp(2), 2.001, numeric_error = 0.01))
+  expect_identical(r$status, "pass")
+  expect_equal(r$residual_error, 0.01, tolerance = 1e-6)
+  expect_identical(chk(mk(exp(2), 2.1, numeric_error = 0.01))$status, "fail")
+  # a product identity in large units passes with a declared scale
+  st <- sim_study("ident_prod", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) 0,
+    estimands = list(sim_estimand("itt", sim_truth_exact(function(scenario) 2e6 * 0.5 + 1e-3)),
+                     sim_estimand("pc", sim_truth_exact(function(scenario) 0.5)),
+                     sim_estimand("cace", sim_truth_exact(function(scenario) 2e6))),
+    methods = list(m = function(data) list(sim_estimate("itt", 1), sim_estimate("pc", 1),
+                                           sim_estimate("cace", 1))))
+  run <- sim_run(st, 2, 1, run_path(), progress = FALSE)
+  id <- function(itt, pc, cace) itt - pc * cace
+  expect_identical(sim_check_identity(run, id, tolerance = 1e-12)$status, "fail")
+  expect_identical(sim_check_identity(run, id, tolerance = 1e-8, scale = function(itt) abs(itt))$status,
+                   "pass")
+  expect_error(sim_check_identity(run, id, scale = -1), "positive")
 })

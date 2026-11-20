@@ -105,11 +105,18 @@ sim_bias_decomposition <- function(run, reference, estimand = NULL, methods = NU
 #' a function of the estimand values (named as the estimands) and of the
 #' scenario, returning a residual that should be zero.
 #'
-#' A residual fails when its absolute value exceeds `tolerance` times the
-#' scale of the values involved (at least 1), plus `z` standard errors of
-#' the residual. The standard error comes from the standard errors of
-#' Monte Carlo truths, propagated through the identity by numerical
-#' differentiation; exact truths and estimates have none. Every checked
+#' A residual fails when its absolute value exceeds `tolerance` times
+#' `scale`, plus the residual's certified numerical error bound, plus `z`
+#' standard errors of the residual. All three terms are in the units of the
+#' residual: `scale` (1 by default) is a reference size for the residual,
+#' given as a number or as a function of the estimand values (and the
+#' scenario), for example the size of one side of the identity when its
+#' values are large; it is never taken from the raw inputs, because a
+#' residual such as `log(or) - log_or` does not share their scale. The
+#' standard error comes from the standard errors of Monte Carlo truths,
+#' and the error bound from the error bounds of numerical truths, each
+#' propagated through the identity by numerical differentiation; exact
+#' truths and estimates have neither. Every checked
 #' unit gets a row: `status` is `pass`, `fail` or `unavailable` (a value
 #' is missing, not usable or not computed), with the reason in `note`.
 #'
@@ -120,12 +127,16 @@ sim_bias_decomposition <- function(run, reference, estimand = NULL, methods = NU
 #'   when one of them is a data set truth); `"estimate"` checks every
 #'   method that targets all the estimands involved, per replication, using
 #'   usable estimates only.
-#' @param tolerance Residual allowed, relative to the scale of the values.
+#' @param tolerance Residual allowed, as a multiple of `scale`.
 #' @param estimands Estimands the identity uses. Defaults to the
 #'   estimands named among its arguments, or all when it takes `values`.
 #' @param z Number of residual standard errors added to the tolerance.
+#' @param scale Reference size of the residual, in its units: a positive
+#'   number, or a function of the estimand values (as named arguments or
+#'   `values`) and optionally `scenario` returning one.
 #' @return A data frame with one row per scenario (and per method or
 #'   replication where applicable): `residual`, `residual_se`, `status`,
+#'   `residual_error` (certified bound from numerical truths), `allowed`,
 #'   `flag` (`TRUE` for a failure, `NA` when unavailable) and `note`.
 #' @examples
 #' study <- sim_study("ratio", scenarios = sim_scenarios(n = 40L, mu = 1),
@@ -139,11 +150,14 @@ sim_bias_decomposition <- function(run, reference, estimand = NULL, methods = NU
 #' sim_check_identity(run, function(mean, log_mean) log(mean) - log_mean, target = "estimate")
 #' @export
 sim_check_identity <- function(run, identity, target = c("truth", "estimate"), tolerance = 1e-8,
-                               estimands = NULL, z = 3) {
+                               estimands = NULL, z = 3, scale = 1) {
   target <- match.arg(target)
   check_function(identity, "identity")
   if (!is_scalar_number(tolerance) || tolerance < 0) stopf("`tolerance` must be a nonnegative number.")
   if (!is_scalar_number(z) || z < 0) stopf("`z` must be a nonnegative number.")
+  if (!is.function(scale) && (!is_scalar_number(scale) || scale <= 0)) {
+    stopf("`scale` must be a positive number or a function of the estimand values.")
+  }
   res <- sim_results(run)
   study <- res$manifest$study
   fa <- names(formals(identity))
@@ -160,37 +174,52 @@ sim_check_identity <- function(run, identity, target = c("truth", "estimate"), t
     if (!is_scalar_number(v) && !(length(v) == 1L && is.na(v))) stopf("`identity` must return one number.")
     as.numeric(v)
   }
-  # residual standard error from the value standard errors (delta method)
-  resid_se <- function(vals, se, scenario, r0) {
-    se[is.na(se)] <- 0
-    if (!any(se > 0) || !is.finite(r0)) return(0)
-    g <- vapply(seq_along(vals), function(i) {
-      if (se[i] == 0) return(0)
+  # gradient of the identity at the values, where a value has a standard
+  # error or an error bound (numerical differentiation)
+  grad <- function(vals, w, scenario, r0) {
+    vapply(seq_along(vals), function(i) {
+      if (w[i] == 0) return(0)
       h <- 1e-6 * max(1, abs(vals[i]))
       v <- vals
       v[i] <- v[i] + h
       (apply_id(v, scenario) - r0) / h
     }, numeric(1))
-    sqrt(sum((g * se)^2))
   }
-  check_one <- function(vals, se, scenario) {
+  scale_of <- function(vals, scenario) {
+    if (!is.function(scale)) return(scale)
+    s <- call_flexible(scale, c(as.list(vals), list(values = as.list(vals), scenario = scenario)))
+    if (!is_scalar_number(s) || !is.finite(s) || s <= 0) stopf("`scale` must return one positive number.")
+    s
+  }
+  check_one <- function(vals, se, scenario, err = 0) {
     miss <- needed[is.na(vals)]
     if (length(miss)) {
-      return(list(residual = NA_real_, residual_se = NA_real_, status = "unavailable",
+      return(list(residual = NA_real_, residual_se = NA_real_, residual_error = NA_real_,
+                  allowed = NA_real_, status = "unavailable",
                   note = paste("no usable value for", paste(miss, collapse = ", "))))
     }
     r0 <- apply_id(vals, scenario)
     if (!is.finite(r0)) {
-      return(list(residual = r0, residual_se = NA_real_, status = "fail",
+      return(list(residual = r0, residual_se = NA_real_, residual_error = NA_real_,
+                  allowed = NA_real_, status = "fail",
                   note = "the identity is not finite at these values"))
     }
-    rse <- resid_se(vals, se, scenario, r0)
-    allowed <- tolerance * max(1, abs(vals)) + z * rse
-    list(residual = r0, residual_se = rse, status = if (abs(r0) > allowed) "fail" else "pass",
-         note = NA_character_)
+    se[is.na(se)] <- 0
+    err <- rep_len(err, length(vals))
+    unstated <- needed[is.na(err)]
+    err[is.na(err)] <- 0
+    g <- grad(vals, as.numeric(se > 0 | err > 0), scenario, r0)
+    rse <- sqrt(sum((g * se)^2))
+    rerr <- sum(abs(g) * err)
+    allowed <- tolerance * scale_of(vals, scenario) + rerr + z * rse
+    list(residual = r0, residual_se = rse, residual_error = rerr, allowed = allowed,
+         status = if (abs(r0) > allowed) "fail" else "pass",
+         note = if (length(unstated)) paste("numerical truth without a stated error bound:",
+                                            paste(unstated, collapse = ", ")) else NA_character_)
   }
   row <- function(lab, chk, ...) {
     data.frame(scenario_id = lab, ..., residual = chk$residual, residual_se = chk$residual_se,
+               residual_error = chk$residual_error, allowed = chk$allowed,
                status = chk$status, note = chk$note, stringsAsFactors = FALSE)
   }
   out <- list()
@@ -205,8 +234,12 @@ sim_check_identity <- function(run, identity, target = c("truth", "estimate"), t
       t <- tr[tr$scenario_key == key & tr$truth_status == "ok", , drop = FALSE]
       vals <- stats::setNames(t$truth[match(needed, t$estimand)], needed)
       se <- stats::setNames(t$truth_se[match(needed, t$estimand)], needed)
+      # error bounds of numerical truths (NA when not stated); other kinds
+      # have none
+      kinds <- t$truth_kind[match(needed, t$estimand)]
+      err <- ifelse(kinds %in% "numeric", t$truth_error[match(needed, t$estimand)], 0)
       if (!length(ds)) {
-        out[[length(out) + 1L]] <- row(lab, check_one(vals, se, sc))
+        out[[length(out) + 1L]] <- row(lab, check_one(vals, se, sc, err))
         next
       }
       d <- if (!is.null(dtr)) dtr[dtr$scenario_key == key & dtr$estimand %in% ds, , drop = FALSE] else NULL
@@ -218,7 +251,9 @@ sim_check_identity <- function(run, identity, target = c("truth", "estimate"), t
         s <- se
         v[ds] <- dr$truth[match(ds, dr$estimand)]
         s[ds] <- 0
-        out[[length(out) + 1L]] <- row(lab, check_one(v, s, sc), replication = rp)
+        e2 <- err
+        e2[match(ds, needed)] <- 0
+        out[[length(out) + 1L]] <- row(lab, check_one(v, s, sc, e2), replication = rp)
       }
     }
   } else {
