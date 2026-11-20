@@ -70,3 +70,23 @@ test_that("symmetry is checked on the correlation scale", {
   ok[2, 3] <- ok[3, 2] <- 0.5
   expect_silent(sim_check_matrix(ok, "covariance"))
 })
+
+test_that("Weibull PH times follow the log scale oracle for extreme predictors", {
+  for (shape in c(0.5, 1, 1000)) for (lp in c(-1000, -5, 0, 5, 1000)) {
+    set.seed(11)
+    got <- sim_rweibull_ph(rep(lp, 5), lambda = 2, shape = shape)$event_time
+    set.seed(11)
+    u <- stats::runif(5)
+    want <- exp((log(-log(u)) - log(2) - lp) / shape)
+    expect_equal(got, want, tolerance = 1e-12, info = paste(shape, lp))
+  }
+  # a time beyond the largest double stays infinite, censored at a horizon
+  set.seed(1)
+  d <- sim_rweibull_ph(rep(-1000, 3), lambda = 1, shape = 1, horizon = 5)
+  expect_true(all(is.infinite(d$event_time)))
+  expect_true(all(d$status == 0L & d$time == 5))
+  # ordinary range: event proportion as before
+  set.seed(2)
+  d <- sim_rweibull_ph(rep(0, 4000), lambda = 0.1, shape = 1.5, horizon = 5)
+  expect_equal(mean(d$status), 1 - exp(-0.1 * 5^1.5), tolerance = 0.03)
+})

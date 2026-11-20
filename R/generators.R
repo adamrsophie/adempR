@@ -151,7 +151,10 @@ sim_rweibull_ph <- function(lp, lambda, shape, censoring_rate = 0, horizon = Inf
   }
   if (!is_scalar_number(horizon) || horizon <= 0) stopf("`horizon` must be positive.")
   n <- length(lp)
-  t_event <- (-log(stats::runif(n)) / (lambda * exp(lp)))^(1 / shape)
+  # inversion on the log time scale, exponentiated once: exp(lp) and the
+  # power would overflow or underflow for large |lp| even where the event
+  # time itself is representable
+  t_event <- exp((log(-log(stats::runif(n))) - log(lambda) - lp) / shape)
   t_cens <- if (censoring_rate > 0) stats::rexp(n, censoring_rate) else rep(Inf, n)
   time <- pmin(t_event, t_cens, horizon)
   data.frame(time = time, status = as.integer(t_event <= pmin(t_cens, horizon)),
