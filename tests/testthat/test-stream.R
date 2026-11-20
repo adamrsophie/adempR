@@ -64,3 +64,24 @@ test_that("accumulated fourth moments merge exactly", {
   m <- sim_accumulated(sim_merge(a, b))
   expect_equal(m$m4_x, mean((x - mean(x))^4), tolerance = 1e-10)
 })
+
+test_that("streamed and in-memory summaries agree at extreme scales", {
+  for (sc in c(1e-200, 1e200)) {
+    st <- sim_study("scale", scenarios = sim_scenarios(n = 5L),
+      generate = function(scenario, context) rnorm(scenario$n),
+      estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+      methods = list(m = function(data) sim_estimate("mean", mean(data) * sc)),
+      measures = c("bias", "empse"))
+    run <- sim_run(st, replications = 20, seed = 1, path = run_path())
+    a <- as.data.frame(sim_summarise(run, measures = c("bias", "empse")))
+    a <- a[a$measure %in% c("bias", "empse"), ]
+    b <- as.data.frame(sim_summarise_stream(run, measures = c("bias", "empse")))
+    b <- b[match(a$measure, b$measure), ]
+    expect_equal(b$value, a$value, tolerance = 1e-10)
+    expect_equal(b$mcse, a$mcse, tolerance = 1e-10)
+    expect_true(all(a$status == "ok") && all(b$status == "ok"))
+    # the MCSE of the bias is that of the unscaled estimates
+    e <- sim_results(run)$estimates$estimate
+    expect_equal(a$mcse[a$measure == "bias"] / sc, stats::sd(e / sc) / sqrt(20), tolerance = 1e-10)
+  }
+})

@@ -190,10 +190,36 @@ kernel_result <- function(value = NA_real_, mcse = NA_real_, lower = NA_real_,
 # Mean of independent contributions (bias, MAE, MSE, mean SE, width).
 k_mean <- function(x, level = 0.95) {
   fin <- is.finite(x)
-  k_mean_moments(n = length(x), mean = if (all(fin)) mean(x) else mean(x[fin]),
-                 var = if (sum(fin) > 1) stats::var(x[fin]) else NA_real_,
-                 pos_inf = sum(x == Inf, na.rm = TRUE), neg_inf = sum(x == -Inf, na.rm = TRUE),
-                 level = level)
+  xf <- x[fin]
+  # the variance on a common scale, so that it neither overflows nor
+  # underflows for very large or very small contributions
+  sc <- pow2_scale(xf)
+  xs <- xf / sc
+  scale_result(k_mean_moments(n = length(x), mean = if (length(xs)) mean(xs) else NA_real_,
+                              var = if (length(xs) > 1) stats::var(xs) else NA_real_,
+                              pos_inf = sum(x == Inf, na.rm = TRUE),
+                              neg_inf = sum(x == -Inf, na.rm = TRUE), level = level), sc)
+}
+
+# A power of two at or above the largest absolute value (1 when there is
+# none): dividing by it is exact, so scaled moments lose no precision.
+pow2_scale <- function(x) {
+  m <- if (length(x)) max(abs(x)) else 0
+  if (!is.finite(m) || m == 0) 1 else 2^min(ceiling(log2(m)), 1023)
+}
+
+# A kernel result computed on values divided by sc, scaled back. A value
+# or MCSE that no longer fits in double precision is reported as
+# overflow, not as a non-finite number with status ok.
+scale_result <- function(r, sc) {
+  if (sc == 1 || !r$status %in% c("ok", "boundary", "unstable", "insufficient")) return(r)
+  fin <- c(is.finite(r$value), is.finite(r$mcse))
+  for (f in c("value", "mcse", "lower", "upper")) r[[f]] <- r[[f]] * sc
+  if (any(fin & !c(is.finite(r$value), is.finite(r$mcse)))) {
+    return(kernel_result(n = r$n, status = "overflow",
+                         note = "the value or its MCSE exceeds the largest double"))
+  }
+  r
 }
 
 # The mean kernel from moments of the finite contributions and counts of
@@ -208,6 +234,10 @@ k_mean_moments <- function(n, mean, var, pos_inf = 0, neg_inf = 0, level = 0.95)
   if (n == 1L) {
     return(kernel_result(value = mean, n = n, status = "insufficient",
                          note = "MCSE needs at least 2 replications"))
+  }
+  if (!is.finite(mean) || !is.finite(var)) {
+    return(kernel_result(n = n, status = "overflow",
+                         note = "the moments of the contributions are not representable in double precision"))
   }
   s <- sqrt(var / n)
   z <- stats::qnorm(1 - (1 - level) / 2)
@@ -253,20 +283,12 @@ k_empse <- function(x, level = 0.95) {
   # moments on a common scale, so that squares and fourth powers of large
   # (or tiny) estimates neither overflow nor underflow; the SD and its
   # MCSE are scaled back at the end
-  sc <- if (length(xf)) max(abs(xf)) else 1
-  if (!is.finite(sc) || sc == 0) sc <- 1
+  sc <- pow2_scale(xf)
   xs <- xf / sc
   r <- k_empse_moments(n = length(x), var = if (length(xs) > 1) stats::var(xs) else NA_real_,
                        m4 = if (length(xs)) mean((xs - mean(xs))^4) else NA_real_,
                        nonfinite = sum(!fin), level = level)
-  if (is.finite(r$value) && r$value > 0) {
-    for (f in c("value", "mcse", "lower", "upper")) r[[f]] <- r[[f]] * sc
-    if (!is.finite(r$value) || (!is.na(r$mcse) && !is.finite(r$mcse))) {
-      return(kernel_result(n = length(x), status = "overflow",
-                           note = "the empirical SE or its MCSE exceeds the largest double"))
-    }
-  }
-  r
+  scale_result(r, sc)
 }
 
 # The empirical SE kernel from the variance and the fourth central moment

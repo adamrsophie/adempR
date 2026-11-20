@@ -120,9 +120,19 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
     k <- paste(cell, what, sep = "\r")
     a <- acc[[k]] %||% list(acc = sim_accumulator(), pos = 0, neg = 0, other = 0,
                             tmin = Inf, tmax = -Inf, levels = numeric(),
-                            units = if (anti) new.env(hash = TRUE, parent = emptyenv()), shift = NA_real_)
+                            units = if (anti) new.env(hash = TRUE, parent = emptyenv()), shift = NA_real_,
+                            sc = 1)
     fin <- is.finite(x)
-    a$acc <- sim_accumulate(a$acc, x[fin])
+    # the moments are accumulated on a power of two scale that covers every
+    # value seen, so squares and fourth powers of very large or very small
+    # contributions neither overflow nor underflow; rescaling by a power of
+    # two is exact
+    sc <- pow2_scale(x[fin])
+    if (a$acc$n == 0) a$sc <- sc else if (sc > a$sc) {
+      a$acc <- acc_rescale(a$acc, a$sc / sc)
+      a$sc <- sc
+    }
+    a$acc <- sim_accumulate(a$acc, x[fin] / a$sc)
     a$pos <- a$pos + sum(x == Inf, na.rm = TRUE)
     a$neg <- a$neg + sum(x == -Inf, na.rm = TRUE)
     a$other <- a$other + sum(is.na(x))
@@ -230,18 +240,20 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
       a <- acc[[paste(cl, what, sep = "\r")]]
       st <- if (is.null(a)) list(n = 0, mean_x = NA_real_, var_x = NA_real_, m4_x = NA_real_) else sim_accumulated(a$acc)
       n <- st$n + if (is.null(a)) 0 else a$pos + a$neg + a$other
+      sc <- if (is.null(a)) 1 else a$sc
       r <- if (!measure_applies(m, study$estimands[[en]]$type)) {
         kernel_result(status = "not_applicable",
                       note = sprintf("measure does not apply to a %s estimand", study$estimands[[en]]$type))
       } else switch(m,
         empse = {
-          r <- k_empse_moments(n, st$var_x, st$m4_x, if (is.null(a)) 0 else a$pos + a$neg + a$other, level)
+          r <- scale_result(k_empse_moments(n, st$var_x, st$m4_x,
+                                            if (is.null(a)) 0 else a$pos + a$neg + a$other, level), sc)
           if (varying) r$note <- paste(c("SD of the errors (data set truth)",
                                          if (!is.na(r$note)) r$note), collapse = "; ")
           r
         },
         coverage = {
-          r <- k_prop_counts(if (st$n) round(st$mean_x * st$n) else 0, n, level)
+          r <- k_prop_counts(if (st$n) round(st$mean_x * sc * st$n) else 0, n, level)
           lv <- if (is.null(meta)) numeric() else meta$levels
           r$note <- paste(c(if (length(lv) == 1L) paste("nominal level", format(lv)),
                             if (length(lv) > 1L) paste("intervals at several nominal levels:",
@@ -250,8 +262,8 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
           if (!nzchar(r$note)) r$note <- NA_character_
           r
         },
-        k_mean_moments(n, st$mean_x, st$var_x, if (is.null(a)) 0 else a$pos,
-                       if (is.null(a)) 0 else a$neg, level))
+        scale_result(k_mean_moments(n, st$mean_x, st$var_x, if (is.null(a)) 0 else a$pos,
+                                    if (is.null(a)) 0 else a$neg, level), sc))
       r <- unit_stream(r, a, m)
       out[[length(out) + 1L]] <- data.frame(scenario_key = k,
         scenario_id = study$scenarios$labels[match(k, keys)], method = mn, estimand = en,
@@ -262,4 +274,13 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
   out <- bind_rows(out)
   rownames(out) <- NULL
   out
+}
+
+# Moments of an unpaired accumulator after multiplying every value by f.
+acc_rescale <- function(acc, f) {
+  acc$mx <- acc$mx * f
+  acc$m2x <- acc$m2x * f^2
+  acc$m3x <- acc$m3x * f^3
+  acc$m4x <- acc$m4x * f^4
+  acc
 }
