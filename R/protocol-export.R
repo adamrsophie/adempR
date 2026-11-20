@@ -73,8 +73,12 @@ sim_protocol_export <- function(study, file, replications = NULL, overwrite = FA
   }
   if (code) out <- c(out, "Generator:", "", code_block(study$generator$fun), "")
   ed <- do.call(rbind, lapply(study$estimands, function(e) {
-    data.frame(id = e$id, quantity = e$quantity, population = e$population %||% "",
-               effect = e$effect, scale = e$scale, truth = e$truth$kind, stringsAsFactors = FALSE)
+    data.frame(id = e$id, type = e$type %||% "scalar", quantity = e$quantity %||% "",
+               population = e$population %||% "",
+               conditioning = paste(e$conditioning, collapse = ", "),
+               effect = e$effect %||% "", scale = e$scale %||% "", units = e$units %||% "",
+               horizon = if (is.null(e$horizon)) "" else paste(e$horizon, collapse = ", "),
+               truth = e$truth$kind, stringsAsFactors = FALSE)
   }))
   out <- c(out, "## 3. Estimands and other targets", "",
            paste0("Rationale: ", txt(p$estimand_rationale)), "", md_table(ed), "")
@@ -85,18 +89,51 @@ sim_protocol_export <- function(study, file, replications = NULL, overwrite = FA
   md <- do.call(rbind, lapply(names(study$methods), function(mn) {
     m <- study$methods[[mn]]
     data.frame(method = mn, role = m$role %||% "method", estimands = paste(m$estimands, collapse = ", "),
-               packages = paste(m$packages, collapse = ", "),
+               scenario_fields = paste(m$scenario_fields, collapse = ", "),
+               oracle = isTRUE(m$oracle), packages = paste(m$packages, collapse = ", "),
+               timeout = if (is.null(m$timeout)) "" else format(m$timeout),
+               coupling = m$coupling %||% "", gpu = isTRUE(m$gpu),
+               declares = if (length(m$declares)) txt(m$declares) else "",
                settings_source = m$settings_source %||% "",
                description = m$description %||% "", stringsAsFactors = FALSE)
   }))
   out <- c(out, "## 4. Methods", "", paste0("Rationale: ", txt(p$method_rationale)), "", md_table(md), "")
+  # every executable part of a method: the fit, how estimates are
+  # extracted, the fallback and fit diagnostics
   if (code) for (mn in names(study$methods)) {
-    out <- c(out, paste0("Method `", mn, "`:"), "", code_block(study$methods[[mn]]$fun), "")
+    m <- study$methods[[mn]]
+    out <- c(out, paste0("Method `", mn, "`:"), "", code_block(m$fun), "")
+    for (part in c("extract", "fallback", "diagnostics")) {
+      f <- m[[part]]
+      if (inherits(f, "adempr_method")) f <- f$fun
+      if (is.function(f)) out <- c(out, paste0("Method `", mn, "`, ", part, ":"), "", code_block(f), "")
+    }
   }
-  mi <- MEASURE_INFO[MEASURE_INFO$measure %in% names(study$measures), c("measure", "eligibility", "mcse_method")]
+  builtin <- intersect(names(study$measures), MEASURE_INFO$measure)
+  mi <- MEASURE_INFO[match(builtin, MEASURE_INFO$measure), c("measure", "eligibility", "mcse_method")]
+  mi$description <- rep("built in", nrow(mi))
+  custom <- Filter(function(m) inherits(m, "adempr_measure"), study$measures)
+  if (length(custom)) {
+    mi <- rbind(mi, do.call(rbind, lapply(custom, function(m) {
+      data.frame(measure = m$id, eligibility = paste("requires", paste(m$requires, collapse = ", ")),
+                 mcse_method = if (identical(m$aggregate, "mean")) "SD of the contributions / sqrt(n)" else
+                   "returned by the custom aggregate, if any",
+                 description = m$description %||% "custom measure", stringsAsFactors = FALSE)
+    })))
+  }
+  rownames(mi) <- NULL
   out <- c(out, "## 5. Performance measures", "", paste0("Rationale: ", txt(p$measure_rationale)), "",
-           md_table(mi), "",
-           paste0("Nominal level of intervals: ", study$level, "; significance level: ", study$alpha, "."), "",
+           md_table(mi), "")
+  if (code) for (m in custom) {
+    out <- c(out, paste0("Measure `", m$id, "`, contribution:"), "", code_block(m$contribution), "")
+    if (is.function(m$aggregate)) out <- c(out, paste0("Measure `", m$id, "`, aggregate:"), "",
+                                          code_block(m$aggregate), "")
+  }
+  out <- c(out,
+           paste0("Level of the Monte Carlo confidence intervals of the performance measures: ", study$level,
+                  ". Method intervals are evaluated at the level each method reports."),
+           paste0("Significance level for rejection when a method reports a p-value without its own: ",
+                  study$alpha, "."), "",
            "## 6. Other", "",
            "### Number of repetitions and Monte Carlo error", "",
            paste0("- Planned replications per scenario: ", if (is.null(replications)) na else replications),
@@ -104,8 +141,12 @@ sim_protocol_export <- function(study, file, replications = NULL, overwrite = FA
            paste0("- Precision targets (Monte Carlo SE): ", txt(p$precision_targets)), "",
            "### Handling of failures and missing results", "",
            paste0("- Plan: ", txt(p$failure_handling)),
-           paste0("- Retries: ", study$failure$retries, "; warnings: ", txt(study$failure$warnings),
-                  "; fallback: ", txt(study$failure$fallback)),
+           paste0("- Failure policy: nonconverged fits ", study$failure$nonconverged,
+                  "; fits with warnings ", study$failure$warnings,
+                  "; estimates at a boundary ", study$failure$boundary,
+                  "; infinite estimates ", study$failure$infinite,
+                  "; retries ", study$failure$retries,
+                  "; fallback results ", study$failure$fallback, "."),
            "- Data sets are never redrawn after a method fails.", "",
            "### Software, random numbers and retention", "",
            paste0("- R ", R.version$major, ".", R.version$minor, ", adempR ",
