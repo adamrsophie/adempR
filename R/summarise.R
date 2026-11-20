@@ -536,11 +536,14 @@ failure_table <- function(res) {
           method = mn, estimand = en, generated = n_gen, generation_failed = n_genfail,
           attempted = NROW(r), usable = sum(r$valid %in% TRUE),
           statuses = if (length(tab)) paste(names(tab), tab, sep = ":", collapse = ", ") else "",
-          # counted among outputs that pass the failure policy, so that a
-          # structurally valid SE of an excluded fit is not counted
+          # each output counted with the eligibility the measures use
+          # (measure_cell()): an SE with a usable point estimate; an
+          # interval or a test with an estimate status the failure policy
+          # admits for them, also without a point estimate
           se_valid = sum(r$valid %in% TRUE & r$se_status %in% "valid"),
-          interval_valid = sum(r$valid %in% TRUE & r$interval_status %in% "valid"),
-          test_valid = sum(r$valid %in% TRUE & r$test_status %in% "valid"),
+          interval_valid = sum(r$estimate_status %in% USABLE_FOR_INTERVAL &
+                                 r$interval_status %in% "valid"),
+          test_valid = sum(r$estimate_status %in% USABLE_FOR_INTERVAL & r$test_status %in% "valid"),
           with_warnings = sum(r$had_warning %in% TRUE),
           fallback_used = sum(r$fallback %in% TRUE),
           stringsAsFactors = FALSE)

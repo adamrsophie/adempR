@@ -278,3 +278,31 @@ test_that("only the limit's own error is a timeout, and extraction shares the li
   r <- adempR:::run_captured(function() repeat Sys.sleep(0.02), timeout = 0.1)
   expect_true(r$timed_out)
 })
+
+test_that("the failure table counts each output with the eligibility of its measures", {
+  mk <- function(method) sim_study("ftab", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) 0,
+    estimands = list(sim_estimand("mu", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = method), measures = c("bias", "coverage", "rejection", "mean_se"))
+  counts <- function(method) {
+    s <- sim_summarise(sim_run(mk(method), 6, 1, run_path(), progress = FALSE))
+    f <- attr(s, "failures")
+    s <- as.data.frame(s)
+    el <- stats::setNames(s$n_eligible, s$measure)
+    list(f = f, el = el)
+  }
+  # interval and test only
+  x <- counts(function(data) sim_estimate("mu", NA_real_, lower = -1, upper = 1, p_value = 0.2))
+  expect_equal(c(x$f$usable, x$f$interval_valid, x$f$test_valid), c(0, 6, 6))
+  expect_equal(x$f$interval_valid, x$el[["coverage"]])
+  expect_equal(x$f$test_valid, x$el[["rejection"]])
+  # point estimate and SE only
+  x <- counts(function(data) sim_estimate("mu", 0.1, se = 1))
+  expect_equal(c(x$f$usable, x$f$se_valid, x$f$interval_valid, x$f$test_valid), c(6, 6, 0, 0))
+  expect_equal(x$f$se_valid, x$el[["mean_se"]])
+  # nonconverged fits are excluded by the default policy from every count
+  x <- counts(function(data, context) sim_estimate("mu", 0.1, se = 1, lower = -1, upper = 1,
+                                                   p_value = 0.2, converged = context$replication > 2))
+  expect_equal(c(x$f$usable, x$f$se_valid, x$f$interval_valid, x$f$test_valid), c(4, 4, 4, 4))
+  expect_equal(unname(x$el[c("bias", "coverage", "rejection", "mean_se")]), c(4, 4, 4, 4))
+})
