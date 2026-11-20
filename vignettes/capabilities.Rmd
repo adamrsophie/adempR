@@ -85,6 +85,8 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Corrupt file detection, quarantine and rerun | verified | test-recovery.R |
 | Duplicate deduplication and conflict detection | verified | test-recovery.R |
 | Selective invalidation from stored fingerprints (method refit, truth and measure re-evaluation, DGP refusal, recorded revisions) | verified | test-replay-invalidation.R |
+| Refits that cannot regenerate the committed data set stop without changing results; failed regeneration rows never shadow the committed generation; a cached truth whose definition changed is recomputed only after an explicit refusal; declared generator packages are part of the data fingerprint | verified | test-regeneration.R, test-truth-cache.R, test-identity-2.R |
+| Task planning in one pass over the pending cells, with identical task identities, seeds and order | verified | test-planning-tasks.R (fresh, resumed, method addition, reordered scenarios) |
 | Replay of one replication: one generation, recorded generation failures, warning flags, checksum verified artifacts | verified | test-replay-invalidation.R |
 | Retention: artifacts indexed by method version; capability report from what was actually retained | verified | test-replay-invalidation.R |
 | Regeneration from an export bundle with the recorded stream registry | verified | test-bundle.R |
@@ -92,13 +94,14 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Batch by batch summaries for runs larger than memory (`sim_summarise_stream()`) | verified | test-stream.R (values, MCSEs, statuses and cells agree with `sim_summarise()` for bias, MSE, EmpSE, mean SE and coverage, including data set truths, boundaries and conflicting duplicates); memory still grows with the number of tasks |
 | A substream for resampling inside a method (`context$inner_seeds`) | verified | test-rng.R |
 | Warning for code that resets the seed and for packages loaded from source or traced | verified | test-methods-extra.R, test-rng.R |
-| Reproduction and seed sensitivity checks between two runs (`sim_verify()`) | verified | test-verify.R (complete key sets, all outcomes, infinite limits, boundary proportions) |
-| Method settings tuned on calibration streams (`sim_calibrate_method()`), with MCSE, weights and failing settings | verified | test-calibrate.R |
+| Reproduction and seed sensitivity checks between two runs (`sim_verify()`), comparing every stored table (estimates, attempts, replications, records, diagnostics, data set truths) by a declared schema and listing the fields left out | verified | test-verify.R (complete key sets, all outcomes, infinite limits, boundary proportions, changed diagnostics detected) |
+| Method settings tuned on calibration streams (`sim_calibrate_method()`), with MCSE, weights and failing settings; an error when no scenario with a positive weight has a loss | verified | test-calibrate.R |
 | Longest first scheduling (`sim_run(cost = )`) without changing results | verified | test-recovery.R |
 | Production runs protected from changes that alter results | verified | test-recovery.R |
+| Antithetic pairs as the independent unit in every summary path (`n_units`; closed form MCSE for measures that are means, delete-one-pair jackknife otherwise; exact interval from the number of pairs when every pair mean is equal) | verified | test-units.R (explicit delete-one-pair oracle for complete and incomplete pairs, linear and nonlinear measures; weighted, streamed, grid, decomposition, reference and seed checks) |
 | Common random numbers across scenarios, antithetic pairs, control variates | verified | test-variance-reduction.R (shared draws, antithetic negation, pair means that vary, incomplete pairs counted, variance reduction of a control variate, no adjustment on a selected subset) |
 | Adaptive allocation of replications across scenarios (`sim_run_adaptive()`) | verified | test-adaptive.R (extra replications equal those of a plain run; zero and undefined MCSEs unresolved) |
-| Blinded evaluation: coded data export of the committed cohort, key kept apart, external results joined by task, blinded report | verified | test-blind.R (identical data sets keep their own answers; names absent from the report) |
+| Blinded evaluation: coded data export of the committed cohort, key kept apart, external results joined by task, blinded report | verified | test-blind.R (identical data sets keep their own answers; names absent from the report; a key inside the export directory is refused after resolving dot segments and symbolic links, and an existing key file is never overwritten) |
 | Living benchmarks: methods added to an existing run, leaderboard | verified | test-living.R (repeated additions from a stale handle) |
 | GPU device assignment (`sim_method(gpu = TRUE)`, `sim_run(gpus = )`) | experimental | test-gpu.R checks the device variable and its restoration; no GPU hardware was used |
 
@@ -106,7 +109,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Bias, MAE, MSE, RMSE, empirical SE, mean SE, RMVAR and their MCSEs | verified | test-measures.R (hand calculations) |
+| Bias, MAE, MSE, RMSE, empirical SE, mean SE, RMVAR and their MCSEs | verified | test-measures.R (hand calculations; empirical SE computed on a common scale for estimates near the largest or smallest double, status `overflow` when not representable) |
 | Relative error in model SE (jackknife MCSE; the normal theory MCSE of Morris et al. Table 6 in the note) | verified | test-measures.R; point estimate and normal theory MCSE agree with rsimsum in test-normal-mean.R |
 | Coverage, noncoverage, rejection, usable proportion with exact intervals | verified | test-measures.R, test-normal-mean.R |
 | Bias-eliminated coverage (jackknife over whole replications), also for a fixed unknown truth | verified | test-measures.R (hand computed jackknife) |
@@ -118,12 +121,12 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Equivalence margins, ratio margins around 1 | implemented; validation and boundary cases tested | test-compare.R |
 | Pareto view | verified | test-compare.R |
 | Weighted summaries over scenarios (Bonferroni exact bounds at the boundary), overall or within factor levels | verified | test-measures.R (hand computed averages and MCSEs within levels) |
-| Ranking of methods with paired bootstrap probabilities and Kendall distance (`sim_rank()`) | verified | test-rank.R |
+| Ranking of methods with paired bootstrap probabilities and Kendall distance (`sim_rank()`); rankings that an uncertain truth can reverse are labeled after a joint shift of the shared truth over its error range | verified | test-rank.R (a Monte Carlo truth that reverses first place gives status `truth_sensitive`; a precise truth does not) |
 | Interval score (Gneiting and Raftery), optionally scaled by a number or a positive column | verified | test-measures-extra.R (hand calculation, scaled at a truth other than 1, unbounded sides) |
 | Bias decomposition against a secondary reference value evaluated as a truth, with MCSEs of every part | verified | test-decompose.R |
-| Algebraic identity checks between estimands on truths and estimates, with relative tolerance, truth errors and unavailable units | verified | test-decompose.R |
-| Descriptive meta-model of factor influence (`sim_factor_influence()`) | implemented | test-metamodel.R (attribution to the driving factor, shares sum to one); descriptive only |
-| Simulation-based calibration of Bayesian methods (`sim_method_sbc()`, `sim_sbc()`) | verified | test-sbc.R (exact posterior accepted, overconfident posterior rejected, point mass ties and exact discrete bin probabilities) |
+| Algebraic identity checks between estimands on truths and estimates, with a tolerance in residual units, an optional scale for relative tolerances, stated truth error bounds added to the allowed residual, and unavailable units | verified | test-decompose.R, test-identity-2.R |
+| Descriptive meta-model of factor influence (`sim_factor_influence()`), judged on the cells left after exclusions, with a status and the factors dropped | implemented | test-metamodel.R (attribution to the driving factor, shares sum to one, a factor that stops varying after exclusions is dropped); descriptive only |
+| Simulation-based calibration of Bayesian methods (`sim_method_sbc()`, `sim_sbc()`), for every scenario with counts of planned, excluded, failed and rankless replications | verified | test-sbc.R (exact posterior accepted, overconfident posterior rejected, point mass ties and exact discrete bin probabilities, scenarios without ranks reported) |
 | Acceptability against a range, with the Monte Carlo interval or a sequential run's monitoring interval (`sim_acceptable()`); the default type I error range only where the null holds | verified | test-flow.R |
 | Mergeable accumulators | verified | test-measures.R |
 
@@ -134,7 +137,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Replication planning formulas | verified | test-measures.R |
 | Pilot studies with cost and precision projections, scheduled for the eligible share | implemented; targets, requirement bounds and eligibility tested | test-design.R |
 | Sequential stopping with error spending over looks and cells | verified | test-nested-sequential.R (simultaneous coverage by simulation; runner intervals recomputed with `binom.test()` for four cells and two looks; stored design and prefix) |
-| Time-uniform confidence sequences (`sim_confidence_sequence()`) | verified for the exact sequence | test-confseq.R (exact sequences contain fixed sample intervals; time uniform error below alpha by simulation with the tuning fixed at the first look); the asymptotic sequence is implemented |
+| Time-uniform confidence sequences (`sim_confidence_sequence()`), with the tuning recorded in the run and a refusal of coverage and MSE against an approximate truth (bias against a bounded numerical truth is widened by the bound) | verified for the exact sequence | test-confseq.R (exact sequences contain fixed sample intervals; time uniform error below alpha by simulation with the tuning fixed at the first look); the asymptotic sequence is implemented |
 | DGP checks | verified | test-generators.R |
 | Diagnostics: outliers, repeated data sets, test and interval disagreement, degenerate estimates | verified | test-measures.R |
 | Plots (zip plot with Monte Carlo band and null version, Bland-Altman agreement, intervals by true value including unbounded limits) | implemented; caller state, distinct methods and eligible levels tested | test-report-plots.R |
@@ -166,6 +169,22 @@ than that. Larger chunks reduce the commit cost. These are single runs on
 one machine, not a controlled comparison; rerun the script on your own
 hardware with `Rscript inst/benchmarks/overhead.R 200`.
 
+Two analysis paths were also timed before and after they were rewritten
+(medians of three runs on the same laptop; seconds):
+
+| Replications | Task planning before | after | Pair jackknife (MSE) before | after |
+|---|---|---|---|---|
+| 1,000 | | | 0.300 | 0.002 |
+| 2,000 | 0.236 | 0.130 | 1.270 | < 0.001 |
+| 4,000 | 0.253 | 0.067 | 4.540 | 0.001 |
+| 8,000 | 0.701 | 0.158 | 17.296 | 0.002 |
+| 16,000 | 3.799 | 0.330 | | |
+| 32,000 | 10.720 | 0.771 | | |
+
+Planning time now grows linearly with the number of replications
+instead of quadratically; the jackknife MCSEs agree with the direct
+pair calculation to within 2e-16.
+
 ## Known limitations
 
 * Methods that set their own seeds or use a random number generator other
@@ -183,3 +202,10 @@ hardware with `Rscript inst/benchmarks/overhead.R 200`.
   cannot be checked and must be released with `sim_unlock()`.
 * Export bundles contain R code; their checksums detect corruption, not
   tampering.
+* The pending task list of a run (scenario, replication, methods and
+  stream seeds) is built in memory before execution, about 1.4 KiB per
+  task; `chunk_size` limits what is executed and committed at once, not
+  this list.
+* Ranking probabilities from `sim_rank()` are conditional on the reported
+  truth; with an uncertain truth only the sensitivity of first place is
+  assessed, not a joint probability.

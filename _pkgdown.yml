@@ -27,6 +27,7 @@ articles:
   - failures-and-denominators
   - rng-and-reproducibility
   - execution-and-recovery
+  - data-generation
 - title: Analysis
   navbar: Analysis
   contents:
@@ -34,6 +35,7 @@ articles:
   - comparisons
   - planning-and-sequential
   - diagnostics-and-reporting
+  - advanced-analyses
 - title: Examples and context
   navbar: Examples and context
   contents:

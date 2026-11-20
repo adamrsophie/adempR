@@ -1,0 +1,345 @@
+---
+title: "Advanced analyses and workflow tools"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Advanced analyses and workflow tools}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+This vignette describes the analyses that go beyond the standard table
+of performance measures: functional and categorical estimands, scoring
+rules, checks of the truth and of known performance, rankings, verdicts
+against acceptable ranges, the influence of design factors, anytime
+valid monitoring, adaptive allocation, analyses of very large runs,
+simulation based calibration, tuning of method settings, blinded
+external analysis, and the tools that manage a study and its runs.
+
+A small study is used throughout.
+
+```{r}
+study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L), sd = c(1, 3)),
+  generate = function(scenario, context) rnorm(scenario$n, 0, scenario$sd),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(
+    mean = function(data) {
+      tt <- t.test(data)
+      sim_estimate("mean", mean(data), se = sd(data) / sqrt(length(data)),
+                   lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95,
+                   p_value = tt$p.value, null = 0)
+    },
+    median = function(data) sim_estimate("mean", median(data))),
+  measures = c("bias", "empse", "mse", "coverage", "rejection"))
+run <- sim_run(study, replications = 60, seed = 1, path = tempfile("adempR-run-"))
+```
+
+`sim_summarize()` is an alias of `sim_summarise()`.
+
+```{r}
+s <- as.data.frame(sim_summarize(run, measures = "bias"))
+s[s$measure == "bias", c("scenario_id", "method", "value", "mcse")]
+```
+
+## Curves and other functionals on a grid
+
+An estimand defined on a grid of points (a survival curve, a dose
+response, a quantile function) is declared with `sim_estimand_grid()`;
+methods return all points with `sim_estimate_grid()`, and
+`sim_summarise_grid()` gives each measure per point together with its
+average over the grid. Every point keeps its own eligibility and status:
+an infinite estimate at one point is reported, not dropped.
+
+```{r}
+grid <- c(0.5, 1, 2)
+curve <- sim_study("curve", scenarios = sim_scenarios(n = 100L, rate = 0.5),
+  generate = function(scenario, context) rexp(scenario$n, scenario$rate),
+  estimands = sim_estimand_grid("surv", grid,
+    truth = function(scenario, at) exp(-scenario$rate * at)),
+  methods = list(empirical = function(data) {
+    sim_estimate_grid("surv", grid, vapply(grid, function(t) mean(data > t), numeric(1)))
+  }))
+run_curve <- sim_run(curve, replications = 30, seed = 1, path = tempfile("adempR-run-"))
+sim_summarise_grid(run_curve, "surv", "bias")
+```
+
+## Categorical estimands
+
+An estimand of type `"categorical"` is a class coded as a number, such as
+a selected model. `sim_measures_categorical()` gives the proportion of
+correct selections, the proportion choosing each declared class, and
+the proportion of outputs outside the declared classes, each with an
+exact interval.
+
+```{r}
+select <- sim_study("select", scenarios = sim_scenarios(n = c(20L, 200L)),
+  generate = function(scenario, context) rnorm(scenario$n, 0.3),
+  estimands = list(sim_estimand("model", type = "categorical",
+                                truth = sim_truth_exact(function(scenario) 2))),
+  methods = list(test = function(data) {
+    sim_estimate("model", if (t.test(data)$p.value < 0.05) 2 else 1)
+  }),
+  measures = sim_measures("usable", sim_measures_categorical(1:2, c("null", "alt"))))
+run_select <- sim_run(select, replications = 40, seed = 1, path = tempfile("adempR-run-"))
+s <- as.data.frame(sim_summarise(run_select))
+s[s$measure != "usable", c("scenario_id", "measure", "value", "lower", "upper")]
+```
+
+## Interval score
+
+The interval score of Gneiting and Raftery rewards narrow intervals and
+penalizes misses in proportion to their distance; lower is better. Pass
+it to `sim_measures()` with other measures.
+
+```{r}
+scored <- sim_study("scored", scenarios = study$scenarios, generate = study$generator,
+  estimands = study$estimands, methods = study$methods["mean"],
+  measures = sim_measures("coverage", sim_measure_interval_score()))
+run_scored <- sim_run(scored, replications = 40, seed = 1, path = tempfile("adempR-run-"))
+s <- as.data.frame(sim_summarise(run_scored))
+s[s$measure == "interval_score", c("scenario_id", "value", "mcse")]
+```
+
+## Decomposing bias against another reference
+
+`sim_bias_decomposition()` splits the bias against the declared truth
+into the bias against another reference (what the method actually
+estimates) and the difference between the two references. Here the
+sample mean of log normal data is consistent for the population mean,
+not for the median that was declared as the truth.
+
+```{r}
+lognormal <- sim_study("lognormal", scenarios = sim_scenarios(n = 50L, mu = 0),
+  generate = function(scenario, context) exp(rnorm(scenario$n, scenario$mu)),
+  estimands = list(sim_estimand("median", sim_truth_exact(function(scenario) exp(scenario$mu)))),
+  methods = list(mean = function(data) sim_estimate("median", mean(data))))
+run_ln <- sim_run(lognormal, replications = 100, seed = 1, path = tempfile("adempR-run-"))
+sim_bias_decomposition(run_ln, function(scenario) exp(scenario$mu + 0.5),
+                       label = "population mean")
+```
+
+## Identities between estimands
+
+When estimands are linked by an identity (here the log of one is the
+other), `sim_check_identity()` checks it on the truths or on the
+estimates of every replication. The tolerance is stated in the units of
+the residual; `scale` turns it into a relative tolerance (a number, or a
+function of the inputs), and a numerical truth's stated error bound is
+added to the allowed residual.
+
+```{r}
+ratio <- sim_study("ratio", scenarios = sim_scenarios(n = 40L, mu = 1),
+  generate = function(scenario, context) rexp(scenario$n, 1 / scenario$mu),
+  estimands = list(
+    sim_estimand("mean", sim_truth_exact(function(scenario) scenario$mu)),
+    sim_estimand("log_mean", sim_truth_exact(function(scenario) log(scenario$mu)))),
+  methods = list(mle = function(data) list(sim_estimate("mean", mean(data)),
+                                        sim_estimate("log_mean", log(mean(data))))))
+run_ratio <- sim_run(ratio, replications = 20, seed = 1, path = tempfile("adempR-run-"))
+id <- sim_check_identity(run_ratio, function(mean, log_mean) log(mean) - log_mean,
+                         target = "estimate")
+head(id[, c("replication", "residual", "allowed", "status")], 3)
+```
+
+## Known performance as a check
+
+A method whose performance is known from theory can declare it with
+`sim_method(reference = )`. `sim_check_reference()`, also run by
+`sim_diagnose()`, flags cells where the estimate disagrees beyond Monte
+Carlo error, which points to a bug in the generator, the truth or the
+evaluation. With antithetic pairs the check uses the pairs.
+
+```{r}
+checked <- sim_study("checked", scenarios = sim_scenarios(n = 20L),
+  generate = function(scenario, context) rnorm(scenario$n),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(mean = sim_method(function(data) {
+    tt <- t.test(data)
+    sim_estimate("mean", mean(data), lower = tt$conf.int[1], upper = tt$conf.int[2], level = 0.95)
+  }, reference = c(bias = 0, coverage = 0.95))),
+  measures = c("bias", "coverage"))
+run_checked <- sim_run(checked, replications = 100, seed = 1, path = tempfile("adempR-run-"))
+sim_check_reference(run_checked)
+```
+
+## Ranking methods
+
+`sim_rank()` ranks methods per scenario on the replications where all of
+them have a usable result, with a paired bootstrap for the probability
+of first place and the mean rank. The bootstrap holds the truth fixed;
+when the truth is a Monte Carlo or numerical approximation, the output
+says so (`truth_conditional`, `truth_halfwidth`) and shifts the truth,
+which every method shares, jointly over its error range. A cell whose
+first place changes within that range gets status `truth_sensitive`.
+
+```{r}
+rk <- sim_rank(run, "mse", B = 200)
+rk[, c("scenario_id", "method", "rank", "p_first", "truth_conditional", "status")]
+```
+
+## Verdicts against an acceptable range
+
+`sim_acceptable()` classifies each cell as `inside`, `outside` or
+`uncertain` relative to an acceptable range, taking the Monte Carlo
+interval into account. For the rejection rate under the null the default
+is Bradley's liberal criterion.
+
+```{r}
+sim_acceptable(run, "rejection")[, c("scenario_id", "method", "value", "verdict")]
+```
+
+## Influence of design factors
+
+`sim_factor_influence()` fits a weighted metamodel of a measure on the
+scenario factors and reports how much of the variation between
+scenarios each factor explains. Exclusions are applied first; a factor
+that no longer varies among the remaining cells is reported as dropped.
+
+```{r}
+sim_factor_influence(run, "empse", method = "mean")
+```
+
+## Monitoring with confidence sequences
+
+A confidence sequence is valid at every number of replications at once,
+so a run can be looked at repeatedly and stopped at any time. The tuning
+is recorded in the run at the first call and reused afterwards. A Monte
+Carlo truth, or a numerical truth with a nonzero error bound, is refused
+for coverage and MSE, since the guarantee would hold only for the
+approximate reference value.
+
+```{r}
+cs <- sim_confidence_sequence(run, "coverage")
+cs[, c("scenario_id", "method", "n", "estimate", "lower", "upper", "type")]
+```
+
+## Adaptive allocation of replications
+
+`sim_run_adaptive()` runs a pilot, estimates the replications each
+scenario needs for a target MCSE, and adds them in rounds up to a cap.
+Each scenario keeps its own random number streams, so the result is
+the same as a run with those numbers of replications.
+
+```{r}
+adaptive <- sim_run_adaptive(study, "bias", target = 0.1, seed = 1,
+                             path = tempfile("adempR-run-"), initial = 20,
+                             max_replications = 200)
+adaptive$allocation
+```
+
+## Very large runs
+
+`sim_summarise_stream()` reads one committed batch at a time and
+accumulates the moments each measure needs, so memory does not grow with
+the size of the stored results. Values, MCSEs and statuses agree with
+`sim_summarise()` up to rounding.
+
+```{r}
+st <- sim_summarise_stream(run, measures = c("bias", "empse"))
+head(as.data.frame(st)[, c("scenario_id", "method", "measure", "value", "mcse")])
+```
+
+Scenarios can also be split across machines. `sim_shard_scenarios()`
+says which scenarios a shard owns, `sim_run_shard()` runs them, and
+`sim_collect_shards()` merges the shards into one run after checking
+that they belong to the same study and seed.
+
+```{r}
+sim_shard_scenarios(study, shard = 1, n_shards = 2)
+parent <- tempfile("adempR-shards-")
+for (k in 1:2) sim_run_shard(study, k, 2, replications = 10, seed = 1, path = parent)
+merged <- sim_collect_shards(study, 2, replications = 10, seed = 1, path = parent,
+                             into = tempfile("adempR-run-"))
+```
+
+## Simulation based calibration
+
+For a Bayesian method, `sim_method_sbc()` wraps a function returning
+posterior draws: the estimate is the posterior mean, the interval a
+central credible interval, and the rank of the truth among the draws is
+stored. With a data set truth drawn from the prior, `sim_sbc()` tests
+that the ranks are uniform in every scenario.
+
+```{r}
+sbc <- sim_study("sbc", scenarios = sim_scenarios(n = 10L),
+  generate = function(scenario, context) {
+    mu <- rnorm(1)
+    sim_data(rnorm(scenario$n, mu), truth = list(mu = mu))
+  },
+  estimands = list(sim_estimand("mu", sim_truth_dataset())),
+  methods = list(exact = sim_method_sbc(function(data) {
+    n <- length(data)
+    rnorm(200, sum(data) / (n + 1), sqrt(1 / (n + 1)))
+  }, "mu")))
+run_sbc <- sim_run(sbc, replications = 60, seed = 1, path = tempfile("adempR-run-"))
+sim_sbc(run_sbc, "exact")
+```
+
+## Tuning method settings on separate streams
+
+Choosing a tuning parameter on the data used for evaluation favors it.
+`sim_calibrate_method()` evaluates a grid of settings on data drawn from
+a separate stream family, so the production run never sees the data used
+for tuning. Scenarios with zero weight, or where no setting has a loss,
+are left out and named; when nothing is left the call is an error
+instead of choosing a setting arbitrarily.
+
+```{r}
+heavy <- sim_study("heavy", scenarios = sim_scenarios(n = 30L),
+  generate = function(scenario, context) rt(scenario$n, df = 3),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(mean = function(data) sim_estimate("mean", mean(data))))
+cal <- sim_calibrate_method(heavy,
+  method = function(trim) function(data) sim_estimate("mean", mean(data, trim = trim)),
+  grid = list(trim = c(0, 0.1, 0.2)), measure = "mse", replications = 50, seed = 7)
+cal$best
+```
+
+## Blinded external analysis
+
+`sim_export_blinded()` writes the data sets of a run under random codes
+that reveal neither the scenario nor the replication, with the key kept
+outside the export directory. Analysts return one row per code and
+estimand, and `sim_external_method()` turns the rows into a method of the
+study; each data set is matched by its checksum.
+
+```{r}
+dir <- tempfile("adempR-blind-")
+key <- sim_export_blinded(run, dir, seed = 1)
+files <- list.files(file.path(dir, "data"))
+returned <- do.call(rbind, lapply(files, function(f) {
+  data.frame(code = sub("\\.rds$", "", f), estimand = "mean",
+             estimate = mean(readRDS(file.path(dir, "data", f)), trim = 0.1))
+}))
+ext <- sim_external_method(returned, paste0(dir, "-key.rds"), description = "returned by analysts")
+with_ext <- sim_study("demo", scenarios = study$scenarios, generate = study$generator,
+  estimands = study$estimands, methods = c(study$methods, list(external = ext)),
+  measures = study$measures)
+run_ext <- sim_run(with_ext, replications = 60, seed = 1, path = run$path)
+s <- as.data.frame(sim_summarise(run_ext, measures = "bias"))
+s[s$measure == "bias", c("scenario_id", "method", "value", "mcse")]
+```
+
+## Managing a study and its runs
+
+`sim_fingerprint()` gives the fingerprint of a study (the hash of
+everything that determines its results), `sim_protocol_export()` writes
+the protocol in the ADEMP-PreReg section order, `sim_open()` opens a
+stored run, and `sim_capabilities()` says which analyses the retained
+outputs still allow.
+
+```{r}
+sim_fingerprint(study)
+f <- tempfile(fileext = ".md")
+sim_protocol_export(study, f, replications = 60)
+head(readLines(f), 5)
+reopened <- sim_open(run$path)
+sim_capabilities(reopened)
+```

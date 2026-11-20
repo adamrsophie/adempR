@@ -173,7 +173,7 @@ another machine.
 | `bias`, `mae`, `mse` | usable estimate and truth | sample SD of contributions over sqrt(n) |
 | `relbias` | usable estimate, nonzero truth | MCSE(bias) / truth; delta method for varying truth |
 | `rmse` | usable estimate and truth | delta method |
-| `empse` | usable estimate (errors, for a data set truth) | kurtosis based variance of the sample variance |
+| `empse` | usable estimate (errors, for a data set truth) | kurtosis based variance of the sample variance, on a common scale; status `overflow` when not representable |
 | `mean_se`, `rmvar` | usable estimate with a valid standard error | mean, or delta method |
 | `se_ratio` | usable estimate with a valid standard error | jackknife (the normal theory value of Morris et al. 2019 is in the note) |
 | `coverage`, `noncoverage_lower`, `noncoverage_upper` | valid interval and truth | binomial, with Clopper-Pearson interval |
@@ -191,7 +191,9 @@ a nonlinear aggregate unless one is supplied. Comparisons add paired
 differences of bias, MAE, MSE, coverage, width, rejection and the usable
 proportion, and relative precision (paired bootstrap MCSE, with the
 normal theory value in the note). Printed summaries show each value to
-the precision its MCSE supports.
+the precision its MCSE supports. With antithetic pairs every MCSE comes
+from the pairs, and the number of independent units is reported as
+`n_units`.
 
 ## Documentation
 
@@ -206,10 +208,17 @@ manual and these articles:
   (logistic regression with separation)
 - [Random numbers and reproducibility](https://adamrsophie.github.io/adempR/articles/rng-and-reproducibility.html)
 - [Execution, recovery and replay](https://adamrsophie.github.io/adempR/articles/execution-and-recovery.html)
+- [Generating data and reducing Monte Carlo error](https://adamrsophie.github.io/adempR/articles/data-generation.html)
+  (generator helpers, calibration, plasmode data, common random numbers,
+  antithetic pairs, control variates)
 - [Performance measures and Monte Carlo error](https://adamrsophie.github.io/adempR/articles/performance-measures.html)
 - [Comparing methods](https://adamrsophie.github.io/adempR/articles/comparisons.html)
 - [Planning replications and sequential stopping](https://adamrsophie.github.io/adempR/articles/planning-and-sequential.html)
 - [Diagnostics and reporting](https://adamrsophie.github.io/adempR/articles/diagnostics-and-reporting.html)
+- [Advanced analyses and workflow tools](https://adamrsophie.github.io/adempR/articles/advanced-analyses.html)
+  (curves, categorical estimands, identity and reference checks, rankings,
+  confidence sequences, adaptive runs, SBC, tuning, blinded analysis,
+  shards)
 - [Worked examples](https://adamrsophie.github.io/adempR/articles/examples.html):
   clustered data, survival at a horizon, missing data, meta-analysis,
   noncompliance (ITT and CACE)

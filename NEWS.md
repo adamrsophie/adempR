@@ -69,22 +69,27 @@ First release.
 * Generators: per replication records of realized properties, plasmode
   resampling of real covariates, a Gaussian copula with arbitrary margins,
   and calibration of a censoring rate to a target proportion.
-* Analysis: method rankings with bootstrap probabilities, a leaderboard,
+* Analysis: method rankings with bootstrap probabilities that state when
+  they hold only for an uncertain truth (and whether that truth can
+  reverse first place), a leaderboard,
   bias decomposition against a secondary reference value with MCSEs of
-  every part, identity checks between estimands with relative tolerances
+  every part, identity checks between estimands with tolerances in residual
+  units, optional relative scales, stated truth error bounds,
   and pass, fail or unavailable statuses, a descriptive meta-model of factor influence, the
   interval score, weighted summaries within factor levels, time-uniform
   confidence sequences, simulation-based calibration of Bayesian methods,
   and batch by batch summaries for runs larger than memory.
 * Variance reduction and allocation: common random numbers across
-  scenarios, antithetic pairs analyzed by pair, control variates from
-  recorded quantities,
+  scenarios, antithetic pairs analyzed by pair in every summary (the
+  number of independent units is reported, and proportions whose pair
+  means are all equal get an exact interval from the pairs), control
+  variates from recorded quantities with the coefficient from the units,
   and adaptive allocation of replications to the scenarios that need them.
 * Workflow: protocol export in the ADEMP-PreReg section order, blinded
   evaluation (coded export of the committed data with the key stored
   apart, external results joined by scenario and replication, a report
   with blinded method names), reproduction and seed sensitivity
-  checks between runs, sharded runs for cluster array jobs, living
+  checks between runs over every stored table, sharded runs for cluster array jobs, living
   benchmarks that add methods to an existing run, longest first
   scheduling, and protection of production runs from changes that alter
   their results. Bland-Altman and interval by truth plots.

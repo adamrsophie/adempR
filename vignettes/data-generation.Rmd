@@ -1,0 +1,200 @@
+---
+title: "Generating data and reducing Monte Carlo error"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Generating data and reducing Monte Carlo error}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(adempR)
+```
+
+This vignette covers the data-generating side of a study: the generator
+object, scenario designs given as a table, helpers for correlated
+covariates, calibration of model parameters to a target, contamination
+and plasmode data, and the three ways adempR reduces Monte Carlo error
+(common random numbers, antithetic pairs and control variates).
+
+## The generator object
+
+A plain function `function(scenario, context)` is enough for most
+studies. `sim_generator()` wraps it with a check of impossible scenarios,
+a version label, declared dependencies and packages (all part of the
+fingerprint of the data), a description for the protocol, and a `record`
+function that stores realized properties of each data set.
+
+```{r}
+gen <- sim_generator(
+  function(scenario, context) {
+    x <- rbinom(scenario$n, 1, 0.5)
+    data.frame(x = x, y = rnorm(scenario$n, scenario$effect * x))
+  },
+  check = function(scenario) if (scenario$n < 4) stop("need at least 4 observations"),
+  record = function(data, meta) c(treated = mean(data$x)),
+  description = "two arm trial with normal outcomes")
+gen$description
+```
+
+The recorded values come back as `records` in `sim_results()` and are
+summarized by `sim_diagnose()`, so a mechanism that drifts from its
+intended targets (realized censoring, events, balance) is visible.
+
+## Scenario designs from a table
+
+A full factorial grid comes from `sim_scenarios()`. A design that is not
+a grid (a fractional design, a list of configurations taken from the
+literature) is given as a data frame, one row per scenario.
+
+```{r}
+design <- data.frame(n = c(20L, 50L, 200L), effect = c(0.8, 0.5, 0.2))
+sc <- sim_scenarios_table(design)
+as.data.frame(sc)
+```
+
+## Correlated covariates
+
+`sim_check_matrix()` verifies that a correlation or covariance matrix is
+symmetric and positive semidefinite, and reports the smallest
+eigenvalue when it is not, before anything is simulated.
+
+```{r}
+sigma <- matrix(c(1, 0.6, 0.6, 1), 2)
+sim_check_matrix(sigma)
+try(sim_check_matrix(matrix(c(1, 0.9, 0.9, 0.9, 1, -0.9, 0.9, -0.9, 1), 3)))
+```
+
+`sim_rmvnorm()` draws multivariate normal vectors, and `sim_rcopula()`
+draws variables with arbitrary margins joined by a Gaussian copula, given
+as quantile functions.
+
+```{r}
+set.seed(1)
+x <- sim_rmvnorm(1000, c(0, 0), sigma)
+round(cor(x), 2)
+d <- sim_rcopula(1000, list(age = function(p) qnorm(p, 60, 10),
+                            smoker = function(p) qbinom(p, 1, 0.3)), sigma)
+round(cor(d, method = "spearman"), 2)
+```
+
+Inside a generator these use the stream the execution layer assigned, so
+they are reproducible like any other draw.
+
+## Calibrating parameters to a target
+
+A target such as an event proportion of 20% or a censoring proportion of
+30% is reached by solving for a parameter on a large calibration sample.
+The result reports the achieved value and its Monte Carlo SE, so the
+calibration error is known; plug the solved value into the scenario.
+
+```{r}
+cal <- sim_calibrate_intercept(0.2, function(n) 0.8 * rnorm(n), n = 1e5, seed = 1)
+cal[c("intercept", "achieved", "achieved_se")]
+cens <- sim_calibrate_censoring(0.3, function(n) {
+  sim_rweibull_ph(rnorm(n), lambda = 0.1, shape = 1.5)$event_time
+}, horizon = 10, seed = 1)
+cens[c("rate", "achieved", "minimum")]
+```
+
+## Contamination and plasmode data
+
+`sim_contaminate()` replaces a proportion of values with draws from a
+wider distribution and marks which values were replaced, for studies of
+robustness.
+
+```{r}
+set.seed(4)
+y <- sim_contaminate(rnorm(100), prop = 0.1, scale = 10)
+sum(attr(y, "contaminated"))
+```
+
+`sim_plasmode()` resamples the rows of a real data set and optionally
+replaces the outcome with one simulated from a known model, so the
+covariate structure is realistic and the truth is known.
+
+```{r}
+set.seed(1)
+pm <- sim_plasmode(mtcars, n = 50, outcome = function(d) {
+  rbinom(nrow(d), 1, plogis(-1 + 0.5 * d$am + 0.02 * (d$hp - 150)))
+})
+head(pm[, c("am", "hp", "y")], 3)
+```
+
+## Data identity
+
+Every committed replication stores a checksum of its data set
+(`data_md5` in the replication table). The same function is exported, so
+a data set regenerated elsewhere can be compared with the stored one.
+
+```{r}
+adempR_data_md5(data.frame(y = 1:3))
+```
+
+## Common random numbers
+
+With `common`, scenarios that agree on the named factors draw the same
+random numbers. A contrast between scenarios that differ only in other
+factors, such as the effect size, then has much less Monte Carlo error.
+
+```{r}
+crn <- sim_study("crn", scenarios = sim_scenarios(n = 30L, effect = c(0, 0.5)),
+  generate = sim_generator(function(scenario, context) {
+    rnorm(scenario$n, scenario$effect)
+  }, common = "n"),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) scenario$effect))),
+  methods = list(mean = function(data) sim_estimate("mean", mean(data))))
+run_crn <- sim_run(crn, replications = 50, seed = 1, path = tempfile("adempR-run-"))
+```
+
+## Antithetic pairs
+
+With `antithetic = TRUE`, replications 2k - 1 and 2k share one data
+stream and the second uses the antithetic draws (`context$antithetic` is
+`TRUE` there). The pair is the independent unit: every MCSE in
+`sim_summarise()` comes from the pairs (a closed form for measures that
+are means, a delete-one-pair jackknife otherwise), and the `n_units`
+column gives the number of pairs. `sim_summarise_antithetic()` reports
+the gain over independent replications.
+
+```{r}
+anti <- sim_study("anti", scenarios = sim_scenarios(n = 20L),
+  generate = sim_generator(function(scenario, context) {
+    z <- rnorm(scenario$n)
+    exp(if (isTRUE(context$antithetic)) -z else z)
+  }, antithetic = TRUE),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) exp(0.5)))),
+  methods = list(mean = function(data) sim_estimate("mean", mean(data))))
+run_anti <- sim_run(anti, replications = 40, seed = 1, path = tempfile("adempR-run-"))
+sim_summarise_antithetic(run_anti, "bias")[, c("method", "value", "mcse", "pairs", "variance_ratio")]
+```
+
+For proportions such as coverage, pairs whose two members agree can make
+every pair mean equal; the MCSE is then 0 but the proportion is not
+known exactly. The summary marks such cells as `boundary` and reports an
+exact interval built from the number of independent pairs.
+
+## Control variates
+
+A quantity recorded for each data set whose expectation is known exactly
+can reduce the Monte Carlo error of a correlated measure. Here the
+sample mean of the data is recorded; its expectation is 0.
+
+```{r}
+cv <- sim_study("cv", scenarios = sim_scenarios(n = 20L),
+  generate = sim_generator(function(scenario, context) rnorm(scenario$n),
+                           record = function(data, meta) c(xbar = mean(data))),
+  estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+  methods = list(trimmed = function(data) sim_estimate("mean", mean(data, trim = 0.2))))
+run_cv <- sim_run(cv, replications = 60, seed = 2, path = tempfile("adempR-run-"))
+sim_control_variate(run_cv, "xbar", control_mean = 0, measure = "bias")[,
+  c("method", "value", "mcse", "value_adjusted", "mcse_adjusted", "variance_ratio", "status")]
+```
+
+The adjustment is made only when every generated data set contributes:
+after failed fits the control mean on the remaining data sets is unknown,
+and the row gets status `selected` with no adjusted value.
