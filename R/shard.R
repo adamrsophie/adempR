@@ -125,6 +125,13 @@ sim_collect_shards <- function(study, n_shards, replications, seed, path, into) 
   man$rng_domain <- if (nzchar(domains)) domains else NULL
   man$collected_from <- basename(dirs)
   man$sessions <- unlist(lapply(mans, `[[`, "sessions"), recursive = FALSE)
+  # retry rounds of the shards: a later retry of the collected run takes a
+  # round above every imported one
+  rr <- vapply(mans, function(m) as.integer(m$retry_round %||% 0L), integer(1))
+  if (any(rr > 0L)) {
+    man$retry_round <- max(rr)
+    man$shard_retry_rounds <- stats::setNames(rr, basename(dirs))
+  }
   sr <- unlist(lapply(mans, function(m) m$scenario_replications))
   if (length(sr)) man$scenario_replications <- sr
   write_manifest(p, man)

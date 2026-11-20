@@ -499,7 +499,7 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
   write_manifest(p, man)
 
   retried <- attr(done, "retried")
-  p$round <- man$retry_round %||% 0L
+  p$round <- max(as.integer(man$retry_round %||% 0L), attr(done, "max_round") %||% 0L)
   if (sum(retried)) {
     p$round <- p$round + 1L
     man$retry_round <- p$round
@@ -640,6 +640,11 @@ committed_index <- function(path, fps, gen_fp, retry = FALSE, estimands = NULL) 
     failed_fit <- sum(att$final & att$status %in% RETRYABLE_STATUSES &
                         att$method %in% names(fps) & att$method_fp == fps[att$method])
   }
+  # the highest retry round of any committed row: a new retry round must
+  # lie above it, also when the rows were imported from shards or another
+  # copy whose manifest counter is lower
+  rounds <- c(0L, reps$round, att$round, est$round)
+  attr(done, "max_round") <- max(as.integer(rounds), na.rm = TRUE)
   attr(done, "retried") <- c(generation = if (retry) failed_gen else 0L,
                              method = failed_fit)
   # checksums of the committed data sets: work added to a replication later
