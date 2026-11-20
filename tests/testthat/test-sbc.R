@@ -63,3 +63,39 @@ test_that("SBC ranks are uniform for point masses and small draw counts, and exc
   expect_equal(sim_sbc(run, "fails", bins = 3)$tests$excluded, 60L)
   expect_error(sim_method_sbc(function(data) 1, "mu", n_draws = 2), "n_draws")
 })
+
+test_that("SBC reports every planned scenario and why fits gave no rank", {
+  mk <- function(fail_gen = FALSE) sim_study("sbc_fail", scenarios = sim_scenarios(fail = c(FALSE, TRUE)),
+    generate = function(scenario, context) {
+      if (fail_gen && context$replication == 1L) stop("no data")
+      mu <- stats::rnorm(1)
+      sim_data(data.frame(y = stats::rnorm(3, mu), fail = scenario$fail), truth = list(mu = mu))
+    },
+    estimands = list(sim_estimand("mu", sim_truth_dataset())),
+    methods = list(m = sim_method_sbc(function(data) {
+      if (data$fail[1]) stop("fails")
+      stats::rnorm(20, sum(data$y) / 4, 0.5)
+    }, "mu", n_draws = 9)), measures = "bias")
+  out <- sim_sbc(sim_run(mk(TRUE), 6, 3, run_path(), progress = FALSE), "m", bins = 2)
+  t <- out$tests
+  expect_equal(nrow(t), 2L)
+  ok <- t[t$scenario_id == "fail=FALSE", ]
+  bad <- t[t$scenario_id == "fail=TRUE", ]
+  expect_equal(c(ok$n, ok$generation_failed, ok$excluded), c(5L, 1L, 1L))
+  expect_equal(c(bad$n, bad$generation_failed, bad$fit_failed, bad$excluded), c(0L, 1L, 5L, 6L))
+  expect_true(is.na(bad$p_value))
+  expect_false(is.na(ok$p_value))
+  expect_equal(t$excluded, t$generation_failed + t$not_generated + t$fit_failed + t$no_truth_or_draws)
+})
+
+test_that("SBC with every fit failing reports counts and no tests", {
+  st <- sim_study("sbc_allfail", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) sim_data(data.frame(y = 1), truth = list(mu = 0)),
+    estimands = list(sim_estimand("mu", sim_truth_dataset())),
+    methods = list(m = sim_method_sbc(function(data) stop("fails"), "mu", n_draws = 9)),
+    measures = "bias")
+  out <- sim_sbc(sim_run(st, 4, 1, run_path(), progress = FALSE), "m", bins = 2)
+  expect_equal(out$tests$fit_failed, 4L)
+  expect_equal(out$tests$n, 0L)
+  expect_true(is.na(out$tests$p_value))
+})

@@ -32,8 +32,10 @@ return at least this many draws.}
 \value{
 \code{sim_method_sbc()}: a method. \code{sim_sbc()}: an object of class
 \code{adempr_sbc} with \code{ranks} (one per fit), \code{bins} (counts and exact
-expected counts per scenario) and \code{tests} (chi-squared statistic, p
-value and number of excluded fits per scenario).
+expected counts per scenario) and \code{tests} (per scenario: ranks \code{n},
+\code{planned}, \code{excluded} and its parts \code{generation_failed},
+\code{not_generated}, \code{fit_failed} and \code{no_truth_or_draws}, the chi-squared
+statistic, its p value and a note).
 }
 \description{
 Simulation-based calibration (Talts et al. 2018) checks a Bayesian
@@ -54,8 +56,11 @@ draws the parameter from the prior, the rank is uniform on its
 correlated (MCMC) draws before returning them. The ranks are binned and
 uniformity is tested per scenario with a chi-squared test whose expected
 counts are the exact probabilities of the discrete rank in each bin.
-Fits without stored draws (failed fits) or without a truth are counted
-as excluded.
+Every scenario of the study is reported, starting from the
+replications planned for it: those without a rank are counted as
+excluded and split into failed generations, replications not generated,
+failed fits and fits without a truth or a full set of draws. A scenario
+without any rank keeps its row with no test (\code{p_value} is \code{NA}).
 }
 \examples{
 # conjugate normal model: exact posterior draws are calibrated
