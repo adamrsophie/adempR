@@ -9,6 +9,7 @@ test_that("blinded export, external results and a blinded report work end to end
   expect_setequal(sub("\\.rds$", "", files), key$code)
   # codes do not reveal the scenario or the replication
   expect_false(any(grepl("n=|^[0-9]+$", key$code)))
+  expect_true(all(grepl("^[a-f][0-9a-f]{11}$", key$code)))
   expect_error(sim_export_blinded(run, dir), "not empty")
   # an external analyst computes medians on the coded files
   ext <- do.call(rbind, lapply(files, function(f) {

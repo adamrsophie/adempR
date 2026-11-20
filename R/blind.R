@@ -41,8 +41,13 @@ sim_export_blinded <- function(run, dir, key = NULL, scenarios = NULL, replicati
   key_path <- key %||% file.path(dirname(normalizePath(dir, mustWork = FALSE)),
                                  paste0(basename(dir), "-key.rds"))
   if (!is_scalar_character(key_path)) stopf("`key` must be a path.")
-  dnorm <- normalizePath(dir, mustWork = FALSE)
-  if (startsWith(normalizePath(key_path, mustWork = FALSE), paste0(dnorm, .Platform$file.sep))) {
+  # normalizePath() leaves missing paths as given, with mixed separators on
+  # Windows, so compare on one separator (and one case on Windows)
+  canon <- function(x) {
+    x <- gsub("[\\/]+", "/", normalizePath(x, winslash = "/", mustWork = FALSE))
+    if (.Platform$OS.type == "windows") tolower(x) else x
+  }
+  if (startsWith(canon(key_path), paste0(sub("/$", "", canon(dir)), "/"))) {
     stopf("`key` must be outside `dir`, which is given to the analysts.")
   }
   seed <- seed %||% fresh_seed()
@@ -78,7 +83,9 @@ sim_export_blinded <- function(run, dir, key = NULL, scenarios = NULL, replicati
     unique_codes <- character()
     while (length(unique_codes) < nrow(tasks)) {
       unique_codes <- unique(c(unique_codes, vapply(seq_len(nrow(tasks) - length(unique_codes)),
-        function(i) paste(sample(hex, 12, replace = TRUE), collapse = ""), character(1))))
+        function(i) paste0(sample(letters[1:6], 1L),
+                           paste(sample(hex, 11, replace = TRUE), collapse = "")),
+        character(1))))
     }
     unique_codes
   })
