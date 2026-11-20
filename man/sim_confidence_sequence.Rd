@@ -28,8 +28,9 @@ only the last.}
 }
 \value{
 A data frame per scenario, method and estimand (and replication
-count with \code{path = TRUE}): \code{n}, \code{estimate}, \code{lower}, \code{upper} and
-\code{type} (\code{"exact"} or \code{"asymptotic"}).
+count with \code{path = TRUE}): \code{n}, \code{estimate}, \code{lower}, \code{upper},
+\code{type} (\code{"exact"} or \code{"asymptotic"}), \code{t_opt}, \code{alpha}, \code{truth_error}
+(the widening for a numerical truth) and \code{tuning_recorded}.
 }
 \description{
 A confidence interval for coverage is valid at one planned number of
@@ -54,7 +55,18 @@ replication as the independent unit, and only for tuning fixed before
 the first look. The tuning (\code{t_opt} and \code{alpha}) is therefore recorded
 in the run at the first call for a measure and reused by later calls,
 also after the run is extended; a call with different tuning is an
-error. The asymptotic sequence assumes a finite positive variance of the
+error. The record on disk decides, so reusing an older run or results
+object cannot change the tuning; results detached from their run
+directory without a record report \code{tuning_recorded = FALSE}.
+
+The guarantee is for the measure against the declared truth. With a
+Monte Carlo truth, or a numerical truth whose error bound is not zero,
+it would hold only for the approximate reference value, so coverage and
+MSE sequences are refused there. A bias sequence against a numerical
+truth with a stated error bound \code{e} is widened by \code{e} on each side,
+which bounds the bias for every truth within the bound (\code{truth_error}).
+
+The asymptotic sequence assumes a finite positive variance of the
 contributions (for \code{"mse"}, a finite fourth moment of the error) and
 becomes valid as the number of replications grows; cells whose running
 standard deviation is 0 get no interval (\code{NA}) because the asymptotic

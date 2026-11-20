@@ -10,6 +10,18 @@
 # conservative and covers Bernoulli measures of independent replications
 # only.
 
+# Estimands whose truth is only known approximately: a Monte Carlo truth,
+# or a numerical truth whose error bound is not zero (or not stated). A
+# guarantee for a truth dependent measure computed against them holds for
+# the approximate reference value, not for the parameter.
+uncertain_truths <- function(study, estimands = names(study$estimands)) {
+  bad <- vapply(study$estimands[estimands], function(e) {
+    k <- e$truth$kind
+    identical(k, "mc") || (identical(k, "numeric") && !isTRUE(e$truth$error == 0))
+  }, logical(1))
+  names(bad)[bad]
+}
+
 cp_interval <- function(k, n, conf) {
   a <- 1 - conf
   lo <- ifelse(k == 0, 0, stats::qbeta(a / 2, k, n - k + 1))
@@ -81,9 +93,11 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
     stopf("Sequential stopping is implemented only for Bernoulli measures (%s); not for %s.",
           paste(PROPORTION_MEASURES, collapse = ", "), paste(bad, collapse = ", "))
   }
-  if (any(vapply(study$estimands, function(e) e$truth$kind == "mc", logical(1))) &&
-      any(measures %in% c("coverage", "noncoverage_lower", "noncoverage_upper", "usable_coverage"))) {
-    stopf("Sequential stopping with Monte Carlo truth is not supported: the truth's uncertainty is not part of the guarantee.")
+  unc <- uncertain_truths(study)
+  if (length(unc) && any(measures %in% c("coverage", "noncoverage_lower", "noncoverage_upper",
+                                         "usable_coverage"))) {
+    stopf("Sequential stopping of coverage needs an exact truth: estimand(s) %s have a Monte Carlo truth or a numerical truth whose error bound is not zero. The intervals at the looks would hold for coverage of the approximate reference value, not of the parameter.",
+          paste(unc, collapse = ", "))
   }
   if (isTRUE(study$generator$antithetic)) {
     stopf("Sequential stopping needs independent replications; antithetic pairs are dependent, so the binomial intervals at the looks would not hold.")

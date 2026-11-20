@@ -23,7 +23,18 @@
 #' the first look. The tuning (`t_opt` and `alpha`) is therefore recorded
 #' in the run at the first call for a measure and reused by later calls,
 #' also after the run is extended; a call with different tuning is an
-#' error. The asymptotic sequence assumes a finite positive variance of the
+#' error. The record on disk decides, so reusing an older run or results
+#' object cannot change the tuning; results detached from their run
+#' directory without a record report `tuning_recorded = FALSE`.
+#'
+#' The guarantee is for the measure against the declared truth. With a
+#' Monte Carlo truth, or a numerical truth whose error bound is not zero,
+#' it would hold only for the approximate reference value, so coverage and
+#' MSE sequences are refused there. A bias sequence against a numerical
+#' truth with a stated error bound `e` is widened by `e` on each side,
+#' which bounds the bias for every truth within the bound (`truth_error`).
+#'
+#' The asymptotic sequence assumes a finite positive variance of the
 #' contributions (for `"mse"`, a finite fourth moment of the error) and
 #' becomes valid as the number of replications grows; cells whose running
 #' standard deviation is 0 get no interval (`NA`) because the asymptotic
@@ -41,8 +52,9 @@
 #' @param path Return the sequence at every replication count instead of
 #'   only the last.
 #' @return A data frame per scenario, method and estimand (and replication
-#'   count with `path = TRUE`): `n`, `estimate`, `lower`, `upper` and
-#'   `type` (`"exact"` or `"asymptotic"`).
+#'   count with `path = TRUE`): `n`, `estimate`, `lower`, `upper`,
+#'   `type` (`"exact"` or `"asymptotic"`), `t_opt`, `alpha`, `truth_error`
+#'   (the widening for a numerical truth) and `tuning_recorded`.
 #' @references Robbins H (1970). Statistical methods related to the law of
 #'   the iterated logarithm. Annals of Mathematical Statistics 41:1397-1409.
 #'   Howard SR, Ramdas A, McAuliffe J, Sekhon J (2021). Time-uniform,
@@ -59,6 +71,22 @@ sim_confidence_sequence <- function(run, measure = c("coverage", "rejection", "b
   study <- res$manifest$study
   if (isTRUE(study$generator$antithetic)) {
     stopf("Confidence sequences need independent replications; antithetic pairs are dependent. Use sim_summarise(), whose MCSEs come from the pairs.")
+  }
+  # A sequence for a truth dependent measure computed against an
+  # approximate truth would hold for the approximate reference value. Bias
+  # against a numerical truth with a stated error bound e is widened by e,
+  # which bounds the bias for every truth within the bound; coverage, MSE
+  # and Monte Carlo truths are refused.
+  if (measure != "rejection") {
+    unc <- uncertain_truths(study)
+    widen <- vapply(unc, function(en) {
+      tr <- study$estimands[[en]]$truth
+      measure == "bias" && identical(tr$kind, "numeric") && isTRUE(is.finite(tr$error))
+    }, logical(1))
+    if (any(!widen)) {
+      stopf("A confidence sequence for `%s` needs an exact truth: estimand(s) %s have a Monte Carlo truth or a numerical truth whose error bound is not zero (or not stated), so the sequence would hold for the approximate reference value, not for the parameter.",
+            measure, paste(unc[!widen], collapse = ", "))
+    }
   }
   tuning <- confseq_tuning(res, measure, alpha, t_opt)
   t_opt <- tuning$t_opt
@@ -96,10 +124,17 @@ sim_confidence_sequence <- function(run, measure = c("coverage", "rejection", "b
       lo <- m - half
       up <- m + half
     }
+    tr <- study$estimands[[grp$estimand[1]]]$truth
+    terr <- if (identical(tr$kind, "numeric") && isTRUE(tr$error > 0)) tr$error else 0
+    if (terr > 0) {
+      lo <- lo - terr
+      up <- up + terr
+    }
     df <- data.frame(scenario_id = study$scenarios$labels[match(grp$scenario_key[1], study$scenarios$keys)],
                      method = grp$method[1], estimand = grp$estimand[1], measure = measure,
                      n = t, estimate = m, lower = lo, upper = up,
                      type = if (bounded) "exact" else "asymptotic", t_opt = t_opt, alpha = alpha,
+                     truth_error = terr, tuning_recorded = isTRUE(tuning$recorded),
                      stringsAsFactors = FALSE)
     out[[length(out) + 1L]] <- if (path) df else df[nrow(df), , drop = FALSE]
   }
@@ -134,28 +169,38 @@ running_sd <- function(x) {
 
 # The tuning of a measure's confidence sequence is fixed at its first use
 # and recorded in the run, so later looks (after extensions) belong to the
-# same sequence.
+# same sequence. The record on disk is authoritative: it is created under
+# the manifest lock if absent and then read back, so a stale run or results
+# object, or two first calls racing, cannot start a second sequence with
+# another tuning. Results detached from their run directory carry the
+# record they were read with; without one the tuning cannot be fixed and
+# the result says so.
 confseq_tuning <- function(res, measure, alpha, t_opt) {
   if (!is.null(t_opt) && (!is_scalar_number(t_opt) || t_opt < 1)) stopf("`t_opt` must be a positive number.")
-  rec <- res$manifest$monitoring[[measure]]
-  if (!is.null(rec)) {
-    if (!is.null(t_opt) && !isTRUE(all.equal(t_opt, rec$t_opt))) {
-      stopf("The confidence sequence for `%s` was tuned with t_opt = %s at its first use; a sequence is valid only with tuning fixed before the first look.",
-            measure, format(rec$t_opt))
-    }
-    if (!isTRUE(all.equal(alpha, rec$alpha))) {
-      stopf("The confidence sequence for `%s` was started with alpha = %s; use the same alpha at every look.",
-            measure, format(rec$alpha))
-    }
-    return(rec)
-  }
-  rec <- list(t_opt = t_opt %||% res$manifest$replications, alpha = alpha,
-              unit = "replication", first_look = as.character(Sys.time()))
-  if (!is.null(res$path) && dir.exists(res$path)) {
+  proposal <- list(t_opt = t_opt %||% res$manifest$replications, alpha = alpha,
+                   unit = "replication", first_look = as.character(Sys.time()))
+  attached <- !is.null(res$path) && file.exists(file.path(res$path, "manifest.json"))
+  if (attached) {
     update_manifest(res$path, function(man) {
-      man$monitoring[[measure]] <- man$monitoring[[measure]] %||% rec
+      man$monitoring[[measure]] <- man$monitoring[[measure]] %||% proposal
       man
     })
+    rec <- read_manifest(res$path)$monitoring[[measure]]
+  } else {
+    rec <- res$manifest$monitoring[[measure]]
+    if (is.null(rec)) {
+      proposal$recorded <- FALSE
+      return(proposal)
+    }
   }
+  if (!is.null(t_opt) && !isTRUE(all.equal(t_opt, rec$t_opt))) {
+    stopf("The confidence sequence for `%s` was tuned with t_opt = %s at its first use; a sequence is valid only with tuning fixed before the first look.",
+          measure, format(rec$t_opt))
+  }
+  if (!isTRUE(all.equal(alpha, rec$alpha))) {
+    stopf("The confidence sequence for `%s` was started with alpha = %s; use the same alpha at every look.",
+          measure, format(rec$alpha))
+  }
+  rec$recorded <- TRUE
   rec
 }
