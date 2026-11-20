@@ -64,15 +64,19 @@ test_that("scenario values edited after sim_scenarios() are refused", {
   expect_match(sim_validate(st, error = FALSE)$message, "edited after sim_scenarios", all = FALSE)
 })
 
-test_that("records and packages have their own fingerprints, apart from the data", {
+test_that("records have their own fingerprint; declared packages are part of the data identity", {
   g0 <- sim_generator(function(scenario, context) 1)
   g1 <- sim_generator(function(scenario, context) 1, record = function(data) c(a = 1))
   g2 <- sim_generator(function(scenario, context) 1, record = function(data) c(a = 2))
   g3 <- sim_generator(function(scenario, context) 1, packages = "stats")
   expect_identical(generator_fingerprint(g0),
                    fingerprint(g0$fun, g0$version, g0$depends))
-  fps <- vapply(list(g0, g1, g2, g3), generator_fingerprint, character(1))
+  fps <- vapply(list(g0, g1, g2), generator_fingerprint, character(1))
   expect_equal(length(unique(fps)), 1L)
+  # packages decide what unqualified calls resolve to, in attachment order
+  g4 <- sim_generator(function(scenario, context) 1, packages = c("utils", "stats"))
+  g5 <- sim_generator(function(scenario, context) 1, packages = c("stats", "utils"))
+  expect_length(unique(vapply(list(g0, g3, g4, g5), generator_fingerprint, character(1))), 4L)
   sf <- function(g) study_fingerprints(sim_study("g", scenarios = sim_scenarios(n = 1L), generate = g,
     estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
     methods = list(m = function(data) sim_estimate("mean", 1))))

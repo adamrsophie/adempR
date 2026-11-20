@@ -29,7 +29,10 @@
 #'   [sim_validate()] and attached only while study code runs (in the main
 #'   process for the sequential backend, replay and validation, and on every
 #'   worker for the future backend), so unqualified calls resolve the same
-#'   way everywhere. Packages attached for the call are detached afterwards:
+#'   way everywhere. The names, in attachment order, are part of the
+#'   generator fingerprint: changing them changes what unqualified calls
+#'   resolve to, so a run is not extended under the old data identity.
+#'   Packages attached for the call are detached afterwards:
 #'   the search path of the session is unchanged after a run. While the run
 #'   lasts, an attached package can mask a function of the same name from a
 #'   package attached earlier; call such functions with `pkg::fun()`.
@@ -89,11 +92,17 @@ sim_generator <- function(fun, check = NULL, version = NULL, depends = list(),
 }
 
 generator_fingerprint <- function(g) {
-  # What determines the data sets. The record function and the declared
-  # packages have their own fingerprints (study_fingerprints()): changing
-  # them does not change the data, so a run can still be extended.
-  if (is.null(g$common) && !isTRUE(g$antithetic)) return(fingerprint(g$fun, g$version, g$depends))
-  fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic))
+  # What determines the data sets. The record function has its own
+  # fingerprint (study_fingerprints()): changing it does not change the
+  # data. The declared packages, in attachment order, decide what an
+  # unqualified call in the generator resolves to, so they are part of the
+  # data identity. A generator without declared packages keeps the
+  # fingerprint it had before packages were included.
+  pk <- as.character(g$packages %||% character())
+  parts <- list(g$fun, g$version, g$depends)
+  if (!is.null(g$common) || isTRUE(g$antithetic)) parts <- c(parts, list(g$common, isTRUE(g$antithetic)))
+  if (length(pk)) parts <- c(parts, list(packages = pk))
+  do.call(fingerprint, unname(parts))
 }
 
 # Identity of the data stream of a scenario: the scenario itself, or the

@@ -37,7 +37,10 @@ and package implementations are not; declare what matters here.}
 \code{\link[=sim_validate]{sim_validate()}} and attached only while study code runs (in the main
 process for the sequential backend, replay and validation, and on every
 worker for the future backend), so unqualified calls resolve the same
-way everywhere. Packages attached for the call are detached afterwards:
+way everywhere. The names, in attachment order, are part of the
+generator fingerprint: changing them changes what unqualified calls
+resolve to, so a run is not extended under the old data identity.
+Packages attached for the call are detached afterwards:
 the search path of the session is unchanged after a run. While the run
 lasts, an attached package can mask a function of the same name from a
 package attached earlier; call such functions with \code{pkg::fun()}.}
