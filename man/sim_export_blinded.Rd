@@ -18,7 +18,10 @@ sim_export_blinded(
 
 \item{dir}{Output directory (must not exist or be empty).}
 
-\item{key}{File for the key; defaults to \verb{<dir>-key.rds} next to \code{dir}.}
+\item{key}{File for the key; defaults to \verb{<dir>-key.rds} next to \code{dir}.
+It must lie outside \code{dir} after resolving dot segments, symbolic
+links in existing parents and separators, and must not exist yet;
+both are checked before anything is written.}
 
 \item{scenarios}{Scenario labels or keys to export; defaults to all.}
 

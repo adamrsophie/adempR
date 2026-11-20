@@ -22,6 +22,9 @@
 #' @param run A run.
 #' @param dir Output directory (must not exist or be empty).
 #' @param key File for the key; defaults to `<dir>-key.rds` next to `dir`.
+#'   It must lie outside `dir` after resolving dot segments, symbolic
+#'   links in existing parents and separators, and must not exist yet;
+#'   both are checked before anything is written.
 #' @param scenarios Scenario labels or keys to export; defaults to all.
 #' @param replications Replications to export; defaults to all committed
 #'   ones.
@@ -41,15 +44,17 @@ sim_export_blinded <- function(run, dir, key = NULL, scenarios = NULL, replicati
   key_path <- key %||% file.path(dirname(normalizePath(dir, mustWork = FALSE)),
                                  paste0(basename(dir), "-key.rds"))
   if (!is_scalar_character(key_path)) stopf("`key` must be a path.")
-  # normalizePath() leaves missing paths as given, with mixed separators on
-  # Windows, so compare on one separator (and one case on Windows)
-  canon <- function(x) {
-    x <- gsub("[\\/]+", "/", normalizePath(x, winslash = "/", mustWork = FALSE))
-    if (.Platform$OS.type == "windows") tolower(x) else x
-  }
-  if (startsWith(canon(key_path), paste0(sub("/$", "", canon(dir)), "/"))) {
+  # the key must not end up inside the directory handed to the analysts,
+  # whatever the spelling: dot segments, symbolic links in existing
+  # parents, separators and (on Windows) case are resolved first
+  dk <- canonical_path(dir)
+  kk <- canonical_path(key_path)
+  if (identical(kk, dk) || startsWith(kk, paste0(sub("/$", "", dk), "/"))) {
     stopf("`key` must be outside `dir`, which is given to the analysts.")
   }
+  # checked before anything is written: an existing key (of an earlier
+  # export) is never overwritten
+  if (file.exists(key_path)) stopf("The key file %s exists; choose another `key`.", key_path)
   seed <- seed %||% fresh_seed()
   man <- run$manifest
   study <- man$study
@@ -276,4 +281,33 @@ relabel_methods <- function(df, map) {
 # the caller's random number generator.
 fresh_seed <- function() {
   strtoi(substr(md5_string(c(format(Sys.time(), "%OS6"), Sys.getpid(), new_uuid())), 1, 7), 16L)
+}
+
+# Canonical spelling of a path that may not exist yet: the deepest existing
+# ancestor is resolved by the file system (symbolic links, "..", case on
+# Windows), and the missing components that follow are normalized
+# lexically ("." dropped, ".." removes the previous component).
+canonical_path <- function(x) {
+  x <- gsub("\\\\", "/", path.expand(x))
+  if (!grepl("^(/|[A-Za-z]:/|//)", x)) x <- paste0(gsub("\\\\", "/", getwd()), "/", x)
+  unc <- startsWith(x, "//")
+  parts <- strsplit(x, "/+")[[1]]
+  root <- if (unc) paste0("//", parts[2], "/") else if (startsWith(x, "/")) "/" else paste0(parts[1], "/")
+  parts <- parts[-seq_len(if (unc) 2L else 1L)]
+  if (unc) parts <- parts[-1]
+  at <- function(k) paste0(root, paste(parts[seq_len(k)], collapse = "/"))
+  k <- length(parts)
+  while (k > 0L && !file.exists(at(k))) k <- k - 1L
+  base <- normalizePath(at(k), winslash = "/", mustWork = FALSE)
+  out <- strsplit(sub("/$", "", base), "/")[[1]]
+  if (!length(out)) out <- ""
+  for (p in parts[seq_len(length(parts) - k) + k]) {
+    if (p %in% c("", ".")) next
+    if (p == "..") {
+      if (length(out) > 1L) out <- out[-length(out)]
+    } else out <- c(out, p)
+  }
+  res <- paste(out, collapse = "/")
+  if (!nzchar(res)) res <- "/"
+  if (.Platform$OS.type == "windows") tolower(res) else res
 }

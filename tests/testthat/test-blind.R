@@ -130,3 +130,47 @@ test_that("blinded export covers the committed cohort, keeps the key apart and r
   expect_error(sim_export_blinded(run, paste0(dir, "d"), key = file.path(paste0(dir, "d"), "k.rds")),
                "outside")
 })
+
+test_that("no spelling of a path puts the key inside the export", {
+  st <- normal_study(n = 5L, mu = 0, measures = "bias")
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path(), progress = FALSE)
+  base <- tempfile("blindalias-")
+  dir.create(base)
+  dir <- file.path(base, "export")
+  inside <- list(
+    file.path(base, ".", "export", "key.rds"),
+    file.path(base, "export", "sub", "..", "key.rds"),
+    file.path(base, "other", "..", "export", "key.rds"),
+    dir)
+  for (k in inside) {
+    expect_error(sim_export_blinded(run, dir, key = k, seed = 1), "outside", info = k)
+    expect_false(file.exists(file.path(dir, "key.rds")))
+  }
+  # a symbolic link to the parent of the export
+  if (.Platform$OS.type != "windows") {
+    link <- file.path(tempdir(), basename(tempfile("blindlink-")))
+    file.symlink(base, link)
+    expect_error(sim_export_blinded(run, dir, key = file.path(link, "export", "key.rds"), seed = 1),
+                 "outside")
+  }
+  # a genuinely separate sibling key, in a directory that does not exist yet
+  sib <- file.path(base, "keys", "export-key.rds")
+  dir.create(dirname(sib))
+  k <- sim_export_blinded(run, dir, key = sib, seed = 1)
+  expect_true(file.exists(sib))
+  expect_false(any(grepl("key", list.files(dir, recursive = TRUE))))
+  # a directory whose name only starts like the export is outside it
+  expect_equal(adempR:::canonical_path(file.path(base, "export2", "k.rds")),
+               paste0(adempR:::canonical_path(base), "/export2/k.rds"))
+})
+
+test_that("an existing key is never overwritten", {
+  st <- normal_study(n = 5L, mu = 0, measures = "bias")
+  run <- sim_run(st, replications = 2, seed = 1, path = run_path(), progress = FALSE)
+  key <- tempfile("existing-key-", fileext = ".rds")
+  saveRDS("old", key)
+  dir <- tempfile("blind-exists-")
+  expect_error(sim_export_blinded(run, dir, key = key, seed = 1), "exists")
+  expect_identical(readRDS(key), "old")
+  expect_false(dir.exists(file.path(dir, "data")))
+})
