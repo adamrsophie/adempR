@@ -635,6 +635,18 @@ sim_check_reference <- function(run, threshold = 3) {
   check <- ifelse(is.na(flag), "insufficient evidence", ifelse(se %in% 0, "zero MCSE", "normal"))
   lo <- up <- rep(NA_real_, nrow(out))
   prop <- out$measure %in% PROPORTION_MEASURES & !is.na(out$value) & out$n_eligible > 0
+  if (isTRUE(study$generator$antithetic)) {
+    # dependent pairs: a binomial interval over the replications does not
+    # hold. A cell with all pair means equal uses the bounded pair interval
+    # of the summary (at the study level); the others are judged by the
+    # pair based MCSE above.
+    bnd <- prop & out$status %in% "boundary" & !is.na(out$lower) & !is.na(out$upper)
+    lo[bnd] <- out$lower[bnd]
+    up[bnd] <- out$upper[bnd]
+    flag[bnd] <- out$reference[bnd] < lo[bnd] | out$reference[bnd] > up[bnd]
+    check[bnd] <- "bounded pair interval"
+    prop <- rep(FALSE, length(prop))
+  }
   if (any(prop)) {
     n <- out$n_eligible[prop]
     x <- round(out$value[prop] * n)

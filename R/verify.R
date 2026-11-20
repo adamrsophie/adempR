@@ -131,6 +131,10 @@ verify_seeds <- function(ra, rb, measures, threshold) {
   keys <- c("scenario_key", "scenario_id", "method", "estimand", "measure")
   take <- function(x) {
     x$se <- if (is.null(x$mcse_total)) x$mcse else ifelse(is.na(x$mcse_total), x$mcse, x$mcse_total)
+    # with antithetic pairs the independent units are the pairs; a mean of
+    # G independent values in [0, 1] with mean p has variance at most
+    # p (1 - p) / G, so the pooled binomial variance below uses G
+    if (!is.null(x$n_units)) x$n_eligible <- ifelse(is.na(x$n_units), x$n_eligible, x$n_units)
     x[c(keys, "value", "se", "n_eligible")]
   }
   m <- merge(take(sa), take(sb), by = keys, suffixes = c("_a", "_b"), all = TRUE)

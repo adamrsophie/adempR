@@ -52,7 +52,7 @@ linear_contributions <- function(m, rows, study, estimand) {
 
 # Measures whose contributions are events (0 or 1).
 is_proportion_measure <- function(m) {
-  is.character(m) && length(m) == 1L && m %in% c(PROPORTION_MEASURES, "usable_coverage")
+  is.character(m) && length(m) == 1L && m %in% PROPORTION_MEASURES
 }
 
 # Sums and counts of contributions per unit.

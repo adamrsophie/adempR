@@ -165,8 +165,7 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
         # than the binomial variance
         need <- if (is.na(sub$value[i]) || n_el == 0) {
           NA_real_
-        } else if (ms %in% c("coverage", "rejection", "usable", "noncoverage_lower",
-                              "noncoverage_upper")) {
+        } else if (ms %in% PROPORTION_MEASURES) {
           k <- round(sub$value[i] * n_el)
           ceiling(conservative_pq(k, n_el) / targets[[ms]]^2)
         } else if (!is.na(sub$mcse[i]) && n_el > 1) {

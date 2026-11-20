@@ -10,9 +10,6 @@
 # conservative and covers Bernoulli measures of independent replications
 # only.
 
-SEQUENTIAL_MEASURES <- c("coverage", "rejection", "usable", "noncoverage_lower",
-                         "noncoverage_upper", "usable_coverage")
-
 cp_interval <- function(k, n, conf) {
   a <- 1 - conf
   lo <- ifelse(k == 0, 0, stats::qbeta(a / 2, k, n - k + 1))
@@ -79,10 +76,10 @@ sim_run_sequential <- function(study, looks, half_width, seed, path,
       any(looks < 2) || any(looks != round(looks))) {
     stopf("`looks` must be increasing whole numbers of at least 2.")
   }
-  bad <- setdiff(measures, SEQUENTIAL_MEASURES)
+  bad <- setdiff(measures, PROPORTION_MEASURES)
   if (length(bad)) {
     stopf("Sequential stopping is implemented only for Bernoulli measures (%s); not for %s.",
-          paste(SEQUENTIAL_MEASURES, collapse = ", "), paste(bad, collapse = ", "))
+          paste(PROPORTION_MEASURES, collapse = ", "), paste(bad, collapse = ", "))
   }
   if (any(vapply(study$estimands, function(e) e$truth$kind == "mc", logical(1))) &&
       any(measures %in% c("coverage", "noncoverage_lower", "noncoverage_upper", "usable_coverage"))) {

@@ -290,7 +290,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
   # measures whose contributions are events (built in proportions, and
   # custom measures returning logical contributions)
   prop_ids <- names(mlist)[vapply(mlist, function(m) is.character(m) &&
-                                    m %in% c(PROPORTION_MEASURES, "usable_coverage"), logical(1))]
+                                    m %in% PROPORTION_MEASURES, logical(1))]
   for (si in seq_along(keys)) {
     key <- keys[si]
     gen_ok <- if (is.null(reps)) integer() else
@@ -390,8 +390,11 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
 #' @export
 sim_summarize <- sim_summarise
 
+# The one registry of built in measures whose contributions are events (0
+# or 1 per replication). Planning, adaptive allocation, sequential
+# stopping, weighted averages and exact intervals all read it.
 PROPORTION_MEASURES <- c("coverage", "noncoverage_lower", "noncoverage_upper", "rejection",
-                         "usable")
+                         "usable", "usable_coverage")
 
 weighted_rows <- function(summ, study, by = NULL, prop_ids = PROPORTION_MEASURES) {
   if (!is.null(by)) {

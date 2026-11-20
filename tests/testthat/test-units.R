@@ -138,3 +138,18 @@ test_that("grid averages keep eligible infinite estimates", {
   expect_equal(f$value, 0)
   expect_equal(f$status, "ok")
 })
+
+test_that("reference checks of antithetic proportions use the pairs", {
+  f <- function(data, context) {
+    x <- c(-0.5, 0.5, -0.25, 0.25, -0.1, 0.1)[context$replication]
+    sim_estimate("mu", x, lower = x - 1, upper = x + 1, level = 0.95)
+  }
+  st <- anti_study(sim_method(f, reference = c(coverage = 0.4)))
+  chk <- sim_check_reference(sim_run(st, 6, 1, run_path(), progress = FALSE))
+  chk <- chk[chk$measure == "coverage", ]
+  # three independent pairs, all covering: 0.4 is inside the bounded pair
+  # interval, although a binomial interval over six replications excludes it
+  expect_equal(chk$check, "bounded pair interval")
+  expect_false(chk$flag)
+  expect_gt(unname(adempR:::cp_interval(6, 6, 0.95)[1, "lower"]), 0.4)
+})
