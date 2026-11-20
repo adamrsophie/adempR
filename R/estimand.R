@@ -186,16 +186,24 @@ sim_truth_unknown <- function() new_truth("unknown")
 #' reports its own standard error, for instance by the delta method.
 #'
 #' @param value The approximated truth.
-#' @param se Its Monte Carlo standard error.
+#' @param se Its Monte Carlo standard error (finite).
 #' @param method Text describing how `se` was obtained.
+#' @param n Number of simulated units actually used, if known. It is
+#'   recorded as `truth_n`; the count requested from [sim_truth_mc()] is
+#'   recorded separately as `truth_n_requested`.
 #' @return An object of class `adempr_truth_value`.
 #' @examples
 #' sim_truth_value(0.5, se = 0.001, method = "delta method")
 #' @export
-sim_truth_value <- function(value, se, method = "user supplied") {
-  if (!is_scalar_number(value)) stopf("`value` must be a single number.")
-  if (!is_scalar_number(se) || se < 0) stopf("`se` must be a single nonnegative number.")
-  structure(list(value = value, se = se, method = method),
+sim_truth_value <- function(value, se, method = "user supplied", n = NULL) {
+  if (!is_scalar_number(value) || !is.finite(value)) stopf("`value` must be a single finite number.")
+  if (!is_scalar_number(se) || !is.finite(se) || se < 0) {
+    stopf("`se` must be a single finite nonnegative number.")
+  }
+  if (!is.null(n) && (!is_scalar_number(n) || n < 1 || n != round(n))) {
+    stopf("`n` must be a positive whole number.")
+  }
+  structure(list(value = value, se = se, method = method, n = n),
             class = "adempr_truth_value")
 }
 
@@ -217,7 +225,7 @@ print.adempr_truth <- function(x, ...) {
 # Compute truth for one scenario. Returns a one-row data frame.
 compute_truth_one <- function(truth, scenario, seed = NULL) {
   out <- data.frame(truth_kind = truth$kind, truth = NA_real_, truth_se = NA_real_,
-                    truth_error = NA_real_, truth_n = NA_integer_,
+                    truth_error = NA_real_, truth_n = NA_integer_, truth_n_requested = NA_integer_,
                     truth_method = NA_character_, truth_status = "ok",
                     stringsAsFactors = FALSE)
   val <- switch(truth$kind,
@@ -270,8 +278,12 @@ compute_truth_one <- function(truth, scenario, seed = NULL) {
                                       out$truth_method, length(v), truth$n)
         }
       }
-      # the count actually used, not only the one requested
-      out$truth_n <- if (inherits(v, "adempr_truth_value")) truth$n else length(v)
+      # the count actually used (unknown for an aggregate that does not
+      # report it), next to the one requested
+      out$truth_n <- if (inherits(v, "adempr_truth_value")) {
+        if (is.null(v$n)) NA_integer_ else as.integer(v$n)
+      } else length(v)
+      out$truth_n_requested <- as.integer(truth$n)
     },
     dataset = {
       out$truth_status <- "dataset"

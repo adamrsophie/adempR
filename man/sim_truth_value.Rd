@@ -4,14 +4,18 @@
 \alias{sim_truth_value}
 \title{A truth value with its uncertainty}
 \usage{
-sim_truth_value(value, se, method = "user supplied")
+sim_truth_value(value, se, method = "user supplied", n = NULL)
 }
 \arguments{
 \item{value}{The approximated truth.}
 
-\item{se}{Its Monte Carlo standard error.}
+\item{se}{Its Monte Carlo standard error (finite).}
 
 \item{method}{Text describing how \code{se} was obtained.}
+
+\item{n}{Number of simulated units actually used, if known. It is
+recorded as \code{truth_n}; the count requested from \code{\link[=sim_truth_mc]{sim_truth_mc()}} is
+recorded separately as \code{truth_n_requested}.}
 }
 \value{
 An object of class \code{adempr_truth_value}.

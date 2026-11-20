@@ -217,8 +217,10 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   add(html_table(ed))
   tr <- res$truth
   tr$scenario <- study$scenarios$labels[match(tr$scenario_key, study$scenarios$keys)]
-  add(html_table(tr[c("scenario", "estimand", "truth_kind", "truth", "truth_se", "truth_error",
-                      "truth_n", "truth_method")]))
+  # truths cached before the requested count was recorded lack its column
+  add(html_table(tr[intersect(c("scenario", "estimand", "truth_kind", "truth", "truth_se",
+                                "truth_error", "truth_n", "truth_n_requested", "truth_method"),
+                              names(tr))]))
   for (e in study$estimands) {
     if (!is.null(e$truth$fun)) {
       add("<details><summary>Truth code of ", html_escape(e$id), "</summary><pre>",
