@@ -437,3 +437,21 @@ test_that("`by` is refused when no weighted rows can be formed", {
   expect_error(sim_summarise(run, by = "mu"), "weighted = TRUE")
   expect_error(sim_summarise(run, weighted = TRUE, by = "mu"), "with weights")
 })
+
+test_that("the empirical SE is computed on a common scale", {
+  ref <- function(x) k_empse(x)
+  for (sc in c(1e200, 1e-200, 1)) {
+    x <- c(-1, 1, -2, 2, 0.5) * sc
+    r <- k_empse(x)
+    base <- k_empse(c(-1, 1, -2, 2, 0.5))
+    expect_equal(r$value / sc, base$value, tolerance = 1e-12)
+    expect_equal(r$mcse / sc, base$mcse, tolerance = 1e-12)
+    expect_equal(r$status, "ok")
+  }
+  # a spread beyond the largest double is reported, not returned as ok
+  r <- k_empse(c(-1.7e308, 1.7e308, -1.7e308, 1.7e308))
+  expect_equal(r$status, "overflow")
+  expect_true(is.na(r$value))
+  # accumulated moments that overflowed are reported too
+  expect_equal(k_empse_moments(10, Inf, Inf)$status, "overflow")
+})

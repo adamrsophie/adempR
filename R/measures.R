@@ -250,9 +250,23 @@ k_root_mean_square <- function(x, level, what) {
 k_empse <- function(x, level = 0.95) {
   fin <- is.finite(x)
   xf <- x[fin]
-  k_empse_moments(n = length(x), var = if (length(xf) > 1) stats::var(xf) else NA_real_,
-                  m4 = if (length(xf)) mean((xf - mean(xf))^4) else NA_real_,
-                  nonfinite = sum(!fin), level = level)
+  # moments on a common scale, so that squares and fourth powers of large
+  # (or tiny) estimates neither overflow nor underflow; the SD and its
+  # MCSE are scaled back at the end
+  sc <- if (length(xf)) max(abs(xf)) else 1
+  if (!is.finite(sc) || sc == 0) sc <- 1
+  xs <- xf / sc
+  r <- k_empse_moments(n = length(x), var = if (length(xs) > 1) stats::var(xs) else NA_real_,
+                       m4 = if (length(xs)) mean((xs - mean(xs))^4) else NA_real_,
+                       nonfinite = sum(!fin), level = level)
+  if (is.finite(r$value) && r$value > 0) {
+    for (f in c("value", "mcse", "lower", "upper")) r[[f]] <- r[[f]] * sc
+    if (!is.finite(r$value) || (!is.na(r$mcse) && !is.finite(r$mcse))) {
+      return(kernel_result(n = length(x), status = "overflow",
+                           note = "the empirical SE or its MCSE exceeds the largest double"))
+    }
+  }
+  r
 }
 
 # The empirical SE kernel from the variance and the fourth central moment
@@ -264,6 +278,10 @@ k_empse_moments <- function(n, var, m4, nonfinite = 0, level = 0.95) {
                          note = "nonfinite estimates; the empirical SE is undefined"))
   }
   if (n < 2L) return(kernel_result(n = n, status = "insufficient", note = "needs at least 2 replications"))
+  if (!is.finite(var) || (n >= 4L && !is.finite(m4))) {
+    return(kernel_result(n = n, status = "overflow",
+                         note = "the moments of the estimates are not representable in double precision"))
+  }
   s <- sqrt(var)
   if (n < 4L) {
     return(kernel_result(value = s, n = n, status = "insufficient",
