@@ -18,10 +18,15 @@ A list of \code{\link[=sim_measure]{sim_measure()}} objects.
 For an estimand of type \code{"categorical"} (a class coded as a number, such
 as a selected model or an estimated number of components), returns
 custom measures: \code{correct}, the proportion of replications in which the
-estimate equals the truth, and \verb{select_<class>}, the proportion in which
-each class is chosen (a multinomial distribution of selections, each
-with an exact interval). Pass them to \code{\link[=sim_measures]{sim_measures()}} with any other
-measures.
+estimate is the true class, \verb{select_<class>}, the proportion in which
+each declared class is chosen, and \code{select_other}, the proportion of
+estimates outside the declared classes (an invalid output, not a
+misclassification), so the selection proportions add up to one. Each
+proportion has an exact interval. The measures apply to categorical
+estimands only; for scalar estimands their cells are \code{not_applicable}.
+A replication whose truth is not a declared class gives a missing
+contribution to \code{correct}. Pass the measures to \code{\link[=sim_measures]{sim_measures()}} with
+any other measures.
 }
 \examples{
 sim_measures("usable", sim_measures_categorical(1:3))

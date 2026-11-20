@@ -143,6 +143,10 @@ sim_measure_info <- function() MEASURE_INFO
 #'   `"truth"`, `"se"`, `"interval"`, `"test"`.
 #' @param direction Preferred direction, for display.
 #' @param description Text.
+#' @param estimand_type `NULL` (applies to every estimand), `"scalar"` or
+#'   `"categorical"`: the type of estimand the measure applies to. Cells of
+#'   other estimands get status `not_applicable`. Built in measures apply
+#'   to scalar estimands; only `usable` also applies to categorical ones.
 #' @return An object of class `adempr_measure`.
 #' @examples
 #' # probability that the absolute error exceeds 0.2
@@ -152,15 +156,29 @@ sim_measure_info <- function() MEASURE_INFO
 #' @export
 sim_measure <- function(id, contribution, aggregate = "mean",
                         requires = c("estimate", "truth"), direction = "none",
-                        description = NULL) {
+                        description = NULL, estimand_type = NULL) {
   check_id(id, "id")
+  if (!is.null(estimand_type) && !(is_scalar_character(estimand_type) &&
+                                   estimand_type %in% c("scalar", "categorical"))) {
+    stopf("`estimand_type` must be NULL, \"scalar\" or \"categorical\".")
+  }
   check_function(contribution, "contribution")
   if (!identical(aggregate, "mean")) check_function(aggregate, "aggregate")
   requires <- match.arg(requires, c("estimate", "truth", "se", "interval", "test"),
                         several.ok = TRUE)
   structure(list(id = id, contribution = contribution, aggregate = aggregate,
                  requires = requires, direction = direction,
-                 description = description), class = "adempr_measure")
+                 description = description, estimand_type = estimand_type),
+            class = "adempr_measure")
+}
+
+# Whether a measure applies to an estimand of the given type. Built in
+# measures treat the estimate as a number on a scale; for a class code only
+# `usable` is meaningful.
+measure_applies <- function(m, type) {
+  type <- type %||% "scalar"
+  if (inherits(m, "adempr_measure")) return(is.null(m$estimand_type) || identical(m$estimand_type, type))
+  identical(type, "scalar") || identical(m, "usable")
 }
 
 kernel_result <- function(value = NA_real_, mcse = NA_real_, lower = NA_real_,
@@ -422,10 +440,15 @@ null_true <- function(theta, h0, alt) {
 #' For an estimand of type `"categorical"` (a class coded as a number, such
 #' as a selected model or an estimated number of components), returns
 #' custom measures: `correct`, the proportion of replications in which the
-#' estimate equals the truth, and `select_<class>`, the proportion in which
-#' each class is chosen (a multinomial distribution of selections, each
-#' with an exact interval). Pass them to [sim_measures()] with any other
-#' measures.
+#' estimate is the true class, `select_<class>`, the proportion in which
+#' each declared class is chosen, and `select_other`, the proportion of
+#' estimates outside the declared classes (an invalid output, not a
+#' misclassification), so the selection proportions add up to one. Each
+#' proportion has an exact interval. The measures apply to categorical
+#' estimands only; for scalar estimands their cells are `not_applicable`.
+#' A replication whose truth is not a declared class gives a missing
+#' contribution to `correct`. Pass the measures to [sim_measures()] with
+#' any other measures.
 #'
 #' @param classes Numeric codes of the classes.
 #' @param labels Labels used in the measure ids; default the codes.
@@ -438,17 +461,31 @@ sim_measures_categorical <- function(classes, labels = classes) {
     stopf("`classes` must be distinct numbers.")
   }
   if (length(labels) != length(classes)) stopf("`labels` must have one entry per class.")
-  out <- list(sim_measure("correct", function(rows) rows$estimate == rows$truth,
-                          requires = c("estimate", "truth"), direction = "higher",
-                          description = "proportion of replications choosing the true class"))
+  if ("other" %in% as.character(labels)) stopf("`other` is reserved for estimates outside the classes.")
+  out <- list(sim_measure("correct", local({
+    classes <- classes
+    function(rows) {
+      ok <- rows$truth %in% classes
+      ifelse(ok, rows$estimate %in% classes & rows$estimate == rows$truth, NA)
+    }
+  }), requires = c("estimate", "truth"), direction = "higher",
+  description = "proportion of replications choosing the true class",
+  estimand_type = "categorical"))
   for (i in seq_along(classes)) {
     cl <- classes[i]
     out[[i + 1L]] <- sim_measure(paste0("select_", labels[i]),
       local({
         cl <- cl
         function(rows) rows$estimate == cl
-      }), requires = "estimate", description = sprintf("proportion choosing class %s", labels[i]))
+      }), requires = "estimate", description = sprintf("proportion choosing class %s", labels[i]),
+      estimand_type = "categorical")
   }
+  out[[length(out) + 1L]] <- sim_measure("select_other", local({
+    classes <- classes
+    function(rows) !(rows$estimate %in% classes)
+  }), requires = "estimate", direction = "lower",
+  description = "proportion of estimates outside the declared classes",
+  estimand_type = "categorical")
   out
 }
 

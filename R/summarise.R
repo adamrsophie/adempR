@@ -279,7 +279,10 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
         for (mid in names(mlist)) {
           m <- mlist[[mid]]
           needs_truth <- measure_needs_truth(m)
-          r <- if (is.null(rows) || !nrow(rows)) {
+          r <- if (!measure_applies(m, estimand$type)) {
+            kernel_result(status = "not_applicable",
+                          note = sprintf("measure does not apply to a %s estimand", estimand$type %||% "scalar"))
+          } else if (is.null(rows) || !nrow(rows)) {
             kernel_result(status = "no_eligible", note = "no results")
           } else if (needs_truth && all(is.na(rows$truth))) {
             kernel_result(status = "unavailable", note = sprintf("truth is %s", tkind))

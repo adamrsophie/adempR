@@ -17,6 +17,41 @@ test_that("categorical estimands get selection proportions and accuracy", {
   expect_error(sim_estimand("x", type = "matrix"), "not supported")
 })
 
+test_that("categorical measures apply only to categorical estimands and count invalid classes", {
+  st <- sim_study("mixed", scenarios = sim_scenarios(n = 30L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n, 0.3)),
+    estimands = list(
+      sim_estimand("model", type = "categorical", truth = sim_truth_exact(function(scenario) 2)),
+      sim_estimand("mean", truth = sim_truth_exact(function(scenario) 0.3))),
+    methods = list(m = function(data) {
+      # class 3 is not a declared class: an invalid output
+      cl <- if (data$y[1] > 1.2) 3 else if (t.test(data$y)$p.value < 0.05) 2 else 1
+      list(sim_estimate("model", cl), sim_estimate("mean", mean(data$y)))
+    }),
+    measures = sim_measures("bias", "usable", sim_measures_categorical(1:2)))
+  run <- sim_run(st, replications = 60, seed = 5, path = run_path())
+  s <- as.data.frame(sim_summarise(run))
+  e <- sim_results(run)$estimates
+  em <- e[e$estimand == "model", ]
+  expect_true(any(em$estimate == 3))
+  sm <- s[s$estimand == "model", ]
+  v <- stats::setNames(sm$value, sm$measure)
+  expect_equal(v[["select_1"]] + v[["select_2"]] + v[["select_other"]], 1)
+  expect_equal(v[["select_other"]], mean(em$estimate == 3))
+  expect_equal(v[["correct"]], mean(em$estimate == 2))
+  expect_identical(sm$status[sm$measure == "bias"], "not_applicable")
+  expect_equal(sm$value[sm$measure == "usable"], 1)
+  ss <- s[s$estimand == "mean", ]
+  expect_true(all(ss$status[ss$measure %in% c("correct", "select_1", "select_2", "select_other")] ==
+                    "not_applicable"))
+  expect_equal(ss$value[ss$measure == "bias"], mean(e$estimate[e$estimand == "mean"]) - 0.3)
+  expect_error(sim_measure("x", function(rows) 1, estimand_type = "vector"), "estimand_type")
+  # the streaming summary scopes built in measures the same way
+  st_s <- sim_summarise_stream(run, "bias")
+  expect_identical(st_s$status[st_s$estimand == "model"], "not_applicable")
+  expect_equal(st_s$value[st_s$estimand == "mean"], ss$value[ss$measure == "bias"])
+})
+
 test_that("the interval score matches a hand computation", {
   st <- normal_study(n = 20L, mu = 1, measures = sim_measures("coverage", sim_measure_interval_score(),
                                                               sim_measure_interval_score("is_rel", scale = "truth")))

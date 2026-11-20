@@ -10,7 +10,8 @@ sim_measure(
   aggregate = "mean",
   requires = c("estimate", "truth"),
   direction = "none",
-  description = NULL
+  description = NULL,
+  estimand_type = NULL
 )
 }
 \arguments{
@@ -31,6 +32,11 @@ list with \code{value} and \code{mcse}.}
 \item{direction}{Preferred direction, for display.}
 
 \item{description}{Text.}
+
+\item{estimand_type}{\code{NULL} (applies to every estimand), \code{"scalar"} or
+\code{"categorical"}: the type of estimand the measure applies to. Cells of
+other estimands get status \code{not_applicable}. Built in measures apply
+to scalar estimands; only \code{usable} also applies to categorical ones.}
 }
 \value{
 An object of class \code{adempr_measure}.

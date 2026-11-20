@@ -190,7 +190,10 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
       a <- acc[[paste(cl, what, sep = "\r")]]
       st <- if (is.null(a)) list(n = 0, mean_x = NA_real_, var_x = NA_real_, m4_x = NA_real_) else sim_accumulated(a$acc)
       n <- st$n + if (is.null(a)) 0 else a$pos + a$neg + a$other
-      r <- switch(m,
+      r <- if (!measure_applies(m, study$estimands[[en]]$type)) {
+        kernel_result(status = "not_applicable",
+                      note = sprintf("measure does not apply to a %s estimand", study$estimands[[en]]$type))
+      } else switch(m,
         empse = {
           r <- k_empse_moments(n, st$var_x, st$m4_x, if (is.null(a)) 0 else a$pos + a$neg + a$other, level)
           if (varying) r$note <- paste(c("SD of the errors (truth varies between data sets)",
