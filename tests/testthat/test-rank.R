@@ -58,3 +58,28 @@ test_that("EmpSE ranking uses the errors when the truth varies", {
   expect_equal(r$value[r$method == "exact"], 0)
   expect_equal(r$rank[r$method == "exact"], 1)
 })
+
+test_that("a ranking that an uncertain truth can reverse is labeled", {
+  mk <- function(se) sim_study("rank_truth", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mean", sim_truth_mc(function(scenario, n) {
+      sim_truth_value(0.6, se = se, n = n)
+    }, n = 10))),
+    methods = list(a = function(data) sim_estimate("mean", 0),
+                   b = function(data) sim_estimate("mean", 1)))
+  run <- sim_run(mk(1), replications = 10, seed = 1, path = run_path())
+  r <- sim_rank(run, "bias", B = 20)
+  # b wins for the reported truth 0.6, a wins for truths below 0.5
+  expect_equal(r$p_first[r$method == "b"], 1)
+  expect_true(all(r$truth_conditional))
+  expect_equal(unique(r$truth_halfwidth), stats::qnorm(0.975) * sim_truth(run)$truth_se, tolerance = 1e-8)
+  expect_true(all(r$first_possible))
+  expect_true(all(r$status == "truth_sensitive"))
+  # a precise truth cannot reverse it
+  r2 <- sim_rank(sim_run(mk(0.01), replications = 10, seed = 1, path = run_path()), "bias", B = 20)
+  expect_true(all(r2$status == "ok"))
+  expect_equal(r2$first_possible, c(FALSE, TRUE))
+  # the empirical SE does not use the truth
+  r3 <- sim_rank(sim_run(mk(1), replications = 10, seed = 1, path = run_path()), "empse", B = 20)
+  expect_false(any(r3$truth_conditional))
+})

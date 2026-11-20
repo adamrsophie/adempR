@@ -45,6 +45,22 @@ rank_loss <- function(measure, value, nominal) {
 #' nominal level of the intervals. With a truth that varies between data
 #' sets the empirical SE is the SD of the errors, as in [sim_summarise()].
 #'
+#' The bootstrap resamples replications and holds the reference value
+#' fixed, so for bias, MAE, MSE, RMSE and coverage the ranking and
+#' `p_first` are conditional on the truth. When the truth is itself
+#' uncertain (a Monte Carlo truth, or a numerical truth with a nonzero or
+#' unstated error bound) this is said in the output: `truth_conditional`
+#' is `TRUE` and `truth_halfwidth` gives the range of truths considered,
+#' the error bound of a numerical truth or the normal quantile at the
+#' study level times the SE of a Monte Carlo truth. The truth is common to
+#' all methods, so it is shifted jointly over that range (never
+#' independently per replication or per method), and `first_possible`
+#' marks each method that is first for some truth in it. When first place
+#' changes within the range the cell gets status `truth_sensitive`: the
+#' bootstrap probabilities then hold only for the reported truth. With an
+#' unstated error bound the range is unknown, `truth_halfwidth` and
+#' `first_possible` are `NA` and the status is `truth_unbounded`.
+#'
 #' @param run A run or results.
 #' @param measure One of `"bias"`, `"mae"`, `"mse"`, `"rmse"`, `"empse"`,
 #'   `"coverage"` or `"width"`.
@@ -59,7 +75,8 @@ rank_loss <- function(measure, value, nominal) {
 #'   order, 1 = reversed) is returned per cell, with its bootstrap mean.
 #' @return A data frame with one row per scenario and method: `value`,
 #'   `loss`, `rank`, `first` (share of first place in the full sample),
-#'   `mean_rank`, `p_first`, `n_common`, `status`, and, with a reference,
+#'   `mean_rank`, `p_first`, `n_common`, `truth_conditional`,
+#'   `truth_halfwidth`, `first_possible`, `status`, and, with a reference,
 #'   `kendall` and `kendall_boot`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
@@ -99,8 +116,12 @@ sim_rank <- function(run, measure = "mse", methods = NULL, estimand = NULL, B = 
     data.frame(scenario_key = key, scenario_id = study$scenarios$labels[match(key, study$scenarios$keys)],
                estimand = estimand, method = methods, measure = measure, value = NA_real_,
                loss = NA_real_, rank = NA_real_, first = NA_real_, mean_rank = NA_real_,
-               p_first = NA_real_, n_common = n, status = status, stringsAsFactors = FALSE)
+               p_first = NA_real_, n_common = n, truth_conditional = NA,
+               truth_halfwidth = NA_real_, first_possible = NA, status = status,
+               stringsAsFactors = FALSE)
   }
+  truth_based <- measure %in% c("bias", "mae", "mse", "rmse", "coverage")
+  zq <- stats::qnorm(1 - (1 - (study$level %||% 0.95)) / 2)
   for (key in study$scenarios$keys) {
     sub <- est[est$scenario_key == key, , drop = FALSE]
     common <- Reduce(intersect, lapply(methods, function(m) sub$replication[sub$method == m]))
@@ -129,11 +150,11 @@ sim_rank <- function(run, measure = "mse", methods = NULL, estimand = NULL, B = 
       out[[length(out) + 1L]] <- skipped(key, n, "intervals without a single nominal level")
       next
     }
-    losses <- function(idx) {
+    losses <- function(idx, shift = 0) {
       vapply(methods, function(m) {
         cc <- cols[[m]]
-        rank_loss(measure, rank_value(measure, cc$e[idx], cc$t[idx], cc$lo[idx], cc$up[idx], cc$varying),
-                  nominal[[m]])
+        rank_loss(measure, rank_value(measure, cc$e[idx], cc$t[idx] + shift, cc$lo[idx], cc$up[idx],
+                                      cc$varying), nominal[[m]])
       }, numeric(1))
     }
     full <- seq_len(n)
@@ -151,13 +172,43 @@ sim_rank <- function(run, measure = "mse", methods = NULL, estimand = NULL, B = 
     boot <- vapply(bl, rank, numeric(length(methods)), ties.method = "average")
     boot <- matrix(boot, nrow = length(methods))
     pf <- matrix(vapply(bl, first_share, numeric(length(methods))), nrow = length(methods))
+    # the truth is shared by every method, so its uncertainty moves all
+    # losses together: shift it jointly over its range and see whether
+    # first place changes
+    tk <- study$estimands[[estimand]]$truth$kind
+    conditional <- truth_based && (identical(tk, "mc") ||
+                                     (identical(tk, "numeric") && !isTRUE(study$estimands[[estimand]]$truth$error == 0)))
+    hw <- NA_real_
+    possible <- rep(NA, length(methods))
+    status <- "ok"
+    if (conditional) {
+      srow <- sub[sub$replication %in% common, , drop = FALSE]
+      hw <- if (identical(tk, "mc")) zq * suppressWarnings(max(srow$truth_se, na.rm = TRUE)) else
+        suppressWarnings(max(srow$truth_error, na.rm = TRUE))
+      if (!is.finite(hw)) {
+        hw <- NA_real_
+        status <- "truth_unbounded"
+      } else {
+        # ponytail: a grid of joint shifts; exact crossing points if a
+        # narrow reversal ever matters
+        sh <- unique(c(0, seq(-hw, hw, length.out = 201L)))
+        firsts <- vapply(sh, function(d) first_share(losses(full, d)) > 0, logical(length(methods)))
+        firsts <- matrix(firsts, nrow = length(methods))
+        possible <- rowSums(firsts) > 0
+        if (any(firsts != firsts[, 1])) status <- "truth_sensitive"
+      }
+    } else if (truth_based) {
+      possible <- first_share(loss) > 0
+    }
     df <- data.frame(scenario_key = key,
                      scenario_id = study$scenarios$labels[match(key, study$scenarios$keys)],
                      estimand = estimand, method = methods, measure = measure,
                      value = unname(value), loss = unname(loss), rank = unname(rk),
                      first = unname(first_share(loss)),
                      mean_rank = rowMeans(boot), p_first = rowMeans(pf),
-                     n_common = n, status = "ok", stringsAsFactors = FALSE)
+                     n_common = n, truth_conditional = conditional,
+                     truth_halfwidth = hw, first_possible = possible,
+                     status = status, stringsAsFactors = FALSE)
     if (!is.null(reference)) {
       df$kendall <- kendall_distance(rk, match(methods, reference))
       df$kendall_boot <- mean(apply(boot, 2, kendall_distance, ref = match(methods, reference)))

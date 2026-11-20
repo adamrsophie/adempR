@@ -37,7 +37,8 @@ order, 1 = reversed) is returned per cell, with its bootstrap mean.}
 \value{
 A data frame with one row per scenario and method: \code{value},
 \code{loss}, \code{rank}, \code{first} (share of first place in the full sample),
-\code{mean_rank}, \code{p_first}, \code{n_common}, \code{status}, and, with a reference,
+\code{mean_rank}, \code{p_first}, \code{n_common}, \code{truth_conditional},
+\code{truth_halfwidth}, \code{first_possible}, \code{status}, and, with a reference,
 \code{kendall} and \code{kendall_boot}.
 }
 \description{
@@ -61,6 +62,22 @@ Smaller is better for MAE, MSE, RMSE, empirical SE and width; for bias
 the absolute bias is ranked, and for coverage the distance from the
 nominal level of the intervals. With a truth that varies between data
 sets the empirical SE is the SD of the errors, as in \code{\link[=sim_summarise]{sim_summarise()}}.
+
+The bootstrap resamples replications and holds the reference value
+fixed, so for bias, MAE, MSE, RMSE and coverage the ranking and
+\code{p_first} are conditional on the truth. When the truth is itself
+uncertain (a Monte Carlo truth, or a numerical truth with a nonzero or
+unstated error bound) this is said in the output: \code{truth_conditional}
+is \code{TRUE} and \code{truth_halfwidth} gives the range of truths considered,
+the error bound of a numerical truth or the normal quantile at the
+study level times the SE of a Monte Carlo truth. The truth is common to
+all methods, so it is shifted jointly over that range (never
+independently per replication or per method), and \code{first_possible}
+marks each method that is first for some truth in it. When first place
+changes within the range the cell gets status \code{truth_sensitive}: the
+bootstrap probabilities then hold only for the reported truth. With an
+unstated error bound the range is unknown, \code{truth_halfwidth} and
+\code{first_possible} are \code{NA} and the status is \code{truth_unbounded}.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),
