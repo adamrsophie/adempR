@@ -110,3 +110,58 @@ test_that("usable comparisons ignore replications a method has not attempted", {
   expect_equal(cp$value, 0)
   expect_equal(cp$n_common, 2)
 })
+
+test_that("comparisons do not depend on row order and report excluded widths", {
+  st <- sim_study("order",
+    scenarios = sim_scenarios(n = c(10L, 20L)),
+    generate = function(scenario, context) rnorm(scenario$n),
+    estimands = list(sim_estimand("mu", sim_truth_exact(function(scenario) 0))),
+    methods = list(
+      a = function(data) sim_estimate("mu", mean(data), lower = mean(data) - 1, upper = mean(data) + 1,
+                                      level = 0.95),
+      b = function(data) {
+        m <- median(data)
+        # an unbounded interval now and then
+        sim_estimate("mu", m, lower = m - 1, upper = if (data[1] > 1) Inf else m + 1, level = 0.95)
+      }))
+  run <- sim_run(st, replications = 40, seed = 3, path = run_path())
+  res <- sim_results(run)
+  cmp <- sim_compare(res, c("a", "b"), measures = c("empse_ratio", "width"), bootstrap = 200)
+  rev_res <- res
+  rev_res$replications <- res$replications[rev(seq_len(nrow(res$replications))), ]
+  rev_res$estimates <- res$estimates[rev(seq_len(nrow(res$estimates))), ]
+  expect_identical(sim_compare(rev_res, c("a", "b"), measures = c("empse_ratio", "width"),
+                               bootstrap = 200), cmp)
+  # each cell has its own stream: measures in another order give the same rows
+  cmp2 <- sim_compare(res, c("a", "b"), measures = c("width", "empse_ratio"), bootstrap = 200)
+  key <- function(x) x[order(x$scenario_key, x$measure), c("value", "lower", "upper")]
+  expect_equal(key(cmp2), key(cmp), ignore_attr = TRUE)
+  w <- cmp[cmp$measure == "width", ]
+  n_inf <- vapply(st$scenarios$keys, function(k) {
+    e <- res$estimates[res$estimates$scenario_key == k & res$estimates$method == "b", ]
+    sum(!is.finite(e$upper))
+  }, numeric(1))
+  expect_true(any(n_inf > 0))
+  for (i in seq_len(nrow(w))) {
+    k <- n_inf[[w$scenario_key[i]]]
+    if (k) expect_match(w$note[i], sprintf("%d replication(s) with an infinite interval width excluded", k),
+                        fixed = TRUE)
+  }
+})
+
+test_that("the RMSE ratio reports its sensitivity to a Monte Carlo truth", {
+  mk <- function(x) data.frame(replication = seq_along(x), method = "m", estimate = x, truth = 0,
+                               truth_se = 0.1, truth_kind = "mc", valid = TRUE,
+                               estimate_status = "ok", interval_status = NA, test_status = NA,
+                               lower = NA, upper = NA)
+  set.seed(1)
+  a <- mk(rnorm(50, 0.05))
+  b <- mk(rnorm(50, 0.3, 2))
+  study <- list(generator = list(), alpha = 0.05, level = 0.95)
+  rr <- adempR:::compare_one("rmse_ratio", b, a, study, 1.96, 100, adempR:::rng_base_seed(1, "t"))
+  grid <- vapply(seq(-0.2, 0.2, length.out = 41L), function(s) {
+    sqrt(mean((b$estimate - s)^2) / mean((a$estimate - s)^2))
+  }, numeric(1))
+  expect_equal(rr$sens, range(grid))
+  expect_true(rr$sens[1] < rr$value && rr$value < rr$sens[2])
+})

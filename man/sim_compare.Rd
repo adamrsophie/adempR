@@ -72,8 +72,12 @@ A common truth cancels from differences in bias, so its uncertainty does
 not enter. For MAE, MSE and coverage differences against a Monte Carlo
 truth it does not cancel: the interval is conditional on the truth, and
 \code{truth_sens_lower} and \code{truth_sens_upper} give the range of the
-difference while the shared truth moves by two of its standard errors
-for both methods together. Bootstrap comparisons report how many
+difference (for \code{rmse_ratio}, of the ratio) while the shared truth moves
+by two of its standard errors for both methods together. Replications
+are paired by number, and every scenario, comparison and measure has
+its own bootstrap stream derived from \code{seed}, so the results do not
+depend on the order of batches, scenarios or measures. Infinite
+interval widths excluded from \code{width} are counted in the note. Bootstrap comparisons report how many
 resamples were undefined and withhold the interval (status \code{unstable})
 when more than 1 percent were.
 }

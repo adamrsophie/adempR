@@ -31,8 +31,12 @@ COMPARE_NONLINEAR <- c("relative_precision", "empse_ratio", "rmse_ratio")
 #' not enter. For MAE, MSE and coverage differences against a Monte Carlo
 #' truth it does not cancel: the interval is conditional on the truth, and
 #' `truth_sens_lower` and `truth_sens_upper` give the range of the
-#' difference while the shared truth moves by two of its standard errors
-#' for both methods together. Bootstrap comparisons report how many
+#' difference (for `rmse_ratio`, of the ratio) while the shared truth moves
+#' by two of its standard errors for both methods together. Replications
+#' are paired by number, and every scenario, comparison and measure has
+#' its own bootstrap stream derived from `seed`, so the results do not
+#' depend on the order of batches, scenarios or measures. Infinite
+#' interval widths excluded from `width` are counted in the note. Bootstrap comparisons report how many
 #' resamples were undefined and withhold the interval (status `unstable`)
 #' when more than 1 percent were.
 #'
@@ -92,11 +96,13 @@ sim_compare <- function(run, methods, estimand = NULL,
   reps <- res$replications
   level <- study$level
   z <- stats::qnorm(1 - (1 - level) / 2)
-  boot_state <- parallel::nextRNGStream(rng_base_seed(seed))
+  if (!is_count(seed)) stopf("`seed` must be a single nonnegative whole number.")
   out <- list()
   ref <- methods[1]
   for (key in study$scenarios$keys) {
-    gen_ok <- reps$replication[reps$scenario_key == key & reps$generation_status == "ok"]
+    # sorted, so the pairing and the bootstrap do not depend on the order in
+    # which batches were read
+    gen_ok <- sort(unique(reps$replication[reps$scenario_key == key & reps$generation_status == "ok"]))
     get <- function(mn) {
       r <- est[est$scenario_key == key & est$method == mn & est$estimand == estimand, ,
                drop = FALSE]
@@ -107,6 +113,9 @@ sim_compare <- function(run, methods, estimand = NULL,
     for (other in methods[-1]) {
       b <- get(other)
       for (ms in measures) {
+        # each cell has its own bootstrap stream, keyed by what it compares
+        boot_state <- rng_base_seed(seed, paste0("compare:", key, ":", estimand, ":", ref, ":",
+                                                 other, ":", ms))
         rr <- compare_one(ms, b, a, study, z, bootstrap, boot_state)
         # Ratios are equal at 1: a margin m means the interval lies within
         # (1 / (1 + m), 1 + m). Differences (and the percent change in
@@ -172,6 +181,11 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
     nonfinite <- sum((a$valid %in% TRUE & !is.finite(a$estimate)) |
                        (b$valid %in% TRUE & !is.finite(b$estimate)))
     if (nonfinite) notes <- sprintf("%d replication(s) with an infinite estimate excluded", nonfinite)
+  }
+  if (ms == "width") {
+    int_ok <- function(r) r$estimate_status %in% USABLE_FOR_INTERVAL & r$interval_status %in% "valid"
+    infinite <- sum((int_ok(a) & !is.finite(a$upper - a$lower)) | (int_ok(b) & !is.finite(b$upper - b$lower)))
+    if (infinite) notes <- sprintf("%d replication(s) with an infinite interval width excluded", infinite)
   }
   tse <- a$truth_se[common][1]
   mc_truth <- ms %in% c("mae", "mse", "coverage", "rmse_ratio") && any(common) &&
@@ -270,6 +284,16 @@ compare_one <- function(ms, b, a, study, z, B, boot_state) {
     analytic <- 200 * ratio * sqrt((1 - base$rho^2) / (n - 1))
     notes <- c(notes, sprintf("analytic MCSE %s (Morris et al. 2019; assumes bivariate normal estimates)",
                               format(signif(analytic, 3))))
+  }
+  if (mc_truth && ms == "rmse_ratio") {
+    # the shared truth moves both methods together
+    ta0 <- ta
+    v <- vapply(seq(-2, 2, length.out = 41L) * tse, function(s) {
+      ta <<- ta0 + s
+      stat(seq_len(n))
+    }, numeric(1))
+    ta <- ta0
+    base$sens <- range(v[is.finite(v)])
   }
   if (!is.finite(base$value)) base$status <- "undefined"
   finish(base)
