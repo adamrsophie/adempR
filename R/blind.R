@@ -74,10 +74,13 @@ sim_export_blinded <- function(run, dir, scenarios = NULL, replications = NULL, 
 #' Turn externally computed results into a method
 #'
 #' Wraps results computed outside R or by blinded analysts on data sets
-#' exported with [sim_export_blinded()]. The returned method identifies
-#' each data set by its checksum (the data passed to a method are exactly
-#' the exported data), looks up the rows for its code and returns them as
-#' estimates. Add it to the study (for example with [sim_amend()] or a new
+#' exported with [sim_export_blinded()]. The returned method finds the
+#' code of each data set from its scenario and replication (so identical
+#' data sets in different replications keep their own results), checks
+#' that the data equal the exported data by their checksum, and returns
+#' the rows for that code as estimates. The tables are validated when the
+#' method is built: codes and data sets must be unique in the key, and
+#' there must be at most one row per code and estimand. Add it to the study (for example with [sim_amend()] or a new
 #' study revision) and extend the run: the results are then evaluated like
 #' any other method. A data set without a returned row is an error of that
 #' method on that data set and is classified by the failure policy.
@@ -95,18 +98,38 @@ sim_external_method <- function(results, key, ...) {
   if (!is.data.frame(results) || !all(c("code", "estimand", "estimate") %in% names(results))) {
     stopf("`results` must be a data frame with columns code, estimand and estimate.")
   }
-  if (!is.data.frame(key) || !all(c("code", "data_md5") %in% names(key))) {
+  if (!is.data.frame(key) ||
+      !all(c("code", "scenario_key", "replication", "data_md5") %in% names(key))) {
     stopf("`key` must come from sim_export_blinded().")
   }
+  if (anyDuplicated(key$code)) stopf("The key has duplicated codes.")
+  task <- paste(key$scenario_key, key$replication, sep = "\r")
+  if (anyDuplicated(task)) stopf("The key lists a scenario and replication more than once.")
   unknown <- setdiff(unique(results$code), key$code)
   if (length(unknown)) stopf("Unknown code(s) in `results`: %s.", paste(utils::head(unknown, 5), collapse = ", "))
+  dup <- duplicated(results[c("code", "estimand")])
+  if (any(dup)) {
+    stopf("`results` has more than one row for code and estimand: %s.",
+          paste(utils::head(paste(results$code[dup], results$estimand[dup]), 5), collapse = ", "))
+  }
+  if (!is.character(results$estimand) && !is.factor(results$estimand)) stopf("`estimand` must be text.")
   cols <- intersect(c("se", "lower", "upper", "level", "p_value", "null", "note"), names(results))
+  for (cn in c("estimate", setdiff(cols, "note"))) {
+    if (!is.numeric(results[[cn]]) && !all(is.na(results[[cn]]))) stopf("Column `%s` of `results` must be numeric.", cn)
+  }
+  if ("note" %in% cols && !is.character(results$note) && !all(is.na(results$note))) {
+    stopf("Column `note` of `results` must be text.")
+  }
+  results$estimand <- as.character(results$estimand)
   table <- results[c("code", "estimand", "estimate", cols)]
-  lookup <- key[c("code", "data_md5")]
-  fun <- function(data) {
-    h <- adempR_data_md5(data)
-    code <- lookup$code[match(h, lookup$data_md5)]
-    if (is.na(code)) stop("This data set was not exported for external analysis.")
+  lookup <- data.frame(task = task, code = key$code, data_md5 = key$data_md5, stringsAsFactors = FALSE)
+  fun <- function(data, context) {
+    i <- match(paste(context$scenario_key, context$replication, sep = "\r"), lookup$task)
+    if (is.na(i)) stop("This data set was not exported for external analysis.")
+    if (!identical(adempR_data_md5(data), lookup$data_md5[i])) {
+      stop("This data set differs from the one exported for external analysis.")
+    }
+    code <- lookup$code[i]
     rows <- table[table$code == code, , drop = FALSE]
     if (!nrow(rows)) stop("No external result was returned for this data set.")
     lapply(seq_len(nrow(rows)), function(i) {

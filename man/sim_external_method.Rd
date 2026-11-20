@@ -21,10 +21,13 @@ A \code{\link[=sim_method]{sim_method()}}.
 }
 \description{
 Wraps results computed outside R or by blinded analysts on data sets
-exported with \code{\link[=sim_export_blinded]{sim_export_blinded()}}. The returned method identifies
-each data set by its checksum (the data passed to a method are exactly
-the exported data), looks up the rows for its code and returns them as
-estimates. Add it to the study (for example with \code{\link[=sim_amend]{sim_amend()}} or a new
+exported with \code{\link[=sim_export_blinded]{sim_export_blinded()}}. The returned method finds the
+code of each data set from its scenario and replication (so identical
+data sets in different replications keep their own results), checks
+that the data equal the exported data by their checksum, and returns
+the rows for that code as estimates. The tables are validated when the
+method is built: codes and data sets must be unique in the key, and
+there must be at most one row per code and estimand. Add it to the study (for example with \code{\link[=sim_amend]{sim_amend()}} or a new
 study revision) and extend the run: the results are then evaluated like
 any other method. A data set without a returned row is an error of that
 method on that data set and is classified by the failure policy.

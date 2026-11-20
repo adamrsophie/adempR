@@ -74,3 +74,32 @@ test_that("a blinded report hides warnings, revisions and keeps summaries unchan
   expect_match(html, paste0(lab, "</td>"))
   expect_equal(key$seed[1], 7)
 })
+
+test_that("external results are joined by task, so identical data sets keep their own answers", {
+  # a fixed design: every replication has the same data
+  st <- sim_study("fixed", scenarios = sim_scenarios(n = 3L),
+    generate = function(scenario, context) data.frame(y = c(1, 2, 3)),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 2))),
+    methods = list(avg = function(data) sim_estimate("mean", mean(data$y))), measures = "bias")
+  p <- run_path()
+  run <- sim_run(st, replications = 3, seed = 1, path = p)
+  dir <- file.path(tempdir(), paste0("blindfix-", basename(p)))
+  key <- sim_export_blinded(run, dir, seed = 7)
+  expect_equal(length(unique(key$data_md5)), 1L)
+  ans <- c(11, 12, 13)
+  ext <- data.frame(code = key$code, estimand = "mean", estimate = ans[key$replication])
+  m <- c(st$methods, list(external = sim_external_method(ext, key)))
+  st2 <- sim_study("fixed", scenarios = st$scenarios, generate = st$generator,
+                   estimands = st$estimands, methods = m, measures = "bias")
+  e <- sim_results(sim_run(st2, replications = 3, seed = 1, path = p))$estimates
+  ee <- e[e$method == "external", ]
+  expect_equal(ee$estimate[order(ee$replication)], ans)
+  # tables are validated when the method is built
+  expect_error(sim_external_method(rbind(ext, ext[1, ]), key), "more than one row")
+  bad_key <- key
+  bad_key$code[2] <- bad_key$code[1]
+  expect_error(sim_external_method(ext, bad_key), "duplicated codes")
+  ext_chr <- ext
+  ext_chr$estimate <- as.character(ext_chr$estimate)
+  expect_error(sim_external_method(ext_chr, key), "must be numeric")
+})
