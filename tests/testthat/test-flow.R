@@ -83,3 +83,20 @@ test_that("a large sample run flags a method aimed at a different quantity", {
   expect_equal(v$status[grepl("large_n:.*:off", v$check)], "warning")
   expect_error(sim_validate(st, large_n = 1e5), "named list")
 })
+
+test_that("usable proportions say when generated data sets are not yet analyzed", {
+  st <- normal_study(n = 10L, mu = 0, measures = c("bias", "usable_coverage"))
+  res <- sim_results(sim_run(st, replications = 4, seed = 1, path = run_path()))
+  # as after an interruption: two of four generated data sets analyzed
+  res$estimates <- res$estimates[res$estimates$replication <= 2, ]
+  res$attempts <- res$attempts[res$attempts$replication <= 2, ]
+  s <- as.data.frame(sim_summarise(res))
+  u <- s[s$measure == "usable", ]
+  expect_identical(u$status, "incomplete")
+  expect_equal(u$value, 1)
+  expect_match(u$note, "2 of 4 generated data sets not yet analyzed")
+  expect_match(u$note, "\\[0.5, 1\\]")
+  expect_identical(s$status[s$measure == "usable_coverage"], "incomplete")
+  expect_equal(u$n_generated, 4L)
+  expect_equal(u$n_attempted, 2L)
+})

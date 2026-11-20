@@ -108,6 +108,9 @@ generated data sets. The summary reports `n_eligible` for each cell, and a
 * `boundary`: a proportion of 0 or 1
 * `undefined`: for example relative bias with zero truth
 * `unavailable`: the truth is unknown
+* `incomplete`: for `usable` and `usable_coverage`, some generated data
+  sets have not been analyzed yet (for example after an interrupted run);
+  the note gives the bounds over all generated data sets
 * `mcse_unavailable`: no known MCSE, for a custom measure without one or
   when the jackknife is undefined (for the SE ratio, leaving one
   replication out can leave estimates that are all equal)

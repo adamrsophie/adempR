@@ -313,6 +313,20 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
             measure_cell(m, rows, study, estimand)
           }
           if (isTRUE(r$proportion)) prop_ids <- union(prop_ids, mid)
+          # The usable proportions are over all generated data sets. While
+          # some have not been analyzed yet, the value covers only the
+          # attempted ones; the bounds over all generated data sets count
+          # the outstanding ones as all failing or all succeeding.
+          n_out <- length(gen_ok) - nrow(rows)
+          if (mid %in% c("usable", "usable_coverage") && n_out > 0L &&
+              r$status %in% c("ok", "boundary", "no_eligible")) {
+            k <- if (is.na(r$value)) 0 else round(r$value * r$n)
+            r$status <- "incomplete"
+            r$note <- paste(c(sprintf("%d of %d generated data sets not yet analyzed; the value covers the analyzed ones; over all generated data sets it lies in [%s, %s]",
+                                      n_out, length(gen_ok), format(signif(k / length(gen_ok), 4)),
+                                      format(signif((k + n_out) / length(gen_ok), 4))),
+                              if (!is.na(r$note)) r$note), collapse = "; ")
+          }
           # antithetic replications are dependent in pairs: the uncertainty
           # comes from the pairs, the independent units
           if (isTRUE(study$generator$antithetic) && nrow(rows)) {
