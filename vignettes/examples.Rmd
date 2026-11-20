@@ -232,6 +232,8 @@ cace_study <- sim_study("noncompliance",
     iv = sim_method(function(data) {
       itt_y <- mean(data$y[data$z == 1]) - mean(data$y[data$z == 0])
       itt_d <- mean(data$d[data$z == 1]) - mean(data$d[data$z == 0])
+      # the ratio is undefined without a first stage: a recorded failure
+      if (itt_d == 0) stop("no first stage: no complier was treated")
       sim_estimate("cace", itt_y / itt_d)
     }, estimands = "cace"),
     as_treated = sim_method(function(data) {
@@ -244,6 +246,11 @@ cs <- as.data.frame(sim_summarise(crun))
 cs[cs$measure == "bias", c("scenario_id", "method", "estimand", "value", "mcse")]
 ```
 
-The ITT and instrumental variable estimators are unbiased for their own
-estimands; the as-treated comparison is biased for the CACE because the
-treated group holds only compliers, who have higher `u`.
+The ITT estimator is unbiased for its estimand. The instrumental variable
+ratio is consistent for the CACE under randomization, exclusion and
+one-sided noncompliance, but as a ratio of two estimates it is not exactly
+unbiased in finite samples; here its bias cannot be told apart from zero
+at this number of replications. A data set without a first stage (no treated complier) has no
+ratio and is recorded as a failure of that method rather than dropped. The
+as-treated comparison is biased for the CACE because the treated group
+holds only compliers, who have higher `u`.

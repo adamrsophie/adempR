@@ -149,10 +149,13 @@ quadrature_truth <- sim_truth_numeric(function(scenario) {
     integrate(f, -Inf, Inf, rel.tol = 1e-10)
   }
   m1 <- m(1); m0 <- m(0)
-  list(value = qlogis(m1$value) - qlogis(m0$value),
-       # a conservative bound on the error of the difference of logits
-       error = (m1$abs.error / (m1$value * (1 - m1$value)) +
-                  m0$abs.error / (m0$value * (1 - m0$value))))
+  value <- qlogis(m1$value) - qlogis(m0$value)
+  # each probability lies within its quadrature error bound; the logit is
+  # increasing, so the difference of logits is bounded by the endpoints
+  lim <- function(q) pmin(pmax(q$value + c(-1, 1) * q$abs.error, 0), 1)
+  p1 <- lim(m1); p0 <- lim(m0)
+  ends <- c(qlogis(p1[1]) - qlogis(p0[2]), qlogis(p1[2]) - qlogis(p0[1]))
+  list(value = value, error = max(abs(ends - value)))
 })
 quadrature_truth$fun(scen$values[[1]])
 ```
