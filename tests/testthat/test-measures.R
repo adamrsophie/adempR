@@ -147,9 +147,9 @@ test_that("truth sensitivity ranges include interior extrema", {
   rows <- data.frame(estimate = c(0, 0), truth = c(0, 0), lower = c(-0.5, -0.5),
                      upper = c(0.5, 0.5), valid = TRUE, estimate_status = "valid",
                      interval_status = "valid")
-  expect_equal(adempR:::truth_sensitivity("coverage", rows, list(level = 0.95), NULL, 1), c(0, 1))
+  expect_equal(adempR:::truth_sensitivity("coverage", rows, list(level = 0.95), NULL, 2), c(0, 1))
   st <- list(level = 0.95)
-  expect_equal(adempR:::truth_sensitivity("mse", rows, st, NULL, 1), c(0, 4))
+  expect_equal(adempR:::truth_sensitivity("mse", rows, st, NULL, 2), c(0, 4))
 })
 
 test_that("bias eliminated coverage handles varying truth, infinity and dependence", {
@@ -305,4 +305,36 @@ test_that("weighted boundary intervals cover usable_coverage and custom logical 
   w <- s[s$scenario_key == "weighted" & s$measure == "hit", ]
   expect_equal(w$status, "boundary")
   expect_true(is.finite(w$lower) && w$lower < 1)
+})
+
+test_that("truth sensitivity finds the exact extrema of squared error and coverage", {
+  # Monte Carlo truth 0 with standard error 0.577; a constant estimate of 1/3
+  mc <- sim_truth_mc(function(scenario, n) c(-1, 1, -1, 1), n = 4)
+  st <- sim_study("sens", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) data.frame(odd = context$replication %% 2 == 1),
+    estimands = list(sim_estimand("m", mc)),
+    methods = list(c = function(data) {
+      # intervals [-1, 0] and [1e-10, 1]: no interval covers a truth inside the gap
+      if (data$odd[1]) sim_estimate("m", 1 / 3, lower = -1, upper = 0, level = 0.95)
+      else sim_estimate("m", 1 / 3, lower = 1e-10, upper = 1, level = 0.95)
+    }), measures = c("mse", "coverage"))
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 4, seed = 1, path = run_path())))
+  mse <- s[s$measure == "mse", ]
+  expect_equal(mse$truth_sens_lower, 0)
+  cov <- s[s$measure == "coverage", ]
+  expect_equal(cov$value, 0.5)
+  expect_equal(cov$truth_sens_lower, 0)
+  expect_equal(cov$truth_sens_upper, 0.5)
+})
+
+test_that("a numerical truth error bound gives a sensitivity range", {
+  st <- sim_study("numsens", scenarios = sim_scenarios(n = 5L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+    estimands = list(sim_estimand("m", sim_truth_numeric(function(scenario) list(value = 0, error = 0.25)))),
+    methods = list(c = function(data) sim_estimate("m", mean(data$y))), measures = "bias")
+  run <- sim_run(st, replications = 10, seed = 1, path = run_path())
+  s <- as.data.frame(sim_summarise(run))
+  b <- s[s$measure == "bias", ]
+  expect_equal(c(b$truth_sens_lower, b$truth_sens_upper), b$value + c(-0.25, 0.25))
+  expect_true(is.na(b$mcse_total))
 })

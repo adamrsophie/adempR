@@ -158,24 +158,29 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
 # with sorted endpoints). For other measures the range is evaluated on a
 # grid of 41 points plus the shifts where bias is zero and where the
 # absolute error is smallest; this is exact for bias, MSE, RMSE and MAE.
-truth_sensitivity <- function(m, rows, study, estimand, tse) {
-  lim <- 2 * tse
+truth_sensitivity <- function(m, rows, study, estimand, lim) {
   if (identical(m, "coverage")) {
     usable_int <- rows$estimate_status %in% USABLE_FOR_INTERVAL &
       rows$interval_status == "valid" & !is.na(rows$truth)
     t <- rows$truth[usable_int]
     if (!length(t)) return(c(NA_real_, NA_real_))
+    # Interval i covers the shifted truth t + s when l_i <= s <= u_i. The
+    # count is constant between endpoints, so the endpoints themselves and
+    # one point inside every gap between them (midpoints, no fixed epsilon
+    # that could step over a narrow gap) give its exact range.
     l <- sort(rows$lower[usable_int] - t)
     u <- sort(rows$upper[usable_int] - t)
-    eps <- 1e-9 * max(1, abs(c(l, u)[is.finite(c(l, u))]))
-    s <- c(-lim, lim, l, l - eps, u, u + eps)
-    s <- s[is.finite(s) & s >= -lim & s <= lim]
+    b <- unique(sort(c(-lim, lim, l, u)))
+    b <- b[is.finite(b) & b >= -lim & b <= lim]
+    s <- c(b, (b[-1] + b[-length(b)]) / 2)
     covered <- findInterval(s, l) - findInterval(s, u, left.open = TRUE)
     return(range(covered) / length(t))
   }
   e <- rows$estimate - rows$truth
   ok <- rows$valid & is.finite(e)
-  extra <- if (any(ok)) c(-mean(e[ok]), -stats::median(e[ok])) else numeric()
+  # shifting the truth by s turns the errors into e - s, so a squared or
+  # absolute error is smallest at s = mean(e) or s = median(e)
+  extra <- if (any(ok)) c(mean(e[ok]), stats::median(e[ok])) else numeric()
   s <- c(seq(-lim, lim, length.out = 41L), extra[abs(extra) <= lim])
   v <- vapply(s, function(sh) measure_cell(m, rows, study, estimand, shift = sh)$value,
               numeric(1))
@@ -210,7 +215,8 @@ measure_needs_truth <- function(m) {
 #' uses an independent random number stream) and, for every measure that
 #' depends on the truth, a sensitivity range: the smallest and largest value
 #' of the measure while the truth moves over plus and minus two standard
-#' errors. For coverage every point where the truth crosses an interval
+#' errors. A numerical truth with an error bound gets the same range over
+#' plus and minus the bound. For coverage every point where the truth crosses an interval
 #' endpoint is evaluated; for bias, MSE, RMSE and MAE the range is exact;
 #' for other measures it is evaluated on a grid of 41 points. The range is
 #' a sensitivity analysis, not a confidence interval, and the point value
@@ -304,12 +310,16 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
                                    rows$test_status == "valid", , drop = FALSE], estimand)
           } else mid
           sens_lo <- sens_hi <- mcse_total <- NA_real_
-          if (needs_truth && !is.na(tse) && tse > 0 && tkind == "mc" &&
-              r$status %in% c("ok", "boundary")) {
-            rg <- truth_sensitivity(m, rows, study, estimand, tse)
+          # the truth moves over two standard errors of a Monte Carlo truth,
+          # or over the error bound of a numerical one
+          ter <- if (tkind == "numeric" && nrow(rows)) unique(rows$truth_error[!is.na(rows$truth_error)]) else numeric()
+          lim <- if (!is.na(tse) && tse > 0 && tkind == "mc") 2 * tse else
+            if (length(ter) == 1L && ter > 0) ter else NA_real_
+          if (needs_truth && !is.na(lim) && r$status %in% c("ok", "boundary")) {
+            rg <- truth_sensitivity(m, rows, study, estimand, lim)
             sens_lo <- rg[1]
             sens_hi <- rg[2]
-            if (identical(m, "bias")) mcse_total <- sqrt(r$mcse^2 + tse^2)
+            if (identical(m, "bias") && tkind == "mc") mcse_total <- sqrt(r$mcse^2 + tse^2)
           }
           out[[length(out) + 1L]] <- data.frame(
             scenario_key = key, scenario_id = labels[si], method = mn, estimand = en,

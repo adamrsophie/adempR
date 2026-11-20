@@ -57,7 +57,8 @@ and truth uncertainty combined, which is valid because the truth stage
 uses an independent random number stream) and, for every measure that
 depends on the truth, a sensitivity range: the smallest and largest value
 of the measure while the truth moves over plus and minus two standard
-errors. For coverage every point where the truth crosses an interval
+errors. A numerical truth with an error bound gets the same range over
+plus and minus the bound. For coverage every point where the truth crosses an interval
 endpoint is evaluated; for bias, MSE, RMSE and MAE the range is exact;
 for other measures it is evaluated on a grid of 41 points. The range is
 a sensitivity analysis, not a confidence interval, and the point value
