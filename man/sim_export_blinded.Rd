@@ -4,31 +4,51 @@
 \alias{sim_export_blinded}
 \title{Export coded data sets for blinded analysis}
 \usage{
-sim_export_blinded(run, dir, scenarios = NULL, replications = NULL, seed = 1L)
+sim_export_blinded(
+  run,
+  dir,
+  key = NULL,
+  scenarios = NULL,
+  replications = NULL,
+  seed = NULL
+)
 }
 \arguments{
 \item{run}{A run.}
 
 \item{dir}{Output directory (must not exist or be empty).}
 
+\item{key}{File for the key; defaults to \verb{<dir>-key.rds} next to \code{dir}.}
+
 \item{scenarios}{Scenario labels or keys to export; defaults to all.}
 
-\item{replications}{Replications to export; defaults to all planned.}
+\item{replications}{Replications to export; defaults to all committed
+ones.}
 
-\item{seed}{Seed of the random codes; the caller's random state is left
-untouched.}
+\item{seed}{Seed of the random codes. The default draws a fresh seed,
+so the codes cannot be rebuilt from the package; it is stored in the
+key. The caller's random state is left untouched.}
 }
 \value{
 Invisibly, the key: a data frame with \code{code}, \code{scenario_key},
-\code{replication} and \code{data_md5}.
+\code{replication} and \code{data_md5}, with attributes \code{seed} and \code{omitted}.
 }
 \description{
 Regenerates the data sets of a run from their stored streams and writes
 each to \verb{dir/data/<code>.rds}, where the code is random and reveals
 neither the scenario nor the replication. Only the data that methods
 see are written (no truth, no metadata). The key linking codes to
-scenarios, replications and data checksums is written to
-\code{dir/key.rds}; keep it away from the analysts. Analysts return one row
-per data set and estimand, which \code{\link[=sim_external_method]{sim_external_method()}} turns into a
-method of the study.
+scenarios, replications and data checksums is written to \code{key}, outside
+\code{dir}, so the directory can be handed to the analysts as it is.
+Analysts return one row per data set and estimand, which
+\code{\link[=sim_external_method]{sim_external_method()}} turns into a method of the study.
+}
+\details{
+By default every committed data set that was generated successfully is
+exported: the replications of each scenario (including extra
+replications of adaptively extended scenarios) and, for a sequential
+run, those up to the analyzed look. A regenerated data set whose
+checksum differs from the one recorded when the run made it (changed
+generator inputs) is not exported. Data sets left out are listed in the
+attribute \code{omitted} of the key, with the reason.
 }

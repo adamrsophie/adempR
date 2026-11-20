@@ -6,33 +6,73 @@
 #' each to `dir/data/<code>.rds`, where the code is random and reveals
 #' neither the scenario nor the replication. Only the data that methods
 #' see are written (no truth, no metadata). The key linking codes to
-#' scenarios, replications and data checksums is written to
-#' `dir/key.rds`; keep it away from the analysts. Analysts return one row
-#' per data set and estimand, which [sim_external_method()] turns into a
-#' method of the study.
+#' scenarios, replications and data checksums is written to `key`, outside
+#' `dir`, so the directory can be handed to the analysts as it is.
+#' Analysts return one row per data set and estimand, which
+#' [sim_external_method()] turns into a method of the study.
+#'
+#' By default every committed data set that was generated successfully is
+#' exported: the replications of each scenario (including extra
+#' replications of adaptively extended scenarios) and, for a sequential
+#' run, those up to the analyzed look. A regenerated data set whose
+#' checksum differs from the one recorded when the run made it (changed
+#' generator inputs) is not exported. Data sets left out are listed in the
+#' attribute `omitted` of the key, with the reason.
 #'
 #' @param run A run.
 #' @param dir Output directory (must not exist or be empty).
+#' @param key File for the key; defaults to `<dir>-key.rds` next to `dir`.
 #' @param scenarios Scenario labels or keys to export; defaults to all.
-#' @param replications Replications to export; defaults to all planned.
-#' @param seed Seed of the random codes; the caller's random state is left
-#'   untouched.
+#' @param replications Replications to export; defaults to all committed
+#'   ones.
+#' @param seed Seed of the random codes. The default draws a fresh seed,
+#'   so the codes cannot be rebuilt from the package; it is stored in the
+#'   key. The caller's random state is left untouched.
 #' @return Invisibly, the key: a data frame with `code`, `scenario_key`,
-#'   `replication` and `data_md5`.
+#'   `replication` and `data_md5`, with attributes `seed` and `omitted`.
 #' @export
-sim_export_blinded <- function(run, dir, scenarios = NULL, replications = NULL, seed = 1L) {
+sim_export_blinded <- function(run, dir, key = NULL, scenarios = NULL, replications = NULL,
+                               seed = NULL) {
   stopifnot(inherits(run, "adempr_run"))
   if (!is_scalar_character(dir)) stopf("`dir` must be a path.")
   if (dir.exists(dir) && length(list.files(dir, all.files = TRUE, no.. = TRUE))) {
     stopf("%s is not empty.", dir)
   }
+  key_path <- key %||% file.path(dirname(normalizePath(dir, mustWork = FALSE)),
+                                 paste0(basename(dir), "-key.rds"))
+  if (!is_scalar_character(key_path)) stopf("`key` must be a path.")
+  dnorm <- normalizePath(dir, mustWork = FALSE)
+  if (startsWith(normalizePath(key_path, mustWork = FALSE), paste0(dnorm, .Platform$file.sep))) {
+    stopf("`key` must be outside `dir`, which is given to the analysts.")
+  }
+  seed <- seed %||% fresh_seed()
   man <- run$manifest
   study <- man$study
   keys <- if (is.null(scenarios)) study$scenarios$keys else
     vapply(scenarios, function(s) resolve_scenario(study, s), character(1))
-  reps <- replications %||% seq_len(man$replications)
-  if (!all(vapply(reps, is_count, logical(1), min = 1))) stopf("`replications` must be positive whole numbers.")
-  tasks <- expand.grid(replication = as.integer(reps), scenario_key = keys, stringsAsFactors = FALSE)
+  if (!is.null(replications) &&
+      !all(vapply(replications, is_count, logical(1), min = 1))) {
+    stopf("`replications` must be positive whole numbers.")
+  }
+  # the committed generations (per scenario counts, sequential prefix)
+  reps_tab <- sim_results(run)$replications
+  reps_tab <- reps_tab[reps_tab$scenario_key %in% keys, , drop = FALSE]
+  omitted <- list()
+  if (!is.null(replications)) {
+    planned <- expand.grid(replication = as.integer(replications), scenario_key = keys,
+                           stringsAsFactors = FALSE)
+    have <- paste(reps_tab$scenario_key, reps_tab$replication)
+    miss <- planned[!paste(planned$scenario_key, planned$replication) %in% have, , drop = FALSE]
+    if (nrow(miss)) omitted[[length(omitted) + 1L]] <- data.frame(miss[c("scenario_key", "replication")],
+      reason = "not generated in the run", stringsAsFactors = FALSE)
+    reps_tab <- reps_tab[reps_tab$replication %in% replications, , drop = FALSE]
+  }
+  failed <- reps_tab$generation_status != "ok"
+  if (any(failed)) omitted[[length(omitted) + 1L]] <- data.frame(
+    scenario_key = reps_tab$scenario_key[failed], replication = reps_tab$replication[failed],
+    reason = "generation failed", stringsAsFactors = FALSE)
+  tasks <- reps_tab[!failed, c("scenario_key", "replication", "data_md5"), drop = FALSE]
+  tasks <- tasks[order(match(tasks$scenario_key, keys), tasks$replication), , drop = FALSE]
   codes <- with_rng_state(rng_base_seed(seed, "blind"), {
     hex <- c(0:9, letters[1:6])
     unique_codes <- character()
@@ -53,22 +93,35 @@ sim_export_blinded <- function(run, dir, scenarios = NULL, replications = NULL, 
       seeds <- task_seeds(ctx, k, r, study, character())[[1]]
       out <- execute_task_seeded(study, list(scenario_key = k, replication = r, seeds = seeds,
                                              methods = character()), keep_data = TRUE)
-      if (!identical(out$replication$generation_status, "ok")) next
+      if (!identical(out$replication$generation_status, "ok")) {
+        omitted[[length(omitted) + 1L]] <- data.frame(scenario_key = k, replication = r,
+          reason = "regeneration failed", stringsAsFactors = FALSE)
+        next
+      }
+      if (!is.na(tasks$data_md5[i]) && !identical(out$replication$data_md5, tasks$data_md5[i])) {
+        omitted[[length(omitted) + 1L]] <- data.frame(scenario_key = k, replication = r,
+          reason = "regenerated data differ from the recorded checksum", stringsAsFactors = FALSE)
+        next
+      }
       md5[i] <- out$replication$data_md5
       saveRDS(out$data, file.path(dir, "data", paste0(codes[i], ".rds")), version = 3)
     }
   })
-  key <- data.frame(code = codes, scenario_key = tasks$scenario_key,
+  out <- data.frame(code = codes, scenario_key = tasks$scenario_key,
                     replication = tasks$replication, data_md5 = md5, stringsAsFactors = FALSE)
-  key <- key[!is.na(key$data_md5), , drop = FALSE]
-  rownames(key) <- NULL
-  saveRDS(key, file.path(dir, "key.rds"), version = 3)
+  out <- out[!is.na(out$data_md5), , drop = FALSE]
+  rownames(out) <- NULL
+  om <- bind_rows(omitted)
+  attr(out, "seed") <- seed
+  attr(out, "omitted") <- if (is.null(om)) data.frame(scenario_key = character(), replication = integer(),
+                                                      reason = character()) else om
+  dir.create(dirname(key_path), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(out, key_path, version = 3)
   writeLines(c("Each file in data/ is one data set; its name is a random code.",
                "Return a table with columns code, estimand, estimate and, where available,",
-               "se, lower, upper, level, p_value, null and note: one row per data set and estimand.",
-               "key.rds links codes to scenarios and must not be given to the analysts."),
+               "se, lower, upper, level, p_value, null and note: one row per data set and estimand."),
              file.path(dir, "README.txt"))
-  invisible(key)
+  invisible(out)
 }
 
 #' Turn externally computed results into a method

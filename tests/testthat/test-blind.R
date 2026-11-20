@@ -16,7 +16,7 @@ test_that("blinded export, external results and a blinded report work end to end
     data.frame(code = sub("\\.rds$", "", f), estimand = "mean", estimate = median(d$y))
   }))
   ext <- ext[-1, ]  # one data set was not analyzed
-  m <- c(st$methods, list(external = sim_external_method(ext, file.path(dir, "key.rds"),
+  m <- c(st$methods, list(external = sim_external_method(ext, paste0(dir, "-key.rds"),
                                                          description = "returned by analysts")))
   st2 <- normal_study(n = c(10L, 20L), mu = 0, measures = c("bias", "empse"), methods = m)
   run2 <- sim_run(st2, replications = 6, seed = 4, path = p)
@@ -102,4 +102,30 @@ test_that("external results are joined by task, so identical data sets keep thei
   ext_chr <- ext
   ext_chr$estimate <- as.character(ext_chr$estimate)
   expect_error(sim_external_method(ext_chr, key), "must be numeric")
+})
+
+test_that("blinded export covers the committed cohort, keeps the key apart and records omissions", {
+  st <- normal_study(n = c(10L, 20L), mu = 0, measures = "bias")
+  p <- run_path()
+  # one scenario raised to five replications
+  run <- sim_run(st, replications = 3, seed = 4, path = p,
+                 scenario_replications = stats::setNames(5L, st$scenarios$labels[1]))
+  dir <- file.path(tempdir(), paste0("blindcoh-", basename(p)))
+  k1 <- sim_export_blinded(run, dir)
+  expect_equal(nrow(k1), 8L)
+  expect_false(file.exists(file.path(dir, "key.rds")))
+  expect_true(file.exists(paste0(dir, "-key.rds")))
+  expect_false(is.null(attr(k1, "seed")))
+  # a fresh seed by default: a second export has other codes
+  dir2 <- paste0(dir, "b")
+  k2 <- sim_export_blinded(run, dir2)
+  expect_length(intersect(k1$code, k2$code), 0L)
+  # asking for a replication the run lacks records it as omitted
+  dir3 <- paste0(dir, "c")
+  k3 <- sim_export_blinded(run, dir3, replications = 1:6, seed = 1)
+  om <- attr(k3, "omitted")
+  expect_true(all(om$reason == "not generated in the run"))
+  expect_equal(nrow(om), 1L + 3L)
+  expect_error(sim_export_blinded(run, paste0(dir, "d"), key = file.path(paste0(dir, "d"), "k.rds")),
+               "outside")
 })
