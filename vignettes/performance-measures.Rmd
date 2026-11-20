@@ -108,7 +108,9 @@ generated data sets. The summary reports `n_eligible` for each cell, and a
 * `boundary`: a proportion of 0 or 1
 * `undefined`: for example relative bias with zero truth
 * `unavailable`: the truth is unknown
-* `mcse_unavailable`: a custom measure with no known MCSE
+* `mcse_unavailable`: no known MCSE, for a custom measure without one or
+  when the jackknife is undefined (for the SE ratio, leaving one
+  replication out can leave estimates that are all equal)
 
 ## Monte Carlo truth
 
@@ -117,8 +119,9 @@ replications. The summary adds `truth_se`, `mcse_total` (for bias,
 $\sqrt{\text{MCSE}^2 + SE_\text{truth}^2}$), and a sensitivity range for
 measures that compare each estimate with the truth: the smallest and
 largest value while the truth moves over $\pm 2\,SE_\text{truth}$
-(the whole range, not only its two ends). The point value and its MCSE
-are conditional on the approximate truth.
+(the whole range, not only its two ends). A numerical truth with an error
+bound gets the same range over plus and minus the bound. The point value
+and its MCSE are conditional on the approximate truth.
 
 ## Custom measures
 

@@ -324,8 +324,15 @@ k_se_ratio <- function(est, se, level = 0.95) {
   emp_i <- sqrt(((sxx - x^2) - (sx - x)^2 / (n - 1)) / (n - 2))
   mod_i <- sqrt((sv - v) / (n - 1))
   th <- 100 * (mod_i / emp_i - 1)
-  mc <- if (all(is.finite(th))) sqrt((n - 1) / n * sum((th - mean(th))^2)) else NA_real_
   normal <- 100 * (mod / emp) * sqrt(stats::var(v) / (4 * n * mod^4) + 1 / (2 * (n - 1)))
+  if (!all(is.finite(th))) {
+    # leaving one replication out can make the empirical SE 0 (all other
+    # estimates equal), so the jackknife is undefined
+    return(kernel_result(value = val, n = n, status = "mcse_unavailable",
+      note = sprintf("the jackknife MCSE is undefined: leaving out %d replication(s) gives an empirical SE of 0; the normal theory MCSE is %s",
+                     sum(!is.finite(th)), format(signif(normal, 3)))))
+  }
+  mc <- sqrt((n - 1) / n * sum((th - mean(th))^2))
   z <- stats::qnorm(1 - (1 - level) / 2)
   kernel_result(value = val, mcse = mc, lower = val - z * mc, upper = val + z * mc, n = n,
                 note = sprintf("jackknife MCSE; the normal theory MCSE of Morris et al. (2019), which ignores the covariance of SEs and estimates, is %s",

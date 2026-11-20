@@ -363,3 +363,11 @@ test_that("bias eliminated coverage deletes whole replications and handles a fix
   expect_equal(b$value, mean(e$lower <= mean(e$estimate) & mean(e$estimate) <= e$upper))
   expect_match(b$note, "mean estimate")
 })
+
+test_that("an undefined leave one out SE ratio is not reported as ok", {
+  r <- adempR:::k_se_ratio(c(0, 0, 0, 1), rep(1, 4))
+  expect_identical(r$status, "mcse_unavailable")
+  expect_true(is.na(r$mcse))
+  expect_equal(r$value, 100 * (1 / sd(c(0, 0, 0, 1)) - 1))
+  expect_match(r$note, "jackknife MCSE is undefined")
+})
