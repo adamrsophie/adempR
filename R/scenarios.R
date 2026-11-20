@@ -26,6 +26,19 @@ scenario_label_of <- function(values) {
 new_scenarios <- function(values, design, excluded = NULL, constraints = list(),
                           distribution = NULL, weights = NULL) {
   if (!length(values)) stopf("The scenario design contains no scenarios.")
+  # every constructor (factorial, table, sampled, combined) passes here, so
+  # factor names are checked once for all: identity columns of the public
+  # tables cannot be overwritten by a factor
+  for (v in values) {
+    nm <- names(v)
+    if (is.null(nm) || any(!nzchar(nm))) stopf("All scenario factors must be named.")
+    if (anyDuplicated(nm)) stopf("Duplicated scenario factor name(s): %s.", paste(unique(nm[duplicated(nm)]), collapse = ", "))
+    bad <- intersect(nm, RESERVED_FACTORS)
+    if (length(bad)) stopf("`%s` is a reserved name and cannot be a scenario factor.", bad[1])
+    if (!is.null(weights) && "weight" %in% nm) {
+      stopf("`weight` is reserved for the design weights and cannot be a scenario factor of a weighted design.")
+    }
+  }
   keys <- vapply(values, scenario_key_of, character(1))
   dup <- duplicated(keys)
   if (any(dup)) {
@@ -112,9 +125,11 @@ apply_constraints <- function(values, constraints) {
                     stringsAsFactors = FALSE))
 }
 
+RESERVED_FACTORS <- c("scenario_key", "scenario_id", "replication")
+
 check_factor_values <- function(name, v) {
   if (!nzchar(name)) stopf("All scenario factors must be named.")
-  if (name %in% c("scenario_key", "scenario_id", "replication")) {
+  if (name %in% RESERVED_FACTORS) {
     stopf("`%s` is a reserved name and cannot be a scenario factor.", name)
   }
   if (is.function(v) || is.environment(v)) {
