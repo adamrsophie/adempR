@@ -64,7 +64,7 @@ test_that("scenario values edited after sim_scenarios() are refused", {
   expect_match(sim_validate(st, error = FALSE)$message, "edited after sim_scenarios", all = FALSE)
 })
 
-test_that("records, packages and the GPU flag enter fingerprints only when used", {
+test_that("records and packages have their own fingerprints, apart from the data", {
   g0 <- sim_generator(function(scenario, context) 1)
   g1 <- sim_generator(function(scenario, context) 1, record = function(data) c(a = 1))
   g2 <- sim_generator(function(scenario, context) 1, record = function(data) c(a = 2))
@@ -72,7 +72,15 @@ test_that("records, packages and the GPU flag enter fingerprints only when used"
   expect_identical(generator_fingerprint(g0),
                    fingerprint(g0$fun, g0$version, g0$depends))
   fps <- vapply(list(g0, g1, g2, g3), generator_fingerprint, character(1))
-  expect_equal(length(unique(fps)), 4L)
+  expect_equal(length(unique(fps)), 1L)
+  sf <- function(g) study_fingerprints(sim_study("g", scenarios = sim_scenarios(n = 1L), generate = g,
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = function(data) sim_estimate("mean", 1))))
+  f0 <- sf(g0); f1 <- sf(g1); f2 <- sf(g2); f3 <- sf(g3)
+  expect_null(f0$record)
+  expect_null(f0$generator_packages)
+  expect_false(identical(f1$record, f2$record))
+  expect_identical(f3$generator_packages, "stats")
   f <- function(data) sim_estimate("mean", 1)
   m0 <- sim_method(f)
   expect_false(identical(method_fingerprint(m0), method_fingerprint(sim_method(f, packages = "stats"))))

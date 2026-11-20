@@ -41,7 +41,10 @@
 #'   both arms). Values are stored per replication, returned by
 #'   [sim_results()] as `records` and summarized by [sim_diagnose()], so a
 #'   mechanism that drifts from its intended targets is visible. The record
-#'   function is not part of the generator fingerprint.
+#'   function and the declared `packages` are not part of the fingerprint of
+#'   the data: changing them does not stop a run from being extended. The
+#'   change is entered as a revision, and records made by an earlier record
+#'   function are excluded from [sim_results()] and [sim_diagnose()].
 #' @param common Optional character vector of scenario factors that alone
 #'   determine the data stream (common random numbers across scenarios).
 #'   Scenarios that agree on these factors draw the same random numbers,
@@ -86,20 +89,11 @@ sim_generator <- function(fun, check = NULL, version = NULL, depends = list(),
 }
 
 generator_fingerprint <- function(g) {
-  # Optional parts enter only when used, so the fingerprints of generators
-  # that do not use them are unchanged. Records and declared packages are
-  # part of what generation produces; the validation `check` is not.
-  extra <- Filter(Negate(is.null), list(common = g$common,
-    antithetic = if (isTRUE(g$antithetic)) TRUE, record = g$record,
-    packages = if (length(g$packages)) sort(g$packages)))
-  if (is.null(g$common) && !isTRUE(g$antithetic)) {
-    if (!length(extra)) return(fingerprint(g$fun, g$version, g$depends))
-    return(fingerprint(g$fun, g$version, g$depends, extra))
-  }
-  if (is.null(g$record) && !length(g$packages)) {
-    return(fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic)))
-  }
-  fingerprint(g$fun, g$version, g$depends, extra)
+  # What determines the data sets. The record function and the declared
+  # packages have their own fingerprints (study_fingerprints()): changing
+  # them does not change the data, so a run can still be extended.
+  if (is.null(g$common) && !isTRUE(g$antithetic)) return(fingerprint(g$fun, g$version, g$depends))
+  fingerprint(g$fun, g$version, g$depends, g$common, isTRUE(g$antithetic))
 }
 
 # Identity of the data stream of a scenario: the scenario itself, or the

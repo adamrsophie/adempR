@@ -456,6 +456,18 @@ environment_signature <- function(env) {
                 names(env))]
 }
 
+# Whether two sessions differ in software. Packages are compared where both
+# sessions recorded them: a package added to or dropped from the study's
+# declarations changes the list, not the software that ran.
+environment_differs <- function(a, b) {
+  sa <- environment_signature(a)
+  sb <- environment_signature(b)
+  common <- intersect(names(sa$packages), names(sb$packages))
+  sa$packages <- sa$packages[common]
+  sb$packages <- sb$packages[common]
+  !identical(sa, sb)
+}
+
 # The manifest is written to a temporary file and renamed into place, with
 # an md5 sidecar; the previous manifest is kept as manifest.rds.bak. This
 # survives process death at any point, not power loss (nothing is flushed).

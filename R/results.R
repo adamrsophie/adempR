@@ -37,6 +37,17 @@ dedup_table <- function(df, keys, scientific, what) {
   df[!dup, , drop = FALSE]
 }
 
+# Records of the current record function; rows committed before records
+# were tagged have no fingerprint and are kept.
+current_records <- function(df, man) {
+  if (is.null(df) || !nrow(df) || is.null(df$record_fp)) return(df)
+  fp <- man$fingerprints$record %||% ""
+  df <- df[is.na(df$record_fp) | df$record_fp == fp, , drop = FALSE]
+  df$record_fp <- NULL
+  rownames(df) <- NULL
+  df
+}
+
 # The selected generation of every data set: repeated deliveries checked
 # for conflicts, then the latest retry round.
 select_generations <- function(reps) {
@@ -121,9 +132,8 @@ read_raw_results <- function(path, repair = FALSE) {
   dtr <- select_dataset_truth(get("dataset_truth"), reps)
   dgn <- latest_round(dedup_table(get("diagnostics"), c(task_keys, "name", "round"), "value",
                                   "fit diagnostic"), task_keys)
-  rcd <- latest_round(dedup_table(get("records"), c("scenario_key", "replication", "name", "round"),
-                                  "value", "data set record"),
-                      c("scenario_key", "replication", "name"))
+  rk <- intersect(c("scenario_key", "replication", "name", "record_fp"), names(get("records")))
+  rcd <- latest_round(dedup_table(get("records"), c(rk, "round"), "value", "data set record"), rk)
   rcd <- same_round(rcd, reps, c("scenario_key", "replication"))
   dgn <- same_round(dgn, est, task_keys)
   list(replications = reps, attempts = att, estimates = est, dataset_truth = dtr,
@@ -299,7 +309,7 @@ sim_results <- function(run) {
   sc <- as.data.frame(study$scenarios)
   structure(list(scenarios = sc, replications = reps, attempts = att, estimates = est,
                  truth = truth, manifest = man, path = run$path,
-                 diagnostics = dgn, records = keep_rep(raw$records),
+                 diagnostics = dgn, records = current_records(keep_rep(raw$records), man),
                  # every attempt of every retry round, for cumulative costs
                  attempts_all = keep_meth(raw$attempts_all),
                  artifacts = raw$artifacts, problems = raw$problems),

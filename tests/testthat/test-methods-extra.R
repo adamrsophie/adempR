@@ -44,6 +44,37 @@ test_that("memory failures, fit diagnostics and reference checks are recorded", 
   expect_error(sim_method(function(data) 1, reference = c(nope = 1)), "reference")
 })
 
+test_that("a changed record function or package list extends a run", {
+  gen <- function(scenario, context) data.frame(y = rnorm(scenario$n))
+  mk <- function(g) sim_study("rec2", scenarios = sim_scenarios(n = 10L), generate = g,
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(m = function(data) sim_estimate("mean", mean(data$y))))
+  path <- run_path()
+  run <- sim_run(mk(sim_generator(gen, record = function(data) c(n = nrow(data)))),
+                 replications = 3, seed = 1, path = path)
+  est3 <- sim_results(run)$estimates$estimate
+  # a new record function: the run extends, earlier estimates stay, and
+  # only records of the new function are summarized
+  run2 <- sim_run(mk(sim_generator(gen, record = function(data) c(sd = sd(data$y)))),
+                  replications = 5, seed = 1, path = path)
+  res <- sim_results(run2)
+  expect_equal(res$estimates$estimate[1:3], est3)
+  expect_equal(nrow(res$estimates), 5)
+  expect_setequal(res$records$name, "sd")
+  expect_setequal(res$records$replication, 4:5)
+  expect_match(unlist(lapply(res$manifest$revisions, `[[`, "changes")),
+               "record function of the generator changed", all = FALSE)
+  expect_false("record_fp" %in% names(res$records))
+  # declared packages: a revision, not a stop
+  run3 <- sim_run(mk(sim_generator(gen, record = function(data) c(sd = sd(data$y)), packages = "stats")),
+                  replications = 6, seed = 1, path = path)
+  res3 <- sim_results(run3)
+  expect_equal(res3$estimates$estimate[1:5], res$estimates$estimate)
+  expect_match(unlist(lapply(res3$manifest$revisions, `[[`, "changes")),
+               "packages declared by the generator changed (none to stats)", fixed = TRUE, all = FALSE)
+  expect_setequal(res3$records$replication, 4:6)
+})
+
 test_that("generators record realized properties of each data set", {
   g <- sim_generator(function(scenario, context) {
     y <- rnorm(scenario$n)

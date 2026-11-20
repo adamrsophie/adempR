@@ -336,8 +336,7 @@ sim_report <- function(run, file, overwrite = FALSE, plots = TRUE, blind_methods
   add(html_table(environment_rows(env)))
   sess <- man$sessions %||% list()
   if (length(sess)) {
-    sig0 <- environment_signature(env)
-    differ <- vapply(sess, function(s) !identical(environment_signature(s), sig0), logical(1))
+    differ <- vapply(sess, environment_differs, logical(1), b = env)
     commits <- unique(unlist(lapply(sess, function(s) s$git$commit)))
     add("<p>Sessions that worked on this run: ", length(sess), ". Sessions with a different software environment from the one that created the directory: ",
         sum(differ), ". Git commits used: ",

@@ -104,6 +104,7 @@ sim_collect_shards <- function(study, n_shards, replications, seed, path, into) 
       stopf("Shard %s did not finish (status %s); rerun its job, it resumes.", basename(d), m$status)
     }
     if (!identical(m$fingerprints$generator, generator_fingerprint(study$generator)) ||
+        !identical(m$fingerprints$record, if (!is.null(study$generator$record)) fingerprint(study$generator$record)) ||
         !identical(unlist(m$fingerprints$methods), unlist(lapply(study$methods, method_fingerprint)))) {
       stopf("Shard %s was run with a different generator or methods.", basename(d))
     }

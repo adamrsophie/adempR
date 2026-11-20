@@ -51,7 +51,10 @@ fraction, the number of events, whether a covariate has support in
 both arms). Values are stored per replication, returned by
 \code{\link[=sim_results]{sim_results()}} as \code{records} and summarized by \code{\link[=sim_diagnose]{sim_diagnose()}}, so a
 mechanism that drifts from its intended targets is visible. The record
-function is not part of the generator fingerprint.}
+function and the declared \code{packages} are not part of the fingerprint of
+the data: changing them does not stop a run from being extended. The
+change is entered as a revision, and records made by an earlier record
+function are excluded from \code{\link[=sim_results]{sim_results()}} and \code{\link[=sim_diagnose]{sim_diagnose()}}.}
 
 \item{common}{Optional character vector of scenario factors that alone
 determine the data stream (common random numbers across scenarios).

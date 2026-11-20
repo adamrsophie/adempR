@@ -195,6 +195,8 @@ print.adempr_study <- function(x, ...) {
 study_fingerprints <- function(study) {
   list(
     generator = generator_fingerprint(study$generator),
+    record = if (!is.null(study$generator$record)) fingerprint(study$generator$record),
+    generator_packages = if (length(study$generator$packages)) sort(study$generator$packages),
     scenarios = stats::setNames(study$scenarios$keys, study$scenarios$keys),
     design = scenario_design_fingerprint(study$scenarios),
     methods = lapply(study$methods, method_fingerprint),
