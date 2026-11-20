@@ -100,3 +100,16 @@ test_that("usable proportions say when generated data sets are not yet analyzed"
   expect_equal(u$n_generated, 4L)
   expect_equal(u$n_attempted, 2L)
 })
+
+test_that("usable coverage counts known misses when every truth is missing", {
+  st <- sim_study("allmiss", scenarios = sim_scenarios(n = 10L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+    estimands = list(sim_estimand("m", sim_truth_unknown())),
+    methods = list(none = function(data) sim_estimate("m", mean(data$y))),
+    measures = "usable_coverage")
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 2, seed = 1, path = run_path())))
+  u <- s[s$measure == "usable_coverage", ]
+  # no usable interval: both data sets are known composite failures
+  expect_equal(u$value, 0)
+  expect_equal(u$n_eligible, 2L)
+})

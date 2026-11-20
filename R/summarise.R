@@ -307,7 +307,9 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
                           note = sprintf("measure does not apply to a %s estimand", estimand$type %||% "scalar"))
           } else if (is.null(rows) || !nrow(rows)) {
             kernel_result(status = "no_eligible", note = "no results")
-          } else if (needs_truth && all(is.na(rows$truth))) {
+          } else if (needs_truth && all(is.na(rows$truth)) && !identical(m, "usable_coverage")) {
+            # (usable coverage still knows its misses: a data set without a
+            # usable interval fails whatever the truth)
             kernel_result(status = "unavailable", note = sprintf("truth is %s", tkind))
           } else {
             measure_cell(m, rows, study, estimand)
