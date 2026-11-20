@@ -23,12 +23,13 @@
 
 testthat::test_that("F1 failed regeneration cannot invalidate committed datasets", {
   testthat::skip_if_not_installed("adempR")
-  withr::local_options(list(adempR.git_dir = tempdir()))
+  old_opts <- options(adempR.git_dir = tempdir())
+  on.exit(options(old_opts), add = TRUE)
   flag <- tempfile("contract-rel-source-")
   writeLines("available", flag)
-  withr::defer(unlink(flag), envir = environment())
+  on.exit(unlink(flag), add = TRUE)
   path <- tempfile("contract-rel-regeneration-")
-  withr::defer(unlink(path, recursive = TRUE), envir = environment())
+  on.exit(unlink(path, recursive = TRUE), add = TRUE)
 
   generate <- local({
     source_file <- flag
@@ -76,13 +77,14 @@ testthat::test_that("F1 failed regeneration cannot invalidate committed datasets
 
 testthat::test_that("F2 collected runs allocate retry IDs above all imported rounds", {
   testthat::skip_if_not_installed("adempR")
-  withr::local_options(list(adempR.git_dir = tempdir()))
+  old_opts <- options(adempR.git_dir = tempdir())
+  on.exit(options(old_opts), add = TRUE)
   flag <- tempfile("contract-rel-service-")
   writeLines("unavailable", flag)
-  withr::defer(unlink(flag), envir = environment())
+  on.exit(unlink(flag), add = TRUE)
   parent <- tempfile("contract-rel-shards-")
   into <- tempfile("contract-rel-collected-")
-  withr::defer(unlink(c(parent, into), recursive = TRUE), envir = environment())
+  on.exit(unlink(c(parent, into), recursive = TRUE), add = TRUE)
   method <- local({
     service_flag <- flag
     function(data) {
@@ -126,19 +128,20 @@ testthat::test_that("F2 collected runs allocate retry IDs above all imported rou
 
 testthat::test_that("F3 truth cache recovery cannot change truth under its old identity", {
   testthat::skip_if_not_installed("adempR")
-  withr::local_options(list(adempR.git_dir = tempdir()))
+  old_opts <- options(adempR.git_dir = tempdir())
+  on.exit(options(old_opts), add = TRUE)
   # A unique temporary global name allows a directly referenced global
   # without overwriting any pre-existing object in the caller's session.
   global_name <- make.names(basename(tempfile("contract_rel_truth_")))
   assign(global_name, 0, envir = globalenv())
-  withr::defer(rm(list = global_name, envir = globalenv()), envir = environment())
+  on.exit(rm(list = global_name, envir = globalenv()), add = TRUE)
   truth <- eval(substitute(function(scenario) VALUE,
                             list(VALUE = as.name(global_name))), globalenv())
   study <- .contract_rel_study(
     function(scenario, context) rep(0, scenario$n),
     list(a = function(data) adempR::sim_estimate("mean", 0)), truth = truth)
   path <- tempfile("contract-rel-truth-")
-  withr::defer(unlink(path, recursive = TRUE), envir = environment())
+  on.exit(unlink(path, recursive = TRUE), add = TRUE)
   run <- adempR::sim_run(study, 2, 1, path, progress = FALSE)
   original <- adempR::sim_truth(run)
   testthat::expect_equal(original$truth, 0)
@@ -159,7 +162,8 @@ testthat::test_that("F3 truth cache recovery cannot change truth under its old i
 testthat::test_that("F4 changed generator package resolution cannot pool distinct DGPs", {
   testthat::skip_if_not_installed("adempR")
   testthat::skip_if_not_installed("xfun")
-  withr::local_options(list(adempR.git_dir = tempdir()))
+  old_opts <- options(adempR.git_dir = tempdir())
+  on.exit(options(old_opts), add = TRUE)
   # Use an explicit clean parent for the generator so a test runner's
   # private bindings cannot mask the declared package's exported attr().
   generate <- eval(quote(function(scenario, context) {
@@ -168,7 +172,7 @@ testthat::test_that("F4 changed generator package resolution cannot pool distinc
   study <- .contract_rel_study(adempR::sim_generator(generate, packages = "base"),
     list(a = function(data) adempR::sim_estimate("mean", mean(data))))
   path <- tempfile("contract-rel-package-")
-  withr::defer(unlink(path, recursive = TRUE), envir = environment())
+  on.exit(unlink(path, recursive = TRUE), add = TRUE)
   run <- adempR::sim_run(study, 2, 1, path, progress = FALSE)
   original_values <- adempR::sim_results(run)$estimates$estimate
   testthat::expect_equal(original_values, c(1, 1))
