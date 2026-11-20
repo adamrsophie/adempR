@@ -496,10 +496,15 @@ sim_measures_categorical <- function(classes, labels = classes) {
 #' proportion to their distance: `(u - l) + 2 / alpha * (l - y) 1(y < l) +
 #' 2 / alpha * (y - u) 1(y > u)`, with `y` the truth and `alpha` taken from
 #' each row's interval level. Lower is better. It is a mean of independent
-#' contributions, so its MCSE is the usual one. With `scale`, each
+#' contributions, so its MCSE is the usual one. Intervals are taken as
+#' central intervals at their level; a one sided or unbounded interval has
+#' an infinite width and therefore an infinite score, and only the side the
+#' truth falls outside of is penalized. A row whose level is not strictly
+#' between 0 and 1 has a missing contribution. With `scale`, each
 #' contribution is divided by a per row scale (for example `"truth"` for a
 #' relative score, or a number), so scenarios on different scales can be
-#' compared.
+#' compared; a row whose scale is zero, negative or not finite has a
+#' missing contribution.
 #'
 #' @param id Measure id.
 #' @param scale `NULL`, a column name of the estimates (for example
@@ -512,17 +517,25 @@ sim_measures_categorical <- function(classes, labels = classes) {
 #' sim_measures("coverage", sim_measure_interval_score())
 #' @export
 sim_measure_interval_score <- function(id = "interval_score", scale = NULL) {
-  if (!is.null(scale) && !(is_scalar_character(scale) || (is_scalar_number(scale) && scale > 0))) {
-    stopf("`scale` must be NULL, a column name or a positive number.")
+  if (!is.null(scale) && !(is_scalar_character(scale) ||
+                           (is_scalar_number(scale) && is.finite(scale) && scale > 0))) {
+    stopf("`scale` must be NULL, a column name or a positive finite number.")
   }
   sim_measure(id, function(rows) {
     a <- 1 - rows$level
     y <- rows$truth
-    s <- (rows$upper - rows$lower) + 2 / a * (rows$lower - y) * (y < rows$lower) +
-      2 / a * (y - rows$upper) * (y > rows$upper)
+    lo <- rows$lower
+    up <- rows$upper
+    # a penalty only on the side that misses, so an unbounded side adds
+    # nothing and an unbounded interval scores Inf (its width)
+    s <- (up - lo) + ifelse(y < lo, 2 / a * (lo - y), 0) + ifelse(y > up, 2 / a * (y - up), 0)
+    s[!(is.finite(a) & a > 0 & a < 1)] <- NA_real_
     if (is.null(scale)) return(s)
-    d <- if (is.character(scale)) abs(rows[[scale]]) else scale
-    ifelse(d > 0, s / d, NA_real_)
+    if (is.character(scale) && is.null(rows[[scale]])) {
+      stopf("Interval score scale column `%s` is not a column of the estimates.", scale)
+    }
+    d <- rep_len(if (is.character(scale)) abs(rows[[scale]]) else scale, length(s))
+    ifelse(is.finite(d) & d > 0, s / d, NA_real_)
   }, requires = c("interval", "truth"), direction = "lower",
   description = if (is.null(scale)) "interval score" else paste("interval score scaled by", scale))
 }

@@ -63,6 +63,23 @@ test_that("the interval score matches a hand computation", {
   expect_equal(s$mcse[s$measure == "interval_score"], sd(is) / sqrt(30))
   expect_equal(s$value[s$measure == "is_rel"], mean(is))
   expect_error(sim_measure_interval_score(scale = -1), "scale")
+  expect_error(sim_measure_interval_score(scale = Inf), "scale")
+  # contributions: unbounded sides, vector scale, invalid level and scale
+  f <- sim_measure_interval_score()$contribution
+  rows <- data.frame(level = c(0.95, 0.95, 0.95, 1), truth = c(0, 3, 0, 0),
+                     lower = c(-Inf, -Inf, -1, -1), upper = c(Inf, 1, 1, 1), se = c(1, 2, 0, 1))
+  v <- f(rows)
+  expect_identical(v[1:2], c(Inf, Inf))
+  expect_equal(v[3], 2)
+  expect_true(is.na(v[4]))
+  g <- sim_measure_interval_score("s", scale = 2)$contribution
+  expect_equal(g(rows[3, ][c(1, 1), ]), c(1, 1))
+  h <- sim_measure_interval_score("s", scale = "se")$contribution
+  expect_true(is.na(h(rows)[3]))
+  expect_error(sim_measure_interval_score("s", scale = "nope")$contribution(rows), "not a column")
+  # a one sided interval that misses on its bounded side
+  rows2 <- data.frame(level = 0.9, truth = 2, lower = -Inf, upper = 1)
+  expect_identical(f(rows2), Inf)
 })
 
 test_that("grid estimands give pointwise and grid averaged performance", {

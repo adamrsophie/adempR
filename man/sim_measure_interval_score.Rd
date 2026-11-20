@@ -20,10 +20,15 @@ The interval score of Gneiting and Raftery (2007) for a central interval
 at level \code{1 - alpha} rewards narrow intervals and penalizes misses in
 proportion to their distance: \verb{(u - l) + 2 / alpha * (l - y) 1(y < l) + 2 / alpha * (y - u) 1(y > u)}, with \code{y} the truth and \code{alpha} taken from
 each row's interval level. Lower is better. It is a mean of independent
-contributions, so its MCSE is the usual one. With \code{scale}, each
+contributions, so its MCSE is the usual one. Intervals are taken as
+central intervals at their level; a one sided or unbounded interval has
+an infinite width and therefore an infinite score, and only the side the
+truth falls outside of is penalized. A row whose level is not strictly
+between 0 and 1 has a missing contribution. With \code{scale}, each
 contribution is divided by a per row scale (for example \code{"truth"} for a
 relative score, or a number), so scenarios on different scales can be
-compared.
+compared; a row whose scale is zero, negative or not finite has a
+missing contribution.
 }
 \examples{
 sim_measures("coverage", sim_measure_interval_score())
