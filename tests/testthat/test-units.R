@@ -153,3 +153,30 @@ test_that("reference checks of antithetic proportions use the pairs", {
   expect_false(chk$flag)
   expect_gt(unname(adempR:::cp_interval(6, 6, 0.95)[1, "lower"]), 0.4)
 })
+
+test_that("pair jackknife matches an explicit delete-one-pair oracle", {
+  set.seed(11)
+  st <- list(level = 0.95, generator = list(antithetic = TRUE))
+  est <- list(truth = list(kind = "exact"))
+  oracle <- function(f, x, rep) {
+    u <- (rep + 1L) %/% 2L
+    th <- vapply(unique(u), function(k) f(x[u != k]), numeric(1))
+    G <- length(th)
+    sqrt((G - 1) / G * sum((th - mean(th))^2))
+  }
+  for (n in c(10L, 11L)) {
+    z <- rnorm(n)
+    rows <- data.frame(estimate = z, truth = 0, valid = TRUE, estimate_status = "valid",
+                       interval_status = "missing", se_status = "missing",
+                       test_status = "missing", se = NA_real_, lower = NA_real_,
+                       upper = NA_real_, level = 0.95, replication = seq_len(n))
+    # linear (closed form), complete and incomplete pairs
+    r <- adempR:::measure_cell("mse", rows, st, est)
+    expect_equal(adempR:::pair_jackknife("mse", rows, st, est, r)$mcse,
+                 oracle(function(x) mean(x^2), z, rows$replication), tolerance = 1e-10)
+    # nonlinear (generic path)
+    r <- adempR:::measure_cell("rmse", rows, st, est)
+    expect_equal(adempR:::pair_jackknife("rmse", rows, st, est, r)$mcse,
+                 oracle(function(x) sqrt(mean(x^2)), z, rows$replication), tolerance = 1e-10)
+  }
+})

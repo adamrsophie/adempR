@@ -697,20 +697,24 @@ plan_tasks <- function(study, R, done) {
 }
 
 build_tasks <- function(study, ctx, todo, data_md5 = NULL) {
-  out <- list()
-  for (key in unique(todo$scenario_key)) {
-    sub <- todo[todo$scenario_key == key, , drop = FALSE]
-    reps <- sort(unique(sub$replication))
-    seeds <- task_seeds(ctx, key, reps, study, names(study$methods))
-    for (j in seq_along(reps)) {
-      ms <- sub$method[sub$replication == reps[j]]
-      ms <- names(study$methods)[names(study$methods) %in% ms]
-      out[[length(out) + 1L]] <- list(scenario_key = key, replication = reps[j],
-                                      seeds = seeds[[j]], methods = ms,
-                                      expect_md5 = unname(data_md5[paste(key, reps[j], sep = "\r")]))
-    }
-  }
-  out
+  all_m <- names(study$methods)
+  # one pass over the pending rows: split by scenario, then by replication
+  # (sorted), instead of rescanning every row for each replication
+  by_key <- split(todo, factor(todo$scenario_key, levels = unique(todo$scenario_key)))
+  out <- lapply(names(by_key), function(key) {
+    sub <- by_key[[key]]
+    ms_by_rep <- split(sub$method, sub$replication)
+    reps <- sort(as.integer(names(ms_by_rep)))
+    ms_by_rep <- ms_by_rep[as.character(reps)]
+    seeds <- task_seeds(ctx, key, reps, study, all_m)
+    md5 <- unname(data_md5[paste(key, reps, sep = "\r")])
+    lapply(seq_along(reps), function(j) {
+      list(scenario_key = key, replication = reps[j], seeds = seeds[[j]],
+           methods = all_m[all_m %in% ms_by_rep[[j]]],
+           expect_md5 = if (is.null(data_md5)) NULL else md5[j])
+    })
+  })
+  if (length(out)) unlist(out, recursive = FALSE) else list()
 }
 
 run_chunk <- function(study, chunk) {
