@@ -8,7 +8,9 @@ sim_check_identity(
   run,
   identity,
   target = c("truth", "estimate"),
-  tolerance = 1e-08
+  tolerance = 1e-08,
+  estimands = NULL,
+  z = 3
 )
 }
 \arguments{
@@ -17,15 +19,22 @@ sim_check_identity(
 \item{identity}{Function of the estimand values (as named arguments, or a
 list \code{values}) and optionally \code{scenario}, returning one number.}
 
-\item{target}{\code{"truth"} checks the truths per scenario; \code{"estimate"}
-checks every method that reports all the estimands involved, per
-replication.}
+\item{target}{\code{"truth"} checks the truths per scenario (per replication
+when one of them is a data set truth); \code{"estimate"} checks every
+method that targets all the estimands involved, per replication, using
+usable estimates only.}
 
-\item{tolerance}{Absolute residual above which a row is flagged.}
+\item{tolerance}{Residual allowed, relative to the scale of the values.}
+
+\item{estimands}{Estimands the identity uses. Defaults to the
+estimands named among its arguments, or all when it takes \code{values}.}
+
+\item{z}{Number of residual standard errors added to the tolerance.}
 }
 \value{
-A data frame with the residual and \code{flag} per scenario (and per
-method and replication for estimates).
+A data frame with one row per scenario (and per method or
+replication where applicable): \code{residual}, \code{residual_se}, \code{status},
+\code{flag} (\code{TRUE} for a failure, \code{NA} when unavailable) and \code{note}.
 }
 \description{
 Some estimands are linked by an identity that holds by construction, for
@@ -34,6 +43,15 @@ example \code{itt = pc * cace} under one-sided noncompliance, or
 identity reveals a bug in a truth function or a method. The identity is
 a function of the estimand values (named as the estimands) and of the
 scenario, returning a residual that should be zero.
+}
+\details{
+A residual fails when its absolute value exceeds \code{tolerance} times the
+scale of the values involved (at least 1), plus \code{z} standard errors of
+the residual. The standard error comes from the standard errors of
+Monte Carlo truths, propagated through the identity by numerical
+differentiation; exact truths and estimates have none. Every checked
+unit gets a row: \code{status} is \code{pass}, \code{fail} or \code{unavailable} (a value
+is missing, not usable or not computed), with the reason in \code{note}.
 }
 \examples{
 study <- sim_study("ratio", scenarios = sim_scenarios(n = 40L, mu = 1),

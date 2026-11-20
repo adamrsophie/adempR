@@ -310,6 +310,7 @@ sim_results <- function(run) {
   structure(list(scenarios = sc, replications = reps, attempts = att, estimates = est,
                  truth = truth, manifest = man, path = run$path,
                  diagnostics = dgn, records = current_records(keep_rep(raw$records), man),
+                 dataset_truth = keep_rep(raw$dataset_truth),
                  # every attempt of every retry round, for cumulative costs
                  attempts_all = keep_meth(raw$attempts_all),
                  artifacts = raw$artifacts, problems = raw$problems),

@@ -26,8 +26,8 @@ value, or a \code{\link[=sim_truth_exact]{sim_truth_exact()}} or \code{\link[=si
 }
 \value{
 A data frame with one row per scenario and method: \code{truth},
-\code{reference}, \code{total_bias}, \code{statistical_bias}, \code{identification_bias},
-the MCSE of the first two, and \code{n}.
+\code{reference}, \code{reference_error}, \code{total_bias}, \code{statistical_bias} and
+\code{identification_bias}, each with its MCSE, and \code{n}.
 }
 \description{
 The truth of an estimand is the causal (or target) quantity; a method
@@ -36,9 +36,18 @@ expression it estimates (Morris, "causal bias vs statistical bias"). With
 a second reference value per scenario, the total bias splits into
 \code{estimate - reference} (statistical bias: does the method estimate what
 it identifies?) and \code{reference - truth} (identification bias: does what
-it identifies equal the estimand?). Both parts come with Monte Carlo
-standard errors; the identification part is a property of the scenario
-and has none when the reference is exact.
+it identifies equal the estimand?).
+}
+\details{
+The reference is evaluated like a truth: a \code{\link[=sim_truth_numeric]{sim_truth_numeric()}}
+provider may return \code{list(value, error)}, and the error bound is
+reported in \code{reference_error}. Each part has a Monte Carlo standard
+error. \code{total_mcse} includes the standard error of a shared Monte Carlo
+truth. The identification part is a property of the scenario: with an
+exact truth its MCSE is 0, with a Monte Carlo truth it is the truth's
+standard error, and with a data set truth it is averaged over the
+replications in which the method's fit is usable, so it can differ
+between methods and has the MCSE of that average.
 }
 \examples{
 # the sample mean of log-normal data identifies exp(mu + 1/2), not exp(mu)
