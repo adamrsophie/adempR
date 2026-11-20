@@ -44,9 +44,18 @@ rates with exact upper bounds, and the replications needed to meet the
 precision targets. For proportions the required replications use the
 largest \code{p (1 - p)} within the pilot's exact interval, so a pilot that
 happens to observe 0 or 100 percent cannot claim that almost no
-replications are needed.
+replications are needed. Bias eliminated coverage, whose center is
+estimated, uses its own MCSE instead of the binomial variance.
 }
 \details{
+A requirement is first a number of eligible results
+(\code{required_eligible}). When only part of the scheduled replications
+were eligible in the pilot (failed fits, missing intervals), the
+scheduled count \code{required_replications} divides it by the lower exact
+95 percent bound of the eligible share. The storage projection counts
+every file the pilot wrote per task, including retained data sets and
+artifacts.
+
 Pilot results are not reused in the production run. A pilot directory
 draws from its own family of random number streams, so a production run
 with the same seed is independent of the pilot; reusing pilot data would

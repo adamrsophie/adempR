@@ -156,3 +156,30 @@ test_that("pilots and DGP checks draw random numbers independent of production",
   expect_false(is.null(prod_y) || is.null(first))
   expect_false(identical(first, prod_y))
 })
+
+test_that("pilot requirements turn eligible counts into scheduled replications", {
+  # half of the fits give no interval, so coverage has half the eligible rows
+  st <- normal_study(n = 10L, mu = 0, methods = list(half = function(data) {
+    ci <- t.test(data$y)$conf.int
+    if (data$y[1] > 0) sim_estimate("mean", mean(data$y))
+    else sim_estimate("mean", mean(data$y), lower = ci[1], upper = ci[2], level = 0.95)
+  }))
+  pl <- sim_pilot(st, replications = 20, seed = 2, targets = c(coverage = 0.05, be_coverage = 0.05))
+  p <- pl$precision[pl$precision$measure == "coverage", ]
+  expect_lt(p$pilot_n, 20)
+  expect_equal(p$pilot_scheduled, 20L)
+  expect_equal(p$eligible_share_lower, qbeta(0.025, p$pilot_n, 20 - p$pilot_n + 1))
+  expect_equal(p$required_replications, ceiling(p$required_eligible / p$eligible_share_lower))
+  expect_gt(p$required_replications, p$required_eligible)
+  # bias eliminated coverage uses its own MCSE, not the binomial variance
+  b <- pl$precision[pl$precision$measure == "be_coverage", ]
+  s <- as.data.frame(pl$summary)
+  sb <- s[s$measure == "be_coverage", ]
+  expect_equal(b$required_eligible, ceiling(sb$mcse^2 * sb$n_eligible / 0.05^2))
+  # the storage projection counts every file the pilot wrote
+  all_bytes <- sum(file.info(list.files(pl$run$path, recursive = TRUE, full.names = TRUE,
+                                        all.files = TRUE))$size)
+  expect_gt(pl$projection$projected_megabytes * 1e6 / pl$projection$tasks, 0)
+  expect_lte(pl$projection$projected_megabytes * 1e6 / pl$projection$tasks, all_bytes / 20 + 1)
+  expect_error(sim_plan_replications("proportion", half_width = 0.01, level = 0), "level")
+})

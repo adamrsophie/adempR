@@ -32,6 +32,7 @@ sim_plan_replications <- function(type = c("proportion", "mean"), p = NULL, sd =
   if (is.null(mcse) == is.null(half_width)) stopf("Give exactly one of `mcse` and `half_width`.")
   target <- mcse %||% half_width
   if (!is_scalar_number(target) || target <= 0) stopf("The precision target must be positive.")
+  if (!is_scalar_number(level) || level <= 0 || level >= 1) stopf("`level` must be in (0, 1).")
   v <- if (type == "proportion") {
     if (is.null(p)) 0.25 else {
       if (!is_scalar_number(p) || p < 0 || p > 1) stopf("`p` must be in [0, 1].")
@@ -71,7 +72,16 @@ conservative_pq <- function(k, n, level = 0.95) {
 #' precision targets. For proportions the required replications use the
 #' largest `p (1 - p)` within the pilot's exact interval, so a pilot that
 #' happens to observe 0 or 100 percent cannot claim that almost no
-#' replications are needed.
+#' replications are needed. Bias eliminated coverage, whose center is
+#' estimated, uses its own MCSE instead of the binomial variance.
+#'
+#' A requirement is first a number of eligible results
+#' (`required_eligible`). When only part of the scheduled replications
+#' were eligible in the pilot (failed fits, missing intervals), the
+#' scheduled count `required_replications` divides it by the lower exact
+#' 95 percent bound of the eligible share. The storage projection counts
+#' every file the pilot wrote per task, including retained data sets and
+#' artifacts.
 #'
 #' Pilot results are not reused in the production run. A pilot directory
 #' draws from its own family of random number streams, so a production run
@@ -138,9 +148,10 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
                mean_generation_seconds = mean(d$generation_elapsed),
                mean_method_seconds = mean(d$methods_seconds), stringsAsFactors = FALSE)
   }))
-  sizes <- file.info(list.files(file.path(path, "batches"), pattern = "\\.rds$",
-                                full.names = TRUE))$size
-  bytes_per_task <- sum(sizes) / max(1, nrow(per_task))
+  # everything the pilot wrote (results, retained data sets, artifacts),
+  # not only the result batches
+  sizes <- file.info(list.files(path, recursive = TRUE, full.names = TRUE, all.files = TRUE))$size
+  bytes_per_task <- sum(sizes, na.rm = TRUE) / max(1, nrow(per_task))
   s <- as.data.frame(summ)
   prec <- NULL
   if (length(targets)) {
@@ -148,19 +159,31 @@ sim_pilot <- function(study, replications = 50L, seed, planned = NULL, targets =
     for (ms in names(targets)) {
       sub <- s[s$measure == ms, , drop = FALSE]
       for (i in seq_len(nrow(sub))) {
-        need <- if (is.na(sub$value[i]) || sub$n_eligible[i] == 0) {
+        n_el <- sub$n_eligible[i]
+        # the requirement is a number of eligible results; bias eliminated
+        # coverage has an estimated center, so it uses its own MCSE rather
+        # than the binomial variance
+        need <- if (is.na(sub$value[i]) || n_el == 0) {
           NA_real_
         } else if (ms %in% c("coverage", "rejection", "usable", "noncoverage_lower",
-                              "noncoverage_upper", "be_coverage")) {
-          k <- round(sub$value[i] * sub$n_eligible[i])
-          ceiling(conservative_pq(k, sub$n_eligible[i]) / targets[[ms]]^2)
-        } else if (!is.na(sub$mcse[i]) && sub$n_eligible[i] > 1) {
-          ceiling((sub$mcse[i]^2 * sub$n_eligible[i]) / targets[[ms]]^2)
+                              "noncoverage_upper")) {
+          k <- round(sub$value[i] * n_el)
+          ceiling(conservative_pq(k, n_el) / targets[[ms]]^2)
+        } else if (!is.na(sub$mcse[i]) && n_el > 1) {
+          ceiling((sub$mcse[i]^2 * n_el) / targets[[ms]]^2)
         } else NA_real_
+        # Only a share of the scheduled replications is eligible (failed
+        # fits, missing intervals); the scheduled count uses the lower
+        # exact bound of that share, so an optimistic pilot cannot shrink it.
+        n_sched <- sub$n_planned[i]
+        share_lo <- if (is.na(n_sched) || n_sched == 0) NA_real_ else
+          if (n_el >= n_sched) 1 else if (n_el == 0) 0 else stats::qbeta(0.025, n_el, n_sched - n_el + 1)
+        sched <- if (is.na(need) || is.na(share_lo) || share_lo == 0) NA_real_ else ceiling(need / share_lo)
         rows[[length(rows) + 1L]] <- data.frame(
           scenario_id = sub$scenario_id[i], method = sub$method[i], estimand = sub$estimand[i],
-          measure = ms, pilot_value = sub$value[i], pilot_n = sub$n_eligible[i],
-          target_mcse = targets[[ms]], required_replications = need, stringsAsFactors = FALSE)
+          measure = ms, pilot_value = sub$value[i], pilot_n = n_el, pilot_scheduled = n_sched,
+          eligible_share_lower = share_lo, target_mcse = targets[[ms]],
+          required_eligible = need, required_replications = sched, stringsAsFactors = FALSE)
       }
     }
     prec <- bind_rows(rows)
