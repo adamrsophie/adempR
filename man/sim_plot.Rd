@@ -30,9 +30,10 @@ sim_plot(
 
 \item{reference}{For \code{"zip"}: rank intervals against the true value
 (\code{"truth"}, a coverage zip plot) or against the declared null value
-(\code{"null"}, a power zip plot, where intervals that exclude the null are
-the rejections). The dotted lines give the Monte Carlo confidence
-interval of the proportion of intervals that contain the reference.}
+(\code{"null"}, a power zip plot of the intervals that include the null;
+they equal the nonrejections only when the method's test and interval
+agree). The dotted lines give the Monte Carlo confidence interval of
+the proportion of intervals that contain the reference.}
 
 \item{methods}{For \code{"bland_altman"}, the two methods compared (defaults
 to the first two that target the estimand).}

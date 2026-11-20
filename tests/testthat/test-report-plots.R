@@ -37,5 +37,23 @@ test_that("Bland-Altman and interval-by-truth plots draw and validate their inpu
   expect_null(sim_plot(run, "interval_truth"))
   expect_identical(grDevices::dev.cur(), dev)
   grDevices::dev.off()
-  expect_error(sim_plot(run, "bland_altman", methods = c("med", "nope")), "two methods")
+  expect_error(sim_plot(run, "bland_altman", methods = c("med", "nope")), "two different methods")
+  expect_error(sim_plot(run, "bland_altman", methods = c("med", "med")), "two different methods")
+})
+
+test_that("unbounded intervals are drawn and the nominal coverage line uses eligible intervals", {
+  st <- normal_study(n = 10L, mu = 0, methods = list(
+    wide = function(data) sim_estimate("mean", mean(data$y), lower = -Inf, upper = Inf, level = 0.95),
+    # a 0.5 level on intervals that are not eligible must not count
+    half = function(data) sim_estimate("mean", mean(data$y), lower = 1, upper = 0, level = 0.5)),
+    measures = "coverage")
+  run <- sim_run(st, replications = 5, seed = 2, path = run_path())
+  f <- tempfile(fileext = ".png")
+  grDevices::png(f)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  expect_null(sim_plot(run, "interval_truth"))
+  e <- sim_results(run)$estimates
+  ok <- e$interval_status == "valid" & e$estimate_status %in% adempR:::USABLE_FOR_INTERVAL
+  expect_equal(unique(e$level[ok]), 0.95)
+  expect_null(sim_plot(run, "precision", measure = "coverage"))
 })

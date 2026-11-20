@@ -353,9 +353,10 @@ sim_check_dgp <- function(study, summaries, targets, n = 200L, seed = 1L, alpha 
 #'   to the first two that target the estimand).
 #' @param reference For `"zip"`: rank intervals against the true value
 #'   (`"truth"`, a coverage zip plot) or against the declared null value
-#'   (`"null"`, a power zip plot, where intervals that exclude the null are
-#'   the rejections). The dotted lines give the Monte Carlo confidence
-#'   interval of the proportion of intervals that contain the reference.
+#'   (`"null"`, a power zip plot of the intervals that include the null;
+#'   they equal the nonrejections only when the method's test and interval
+#'   agree). The dotted lines give the Monte Carlo confidence interval of
+#'   the proportion of intervals that contain the reference.
 #' @param ... Graphical parameters passed to the main plotting call.
 #' @return `NULL`, invisibly.
 #' @examples
@@ -416,8 +417,8 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
     ok <- sub$valid & is.finite(sub$estimate)
     avail <- unique(sub$method[ok])
     methods <- methods %||% utils::head(avail, 2L)
-    if (length(methods) != 2L || !all(methods %in% avail)) {
-      stopf("`methods` must name two methods with usable estimates for this scenario.")
+    if (length(methods) != 2L || methods[1] == methods[2] || !all(methods %in% avail)) {
+      stopf("`methods` must name two different methods with usable estimates for this scenario.")
     }
     a <- sub[ok & sub$method == methods[1], c("replication", "estimate")]
     b <- sub[ok & sub$method == methods[2], c("replication", "estimate")]
@@ -447,12 +448,25 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
     for (mm in ms) {
       q <- r[r$method == mm, , drop = FALSE]
       miss <- q$truth < q$lower | q$truth > q$upper
-      graphics::plot(range(q$truth), range(c(q$lower, q$upper, q$truth)), type = "n",
+      # unbounded limits are drawn to the edge of the plot and marked
+      fin <- c(q$lower[is.finite(q$lower)], q$upper[is.finite(q$upper)], q$truth)
+      yr <- range(fin)
+      pad <- max(diff(yr), abs(yr), 1) * 0.1
+      lo_edge <- yr[1] - pad
+      hi_edge <- yr[2] + pad
+      lo <- ifelse(is.finite(q$lower), q$lower, lo_edge)
+      hi <- ifelse(is.finite(q$upper), q$upper, hi_edge)
+      graphics::plot(range(q$truth), c(lo_edge, hi_edge), type = "n",
                      xlab = "true value", ylab = "interval", main = paste(mm, lab, sep = "\n"), ...)
-      graphics::segments(q$truth, q$lower, q$truth, q$upper,
+      graphics::segments(q$truth, lo, q$truth, hi,
                          col = ifelse(miss, "firebrick", grDevices::adjustcolor("grey30", 0.4)))
+      unb <- !is.finite(q$lower) | !is.finite(q$upper)
+      if (any(!is.finite(q$lower))) graphics::points(q$truth[!is.finite(q$lower)], lo[!is.finite(q$lower)], pch = 6, cex = 0.6)
+      if (any(!is.finite(q$upper))) graphics::points(q$truth[!is.finite(q$upper)], hi[!is.finite(q$upper)], pch = 2, cex = 0.6)
       graphics::abline(0, 1, col = "steelblue", lwd = 2)
-      graphics::mtext(sprintf("%d of %d miss", sum(miss), nrow(q)), side = 3, line = 0.2, cex = 0.8)
+      graphics::mtext(sprintf("%d of %d miss%s", sum(miss), nrow(q),
+                              if (any(unb)) sprintf("; %d unbounded (triangles)", sum(unb)) else ""),
+                      side = 3, line = 0.2, cex = 0.8)
     }
   } else if (type == "zip") {
     reference <- match.arg(reference)
@@ -490,7 +504,7 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
       ci <- cp_interval(sum(cover), n, study$level)
       graphics::abline(h = 100 * ci, lty = 3, col = "steelblue")
       graphics::mtext(sprintf("%s %.3f (MC %g%% CI %.3f to %.3f)%s",
-                              if (reference == "truth") "coverage" else "1 - rejection",
+                              if (reference == "truth") "coverage" else "intervals including the null",
                               mean(cover), 100 * study$level, ci[1], ci[2],
                               if (length(lv) > 1L) ", mixed levels" else ""),
                       side = 3, line = 0.2, cex = 0.7)
@@ -519,7 +533,10 @@ sim_plot <- function(run, type = c("estimates", "est_se", "zip", "failures", "pr
     if (measure == "coverage") {
       # the nominal level is the level the methods declared, not the Monte
       # Carlo confidence of the study
-      lv <- unique(est$level[est$estimand == estimand & !is.na(est$level)])
+      # the levels of the intervals coverage counts, as in sim_summarise()
+      ok_int <- est$estimand == estimand & est$interval_status == "valid" &
+        est$estimate_status %in% USABLE_FOR_INTERVAL & !is.na(est$truth)
+      lv <- unique(est$level[ok_int & !is.na(est$level)])
       if (length(lv) == 1L) graphics::abline(v = lv, lty = 2) else
         graphics::mtext("methods declare different nominal levels", side = 3, cex = 0.8)
     }
