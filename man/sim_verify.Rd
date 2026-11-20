@@ -19,18 +19,23 @@ identical in the reproduction mode.}
 }
 \value{
 A list of class \code{adempr_verify} with \code{mode} (\code{"reproduce"} or
-\code{"seed_sensitivity"}), \code{table} and \code{ok} (\code{TRUE}, \code{FALSE} or, for an
-indeterminate seed comparison, \code{NA}).
+\code{"seed_sensitivity"}), \code{table}, \code{ok} (\code{TRUE}, \code{FALSE} or, for an
+indeterminate seed comparison, \code{NA}) and, when reproducing, \code{tables}
+(one row per compared table) and \code{excluded_fields}.
 }
 \description{
 With two runs that used the same seed (1 and 1L are the same seed),
-\code{sim_verify()} checks that every stored outcome is reproduced: estimate
-rows are matched on scenario, estimand, replication and method, and
-every estimate column (point, SE, interval, test, flags), the attempt
-status, the warning flag, the truth and the validity status must agree;
-generated data sets must have the same outcome and checksum. Missing
-values equal missing values and equal infinities are equal. Rows present
-in one run only make the check fail. This is the check for a rerun on
+\code{sim_verify()} checks that every stored scientific outcome is
+reproduced, table by table: estimates (every estimate column, the
+attempt status, the warning and fallback flags, the truth with its SE
+and error bound, and the validity status), generations (outcome,
+message and data checksum), method attempts (status, failed stage,
+message, number of warnings), fit diagnostics, data set records, data
+set truths and the truth table. Rows are matched on their keys; rows
+present in one run only make the check fail. Only timing fields
+(elapsed and CPU times) are left out; \code{excluded_fields} names them and
+\code{tables} gives the fields compared and the result for each table.
+Missing values equal missing values and equal infinities are equal. This is the check for a rerun on
 another machine or with another backend.
 }
 \details{

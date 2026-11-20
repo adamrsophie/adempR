@@ -67,3 +67,36 @@ test_that("seed sensitivity treats boundary proportions and missing MCSEs carefu
   expect_true(is.na(v$ok))
   expect_equal(v$n_indeterminate, 1L)
 })
+
+test_that("reproduction checks every scientific table, one mutated field at a time", {
+  st <- sim_study("verify_schema", scenarios = sim_scenarios(n = 5L),
+    generate = sim_generator(function(scenario, context) stats::rnorm(scenario$n),
+                             record = function(data) list(m = mean(data))),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(a = sim_method(function(data) sim_estimate("mean", mean(data)),
+                                  diagnostics = function(fit) c(d = 1))),
+    measures = "bias")
+  ra <- sim_results(sim_run(st, 3, 1, run_path(), progress = FALSE))
+  rb <- sim_results(sim_run(st, 3, 1, run_path(), progress = FALSE))
+  v <- sim_verify(ra, rb)
+  expect_true(v$ok)
+  expect_true(all(v$tables$identical))
+  expect_true(all(c("diagnostics", "records", "attempts", "truth") %in% v$tables$table))
+  expect_true("elapsed" %in% v$excluded_fields)
+  mutate <- function(tab, col, val) {
+    x <- rb
+    x[[tab]][[col]][1] <- val
+    sim_verify(ra, x)
+  }
+  for (m in list(c("diagnostics", "value"), c("records", "value"), c("attempts", "status"),
+                 c("truth", "truth"), c("estimates", "estimate"), c("replications", "data_md5"))) {
+    val <- if (is.numeric(rb[[m[1]]][[m[2]]])) 999 else "changed"
+    w <- mutate(m[1], m[2], val)
+    expect_false(w$ok, info = paste(m, collapse = "$"))
+    expect_false(w$tables$identical[w$tables$table == m[1]], info = m[1])
+  }
+  # timing fields are not compared
+  x <- rb
+  x$attempts$elapsed <- x$attempts$elapsed + 10
+  expect_true(sim_verify(ra, x)$ok)
+})

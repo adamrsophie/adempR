@@ -3,13 +3,17 @@
 #' Compare two runs of the same study
 #'
 #' With two runs that used the same seed (1 and 1L are the same seed),
-#' `sim_verify()` checks that every stored outcome is reproduced: estimate
-#' rows are matched on scenario, estimand, replication and method, and
-#' every estimate column (point, SE, interval, test, flags), the attempt
-#' status, the warning flag, the truth and the validity status must agree;
-#' generated data sets must have the same outcome and checksum. Missing
-#' values equal missing values and equal infinities are equal. Rows present
-#' in one run only make the check fail. This is the check for a rerun on
+#' `sim_verify()` checks that every stored scientific outcome is
+#' reproduced, table by table: estimates (every estimate column, the
+#' attempt status, the warning and fallback flags, the truth with its SE
+#' and error bound, and the validity status), generations (outcome,
+#' message and data checksum), method attempts (status, failed stage,
+#' message, number of warnings), fit diagnostics, data set records, data
+#' set truths and the truth table. Rows are matched on their keys; rows
+#' present in one run only make the check fail. Only timing fields
+#' (elapsed and CPU times) are left out; `excluded_fields` names them and
+#' `tables` gives the fields compared and the result for each table.
+#' Missing values equal missing values and equal infinities are equal. This is the check for a rerun on
 #' another machine or with another backend.
 #'
 #' With two runs that used different seeds, it is a seed sensitivity check:
@@ -31,8 +35,9 @@
 #' @param tolerance Absolute difference under which estimates count as
 #'   identical in the reproduction mode.
 #' @return A list of class `adempr_verify` with `mode` (`"reproduce"` or
-#'   `"seed_sensitivity"`), `table` and `ok` (`TRUE`, `FALSE` or, for an
-#'   indeterminate seed comparison, `NA`).
+#'   `"seed_sensitivity"`), `table`, `ok` (`TRUE`, `FALSE` or, for an
+#'   indeterminate seed comparison, `NA`) and, when reproducing, `tables`
+#'   (one row per compared table) and `excluded_fields`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = 20L),
 #'   generate = function(scenario, context) rnorm(scenario$n),
@@ -77,15 +82,47 @@ same_values <- function(x, y, tolerance) {
   (is.na(x) & is.na(y)) | (!is.na(x) & !is.na(y) & x == y)
 }
 
-# Every stored outcome is compared on the complete set of keys: estimate
-# columns, statuses and the truth of each estimate row, and the outcome
-# and data checksum of each generated data set. Rows present in one run
-# only are reported and make the check fail.
+# The scientific equality schema of a reproduction: for each stored table,
+# the keys that identify a row and the fields that must agree. Timing
+# fields (elapsed and CPU times, start times) vary by design and are left
+# out; VERIFY_EXCLUDED lists them.
+verify_schema <- function() {
+  list(
+    estimates = list(keys = c("scenario_key", "estimand", "replication", "method"),
+                     fields = c(setdiff(RAW_ESTIMATE_COLUMNS, "estimand"), "fallback",
+                                "attempt_status", "had_warning", "truth", "truth_se",
+                                "truth_error", "estimate_status")),
+    replications = list(keys = c("scenario_key", "replication"),
+                        fields = c("generation_status", "generation_message", "data_md5")),
+    attempts = list(keys = c("scenario_key", "replication", "method", "attempt"),
+                    fields = c("status", "failed_stage", "message", "n_warnings", "final")),
+    diagnostics = list(keys = c("scenario_key", "replication", "method", "name"), fields = "value"),
+    records = list(keys = c("scenario_key", "replication", "name"), fields = "value"),
+    dataset_truth = list(keys = c("scenario_key", "replication", "estimand"), fields = "truth"),
+    truth = list(keys = c("scenario_key", "estimand"),
+                 fields = c("truth", "truth_se", "truth_error", "truth_status", "truth_n")))
+}
+
+VERIFY_EXCLUDED <- c("elapsed", "cpu", "generation_elapsed", "truth_elapsed", "started", "time")
+
+# Every table of the schema is compared on its complete set of keys; rows
+# present in one run only are reported and make the check fail.
 verify_reproduce <- function(ra, rb, tolerance) {
-  keys <- c("scenario_key", "estimand", "replication", "method")
-  cols <- c(setdiff(RAW_ESTIMATE_COLUMNS, "estimand"), "fallback", "attempt_status",
-            "had_warning", "truth", "estimate_status")
   cmp <- function(xa, xb, keys, cols) {
+    if (is.null(xa) || !nrow(xa)) xa <- NULL
+    if (is.null(xb) || !nrow(xb)) xb <- NULL
+    if (is.null(xa) && is.null(xb)) {
+      return(list(m = data.frame(), both = logical(), same = logical(), diff = 0, fields = character()))
+    }
+    if (is.null(xa) || is.null(xb)) {
+      x <- xa %||% xb
+      m <- x[intersect(keys, names(x))]
+      m$.in_a <- !is.null(xa)
+      m$.in_b <- !is.null(xb)
+      return(list(m = m, both = rep(FALSE, nrow(m)), same = rep(FALSE, nrow(m)), diff = Inf,
+                  fields = character()))
+    }
+    keys <- intersect(keys, intersect(names(xa), names(xb)))
     cols <- intersect(cols, intersect(names(xa), names(xb)))
     xa$.in_a <- TRUE
     xb$.in_b <- TRUE
@@ -105,18 +142,30 @@ verify_reproduce <- function(ra, rb, tolerance) {
         diff <- max(c(diff, d[both]), na.rm = TRUE)
       }
     }
-    list(m = m, both = both, same = same & both, diff = diff)
+    list(m = m, both = both, same = same & both, diff = diff, fields = cols)
   }
-  e <- cmp(ra$estimates, rb$estimates, keys, cols)
-  g <- cmp(ra$replications, rb$replications, c("scenario_key", "replication"),
-           c("generation_status", "data_md5"))
-  tab <- data.frame(n_a = nrow(ra$estimates), n_b = nrow(rb$estimates),
+  sch <- verify_schema()
+  res <- lapply(names(sch), function(t) cmp(ra[[t]], rb[[t]], sch[[t]]$keys, sch[[t]]$fields))
+  names(res) <- names(sch)
+  tables <- data.frame(table = names(sch),
+    n_compared = vapply(res, function(r) sum(r$both), numeric(1)),
+    n_identical = vapply(res, function(r) sum(r$same), numeric(1)),
+    only_a = vapply(res, function(r) if (nrow(r$m)) sum(!r$m$.in_b %in% TRUE) else 0, numeric(1)),
+    only_b = vapply(res, function(r) if (nrow(r$m)) sum(!r$m$.in_a %in% TRUE) else 0, numeric(1)),
+    fields = vapply(res, function(r) paste(r$fields, collapse = ", "), character(1)),
+    stringsAsFactors = FALSE)
+  tables$identical <- tables$n_identical == tables$n_compared & tables$only_a == 0 & tables$only_b == 0
+  rownames(tables) <- NULL
+  e <- res$estimates
+  g <- res$replications
+  tab <- data.frame(n_a = NROW(ra$estimates), n_b = NROW(rb$estimates),
                     n_compared = sum(e$both), n_identical = sum(e$same),
-                    only_a = sum(!e$m$.in_b %in% TRUE), only_b = sum(!e$m$.in_a %in% TRUE),
+                    only_a = tables$only_a[1], only_b = tables$only_b[1],
                     datasets_differing = sum(!g$same), max_abs_diff = e$diff)
-  mism <- e$m[!e$same, keys, drop = FALSE]
-  list(mode = "reproduce", table = tab, mismatches = mism,
-       ok = nrow(e$m) > 0 && all(e$same) && all(g$same))
+  mism <- if (nrow(e$m)) e$m[!e$same, sch$estimates$keys, drop = FALSE] else data.frame()
+  list(mode = "reproduce", table = tab, tables = tables, mismatches = mism,
+       excluded_fields = VERIFY_EXCLUDED,
+       ok = nrow(e$m) > 0 && all(tables$identical))
 }
 
 # Seed sensitivity: each cell's difference against its Monte Carlo error.
@@ -164,6 +213,8 @@ print.adempr_verify <- function(x, ...) {
                 x$seeds[[1]], t$n_identical, t$n_compared, t$max_abs_diff))
     if (t$only_a || t$only_b) cat(sprintf("Rows in one run only: %d in a, %d in b.\n", t$only_a, t$only_b))
     if (t$datasets_differing) cat(sprintf("%d generated data sets differ.\n", t$datasets_differing))
+    bad <- x$tables[!x$tables$identical, , drop = FALSE]
+    if (nrow(bad)) cat(sprintf("Tables that differ: %s.\n", paste(bad$table, collapse = ", ")))
   } else {
     t <- x$table
     cat(sprintf("Seed sensitivity (seeds %s and %s): %d cells, %d beyond the threshold (%.2g expected by chance), %d not comparable, %.0f%% with |z| > 1.96.\n",
