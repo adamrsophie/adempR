@@ -19,3 +19,31 @@ test_that("method settings are tuned on calibration streams, not production stre
   expect_output(print(cal), "Chosen: trim = 0.25")
   expect_error(sim_calibrate_method(st, method = 1, grid = list(a = 1), seed = 1), "function")
 })
+
+test_that("calibration penalizes settings that fail, uses weights and reports uncertainty", {
+  st <- sim_study("cal2", scenarios = sim_scenarios(n = c(8L, 40L), .weights = c(1, 3)),
+    generate = function(scenario, context) data.frame(y = rt(scenario$n, df = 2)),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
+    methods = list(mean = function(data) sim_estimate("mean", mean(data$y))))
+  # the heavy trim is best where it runs but fails in the small scenario
+  cal <- sim_calibrate_method(st,
+    method = function(trim) function(data) {
+      if (trim > 0.3 && nrow(data) < 10) stop("too few observations")
+      sim_estimate("mean", mean(data$y, trim = trim))
+    },
+    grid = list(trim = c(0, 0.2, 0.4)), measure = "mse", replications = 40, seed = 4,
+    path = run_path())
+  o <- cal$overall
+  expect_true(all(c("loss", "mcse", "usable", "scenarios_without_loss") %in% names(o)))
+  expect_identical(o$loss[o$setting == "setting_3"], Inf)
+  expect_equal(o$scenarios_without_loss[o$setting == "setting_3"], 1)
+  expect_lt(o$usable[o$setting == "setting_3"], 1)
+  expect_false(identical(cal$best$trim, 0.4))
+  # weighted mean of the per scenario losses
+  t2 <- cal$table[cal$table$setting == "setting_2", ]
+  expect_equal(o$loss[o$setting == "setting_2"], sum(c(0.25, 0.75) * t2$loss))
+  expect_equal(o$mcse[o$setting == "setting_2"], sqrt(sum(c(0.25, 0.75)^2 * t2$mcse^2)))
+  expect_true(all(is.finite(cal$table$mcse[cal$table$setting != "setting_3"])))
+  expect_length(cal$excluded, 0L)
+  expect_output(print(cal), "design weights")
+})

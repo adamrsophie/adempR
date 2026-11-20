@@ -23,10 +23,24 @@
 #' @param seed Calibration seed.
 #' @param path Directory for the calibration run.
 #' @param ... Passed to [sim_run()].
+#' Each setting is evaluated on its own usable replications in each
+#' scenario (as in [sim_summarise()]); its usable proportion is reported
+#' beside the loss, so a setting that often fails is visible. The loss is
+#' averaged over scenarios with the design weights when the scenarios have
+#' them, else equally. A setting without a loss in a scenario (it never
+#' produced a usable result there) cannot be chosen; a scenario where no
+#' setting has a loss (for example an unknown truth) is left out and
+#' named in `excluded`. The MCSE of the mean loss treats scenarios as
+#' independent; differences between settings evaluated on the same data
+#' sets are usually more precise than the two MCSEs suggest (see
+#' [sim_compare()] on the calibration run).
+#'
 #' @return An object of class `adempr_calibration` with `table` (one row
-#'   per setting and scenario: value, MCSE, loss), `overall` (mean loss per
-#'   setting across scenarios), `best` (the chosen settings, a one row data
-#'   frame), and `run`.
+#'   per setting and scenario: value, MCSE, loss, usable proportion, number
+#'   of contributions, status), `overall` (per setting: mean loss, its MCSE,
+#'   mean usable proportion and the number of scenarios without a loss,
+#'   ordered by loss), `best` (the chosen settings, a one row data frame),
+#'   `excluded` (scenarios not used) and `run`.
 #' @examples
 #' study <- sim_study("demo", scenarios = sim_scenarios(n = 30L),
 #'   generate = function(scenario, context) rt(scenario$n, df = 3),
@@ -65,18 +79,66 @@ sim_calibrate_method <- function(study, method, grid, measure = "mse", estimand 
   attr(cal, "adempr_derived") <- list(kind = "calibration", parent = derived_parent(study))
   run <- sim_run(cal, replications = replications, seed = seed, path = path,
                  label = "calibration", ...)
-  r <- sim_rank(run, measure = measure, estimand = estimand, B = 10L, seed = 1L)
-  tab <- data.frame(setting = r$method, r[c("scenario_id", "value", "loss", "rank", "n_common")],
-                    stringsAsFactors = FALSE)
-  tab <- cbind(grid[match(tab$setting, ids), , drop = FALSE], tab)
-  rownames(tab) <- NULL
-  overall <- stats::aggregate(loss ~ setting, data = tab, FUN = mean)
+  res <- sim_results(run)
+  sm <- as.data.frame(sim_summarise(res, measures = unique(c(measure, "usable"))))
+  sm <- sm[sm$estimand == estimand & sm$scenario_key %in% cal$scenarios$keys, , drop = FALSE]
+  est <- res$estimates
+  keys <- cal$scenarios$keys
+  rows <- list()
+  for (k in keys) for (id in ids) {
+    cell <- sm[sm$scenario_key == k & sm$method == id, , drop = FALSE]
+    v <- cell[cell$measure == measure, , drop = FALSE]
+    u <- cell$value[cell$measure == "usable"]
+    nominal <- NA_real_
+    if (measure == "coverage") {
+      lv <- unique(est$level[est$scenario_key == k & est$method == id & est$estimand == estimand &
+                               !is.na(est$level)])
+      nominal <- if (length(lv) == 1L) lv else NA_real_
+    }
+    val <- if (nrow(v)) v$value[1] else NA_real_
+    loss <- switch(measure, bias = abs(val), coverage = abs(val - nominal), val)
+    rows[[length(rows) + 1L]] <- data.frame(
+      setting = id, scenario_key = k,
+      scenario_id = cal$scenarios$labels[match(k, keys)],
+      value = val, mcse = if (nrow(v)) v$mcse[1] else NA_real_, loss = loss,
+      usable = if (length(u)) u[1] else NA_real_, n = if (nrow(v)) v$n_eligible[1] else 0L,
+      status = if (nrow(v)) v$status[1] else "no_results",
+      stringsAsFactors = FALSE)
+  }
+  tab <- bind_rows(rows)
+  # A scenario where no setting has a loss (for example an unknown truth)
+  # cannot inform the choice and is reported. Elsewhere a setting without a
+  # loss failed there and cannot be chosen, so a setting that fails in a
+  # hard scenario is not rescued by dropping that scenario.
+  informative <- vapply(keys, function(k) any(is.finite(tab$loss[tab$scenario_key == k])), logical(1))
+  excluded <- cal$scenarios$labels[!informative]
+  w <- cal$scenarios$weights %||% rep(1, length(keys))
+  w <- stats::setNames(w / sum(w[informative]), keys)
+  use <- tab$scenario_key %in% keys[informative]
+  overall <- do.call(rbind, lapply(ids, function(id) {
+    t <- tab[use & tab$setting == id, , drop = FALSE]
+    wk <- w[t$scenario_key]
+    data.frame(setting = id,
+               loss = if (all(is.finite(t$loss))) sum(wk * t$loss) else Inf,
+               mcse = sqrt(sum(wk^2 * t$mcse^2)),
+               usable = sum(wk * t$usable),
+               scenarios_without_loss = sum(!is.finite(t$loss)),
+               stringsAsFactors = FALSE)
+  }))
+  if (!any(is.finite(overall$loss))) {
+    stopf("No setting has a %s loss in every informative scenario; nothing can be chosen.", measure)
+  }
   overall <- overall[order(overall$loss), , drop = FALSE]
+  rownames(overall) <- NULL
   best_id <- overall$setting[1]
   best <- grid[match(best_id, ids), , drop = FALSE]
   rownames(best) <- NULL
+  tab <- cbind(grid[match(tab$setting, ids), , drop = FALSE], tab)
+  rownames(tab) <- NULL
   structure(list(table = tab, overall = overall, best = best, measure = measure,
-                 estimand = estimand, run = run), class = "adempr_calibration")
+                 estimand = estimand, excluded = excluded,
+                 weighted = !is.null(cal$scenarios$weights), run = run),
+            class = "adempr_calibration")
 }
 
 #' @export
@@ -85,5 +147,13 @@ print.adempr_calibration <- function(x, ...) {
               x$measure, x$estimand, nrow(x$overall)))
   cat("Chosen: ", paste(names(x$best), vapply(x$best, format, character(1)), sep = " = ",
                         collapse = ", "), "\n", sep = "")
+  o <- x$overall
+  cat(sprintf("Mean loss (%s): %s.\n", if (isTRUE(x$weighted)) "design weights" else "equal weights",
+              paste(sprintf("%s %s (MCSE %s, usable %s)", o$setting, format(signif(o$loss, 4)),
+                            format(signif(o$mcse, 2)), format(round(o$usable, 3))), collapse = "; ")))
+  if (length(x$excluded)) {
+    cat(sprintf("Scenarios without a loss for any setting, not used: %s.\n",
+                paste(x$excluded, collapse = ", ")))
+  }
   invisible(x)
 }

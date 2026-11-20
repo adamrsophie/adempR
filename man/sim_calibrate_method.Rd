@@ -37,13 +37,26 @@ level) or \code{"width"}; smaller loss is better.}
 
 \item{path}{Directory for the calibration run.}
 
-\item{...}{Passed to \code{\link[=sim_run]{sim_run()}}.}
+\item{...}{Passed to \code{\link[=sim_run]{sim_run()}}.
+Each setting is evaluated on its own usable replications in each
+scenario (as in \code{\link[=sim_summarise]{sim_summarise()}}); its usable proportion is reported
+beside the loss, so a setting that often fails is visible. The loss is
+averaged over scenarios with the design weights when the scenarios have
+them, else equally. A setting without a loss in a scenario (it never
+produced a usable result there) cannot be chosen; a scenario where no
+setting has a loss (for example an unknown truth) is left out and
+named in \code{excluded}. The MCSE of the mean loss treats scenarios as
+independent; differences between settings evaluated on the same data
+sets are usually more precise than the two MCSEs suggest (see
+\code{\link[=sim_compare]{sim_compare()}} on the calibration run).}
 }
 \value{
 An object of class \code{adempr_calibration} with \code{table} (one row
-per setting and scenario: value, MCSE, loss), \code{overall} (mean loss per
-setting across scenarios), \code{best} (the chosen settings, a one row data
-frame), and \code{run}.
+per setting and scenario: value, MCSE, loss, usable proportion, number
+of contributions, status), \code{overall} (per setting: mean loss, its MCSE,
+mean usable proportion and the number of scenarios without a loss,
+ordered by loss), \code{best} (the chosen settings, a one row data frame),
+\code{excluded} (scenarios not used) and \code{run}.
 }
 \description{
 Choosing a tuning parameter (a penalty, a bandwidth, a number of
