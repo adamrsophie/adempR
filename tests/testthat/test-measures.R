@@ -371,3 +371,15 @@ test_that("an undefined leave one out SE ratio is not reported as ok", {
   expect_equal(r$value, 100 * (1 / sd(c(0, 0, 0, 1)) - 1))
   expect_match(r$note, "jackknife MCSE is undefined")
 })
+
+test_that("a custom aggregate without a value or with an infinite MCSE is not ok", {
+  rows <- data.frame(estimate = c(1, 2, 3), truth = 0)
+  m <- sim_measure("odd", contribution = function(rows) rows$estimate,
+                   aggregate = function(x) list(value = NA_real_, mcse = 0.1))
+  r <- adempR:::k_custom(m, rows)
+  expect_identical(r$status, "undefined")
+  expect_true(is.na(r$value) && is.na(r$mcse))
+  m2 <- sim_measure("inf", contribution = function(rows) rows$estimate,
+                    aggregate = function(x) list(value = 1, mcse = Inf))
+  expect_error(adempR:::k_custom(m2, rows), "finite")
+})

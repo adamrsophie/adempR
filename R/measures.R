@@ -434,6 +434,15 @@ k_custom <- function(measure, rows, level = 0.95) {
     stopf("The aggregate of custom measure `%s` must return a list with a single numeric `value`, a nonnegative `mcse` (or NA) and optional `lower` <= `upper`.",
           measure$id)
   }
+  if (isTRUE(is.infinite(r$mcse)) || isTRUE(is.infinite(r$lower)) || isTRUE(is.infinite(r$upper))) {
+    stopf("The aggregate of custom measure `%s` must return a finite `mcse`, `lower` and `upper` (or NA).",
+          measure$id)
+  }
+  if (is.na(r$value)) {
+    # no value: an uncertainty or interval attached to nothing is not kept
+    return(kernel_result(n = length(x), status = "undefined",
+                         note = "the aggregate returned no value"))
+  }
   mc <- r$mcse %||% NA_real_
   kernel_result(value = r$value, mcse = mc, lower = r$lower %||% NA_real_,
                 upper = r$upper %||% NA_real_, n = length(x),
