@@ -115,3 +115,26 @@ test_that("control variates use pair means for the coefficient and the MCSEs", {
   expect_equal(cv$value_adjusted, mean(x - b * (cc - 1)), tolerance = 1e-12)
   expect_equal(cv$n_units, 5L)
 })
+
+test_that("grid averages keep eligible infinite estimates", {
+  mk <- function(vals) sim_study("grid_inf", scenarios = sim_scenarios(n = 1L),
+    generate = function(scenario, context) 0,
+    estimands = sim_estimand_grid("g", c(1, 2), function(scenario, at) at),
+    methods = list(m = function(data) sim_estimate_grid("g", c(1, 2), vals)),
+    measures = "bias")
+  avg <- function(vals) {
+    out <- sim_summarise_grid(sim_run(mk(vals), 3, 1, run_path(), progress = FALSE), "g", "bias")
+    out[out$measure == "grid_mean_bias", ]
+  }
+  a <- avg(c(-Inf, 2))
+  expect_identical(a$value, -Inf)
+  expect_equal(a$status, "infinite")
+  expect_equal(a$n_eligible, 3L)
+  b <- avg(c(Inf, -Inf))
+  expect_true(is.na(b$value))
+  expect_equal(b$status, "undefined")
+  expect_equal(b$n_eligible, 3L)
+  f <- avg(c(1, 2))
+  expect_equal(f$value, 0)
+  expect_equal(f$status, "ok")
+})
