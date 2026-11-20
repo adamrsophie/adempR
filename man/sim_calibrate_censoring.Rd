@@ -16,7 +16,8 @@ sim_calibrate_censoring(
 \arguments{
 \item{target}{Target censored proportion in (0, 1).}
 
-\item{event_sampler}{Function of \code{n} returning \code{n} event times.}
+\item{event_sampler}{Function of \code{n} returning \code{n} nonnegative event
+times (\code{Inf} for a subject who never has the event).}
 
 \item{horizon}{Administrative censoring time.}
 
@@ -35,6 +36,9 @@ censored proportion without random censoring) and \code{n}.
 With event times \code{T} drawn by \code{event_sampler}, independent exponential
 censoring with rate \code{r} and administrative censoring at \code{horizon}, the
 expected censored proportion is \verb{1 - E[exp(-r T) 1(T <= horizon)]}.
+An infinite event time (a subject who never has the event, such as a
+cured subject) is censored at every rate, including 0; an event at time
+0 is never censored.
 The rate is found with \code{\link[stats:uniroot]{stats::uniroot()}} on a large calibration sample
 drawn from its own seed, and the achieved proportion is reported with
 its Monte Carlo standard error. Pass the rate to \code{\link[=sim_rweibull_ph]{sim_rweibull_ph()}} as

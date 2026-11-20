@@ -282,13 +282,17 @@ sim_contaminate <- function(x, prop, scale = 10, sd = 1) {
 #' With event times `T` drawn by `event_sampler`, independent exponential
 #' censoring with rate `r` and administrative censoring at `horizon`, the
 #' expected censored proportion is `1 - E[exp(-r T) 1(T <= horizon)]`.
+#' An infinite event time (a subject who never has the event, such as a
+#' cured subject) is censored at every rate, including 0; an event at time
+#' 0 is never censored.
 #' The rate is found with [stats::uniroot()] on a large calibration sample
 #' drawn from its own seed, and the achieved proportion is reported with
 #' its Monte Carlo standard error. Pass the rate to [sim_rweibull_ph()] as
 #' `censoring_rate`.
 #'
 #' @param target Target censored proportion in (0, 1).
-#' @param event_sampler Function of `n` returning `n` event times.
+#' @param event_sampler Function of `n` returning `n` nonnegative event
+#'   times (`Inf` for a subject who never has the event).
 #' @param horizon Administrative censoring time.
 #' @param n Size of the calibration sample.
 #' @param seed Seed for the calibration sample (the caller's random number
@@ -304,15 +308,21 @@ sim_contaminate <- function(x, prop, scale = 10, sd = 1) {
 #' @export
 sim_calibrate_censoring <- function(target, event_sampler, horizon = Inf, n = 1e5, seed = 1L,
                                     upper = 1e3) {
+  if (!is_scalar_number(target)) stopf("`target` must be a single number.")
   check_prob(target, "target", open = TRUE)
   check_function(event_sampler, "event_sampler")
   if (!is_scalar_number(horizon) || horizon <= 0) stopf("`horizon` must be positive.")
+  if (!is_count(n, 2)) stopf("`n` must be a whole number of at least 2.")
+  if (!is_scalar_number(upper) || !is.finite(upper) || upper <= 0) {
+    stopf("`upper` must be a positive finite number.")
+  }
   t <- with_rng_state(rng_base_seed(seed), event_sampler(n))
   if (!is.numeric(t) || length(t) != n || anyNA(t) || any(t < 0)) {
     stopf("`event_sampler` must return `n` nonnegative event times.")
   }
-  inside <- t <= horizon
-  cens <- function(r) 1 - mean(exp(-r * t) * inside)
+  # a never-event (Inf) is censored whatever the rate, so it is outside
+  inside <- is.finite(t) & t <= horizon
+  cens <- function(r) 1 - mean(ifelse(inside, exp(-r * t), 0))
   minimum <- cens(0)
   if (target < minimum) {
     stopf("Administrative censoring alone censors %.3f, above the target %s.", minimum, target)
@@ -320,7 +330,7 @@ sim_calibrate_censoring <- function(target, event_sampler, horizon = Inf, n = 1e
   if (cens(upper) < target) stopf("The target %s cannot be reached with rates up to %s.", target, upper)
   r <- if (target == minimum) 0 else stats::uniroot(function(r) cens(r) - target, c(0, upper),
                                                     tol = 1e-12)$root
-  ind <- 1 - exp(-r * t) * inside
+  ind <- 1 - ifelse(inside, exp(-r * t), 0)
   list(rate = r, achieved = mean(ind), achieved_se = stats::sd(ind) / sqrt(n),
        minimum = minimum, target = target, n = n)
 }
@@ -349,19 +359,28 @@ sim_calibrate_censoring <- function(target, event_sampler, horizon = Inf, n = 1e
 sim_rcopula <- function(n, margins, corr) {
   if (!is_count(n, 1)) stopf("`n` must be a positive whole number.")
   if (!is.list(margins) || !length(margins) || is.null(names(margins)) ||
+      any(!nzchar(names(margins))) || anyDuplicated(names(margins)) ||
       !all(vapply(margins, is.function, logical(1)))) {
-    stopf("`margins` must be a named list of quantile functions.")
+    stopf("`margins` must be a list of quantile functions with unique names.")
   }
   k <- length(margins)
   corr <- as.matrix(corr)
   if (!identical(dim(corr), c(k, k))) stopf("`corr` must be a %d by %d matrix.", k, k)
+  # a named correlation matrix must list the margins in the same order
+  for (dn in dimnames(corr)) {
+    if (!is.null(dn) && !identical(dn, names(margins))) {
+      stopf("The names of `corr` must match the names of `margins` in order.")
+    }
+  }
   sim_check_matrix(corr, "correlation")
   z <- sim_rmvnorm(n, rep(0, k), corr)
   u <- stats::pnorm(z)
   out <- lapply(seq_len(k), function(j) {
     v <- margins[[j]](u[, j])
-    if (length(v) != n) stopf("Margin `%s` must return one value per probability.", names(margins)[j])
-    v
+    if (!is.atomic(v) || !is.null(dim(v)) || length(v) != n) {
+      stopf("Margin `%s` must return a vector with one value per probability.", names(margins)[j])
+    }
+    as.vector(v)
   })
   names(out) <- names(margins)
   as.data.frame(out, stringsAsFactors = FALSE)
@@ -379,9 +398,12 @@ sim_rcopula <- function(n, margins, corr) {
 #' @param n Number of rows to draw.
 #' @param outcome Function of the resampled data returning a vector (added
 #'   as column `y`) or a data frame or named list of new columns; `NULL`
-#'   returns the resampled covariates only.
+#'   returns the resampled covariates only. Each column has one value per
+#'   row; a single value is repeated for every row. A column that already
+#'   exists in `data` is refused unless `overwrite = TRUE`.
 #' @param replace Sample rows with replacement (bootstrap); `FALSE` draws a
 #'   subsample, which needs `n <= nrow(data)`.
+#' @param overwrite Allow `outcome` to replace columns of `data`.
 #' @return A data frame with attribute `rows`.
 #' @examples
 #' set.seed(1)
@@ -390,7 +412,7 @@ sim_rcopula <- function(n, margins, corr) {
 #' })
 #' head(pm)
 #' @export
-sim_plasmode <- function(data, n = nrow(data), outcome = NULL, replace = TRUE) {
+sim_plasmode <- function(data, n = nrow(data), outcome = NULL, replace = TRUE, overwrite = FALSE) {
   if (!is.data.frame(data) || !nrow(data)) stopf("`data` must be a nonempty data frame.")
   if (!is_count(n, 1)) stopf("`n` must be a positive whole number.")
   if (!replace && n > nrow(data)) stopf("Without replacement `n` cannot exceed %d rows.", nrow(data))
@@ -400,12 +422,21 @@ sim_plasmode <- function(data, n = nrow(data), outcome = NULL, replace = TRUE) {
   if (!is.null(outcome)) {
     check_function(outcome, "outcome")
     y <- outcome(d)
-    if (is.list(y)) {
-      if (is.null(names(y)) || any(!nzchar(names(y)))) stopf("`outcome` must return named columns.")
-      for (nm in names(y)) d[[nm]] <- y[[nm]]
-    } else {
-      if (length(y) != n) stopf("`outcome` must return one value per row.")
-      d$y <- y
+    if (!is.list(y)) y <- list(y = y)
+    if (is.null(names(y)) || any(!nzchar(names(y))) || anyDuplicated(names(y))) {
+      stopf("`outcome` must return uniquely named columns.")
+    }
+    clash <- intersect(names(y), names(data))
+    if (length(clash) && !isTRUE(overwrite)) {
+      stopf("`outcome` returns column(s) %s that exist in `data`; rename them or set `overwrite = TRUE`.",
+            paste(clash, collapse = ", "))
+    }
+    for (nm in names(y)) {
+      v <- y[[nm]]
+      if (!is.atomic(v) || !is.null(dim(v)) || !length(v) %in% c(1L, n)) {
+        stopf("Column `%s` returned by `outcome` must have one value per row (or a single value).", nm)
+      }
+      d[[nm]] <- rep_len(v, n)
     }
   }
   attr(d, "rows") <- rows

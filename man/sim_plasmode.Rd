@@ -4,7 +4,13 @@
 \alias{sim_plasmode}
 \title{Plasmode data: resampled real covariates with simulated outcomes}
 \usage{
-sim_plasmode(data, n = nrow(data), outcome = NULL, replace = TRUE)
+sim_plasmode(
+  data,
+  n = nrow(data),
+  outcome = NULL,
+  replace = TRUE,
+  overwrite = FALSE
+)
 }
 \arguments{
 \item{data}{The source data frame (covariates).}
@@ -13,10 +19,14 @@ sim_plasmode(data, n = nrow(data), outcome = NULL, replace = TRUE)
 
 \item{outcome}{Function of the resampled data returning a vector (added
 as column \code{y}) or a data frame or named list of new columns; \code{NULL}
-returns the resampled covariates only.}
+returns the resampled covariates only. Each column has one value per
+row; a single value is repeated for every row. A column that already
+exists in \code{data} is refused unless \code{overwrite = TRUE}.}
 
 \item{replace}{Sample rows with replacement (bootstrap); \code{FALSE} draws a
 subsample, which needs \code{n <= nrow(data)}.}
+
+\item{overwrite}{Allow \code{outcome} to replace columns of \code{data}.}
 }
 \value{
 A data frame with attribute \code{rows}.

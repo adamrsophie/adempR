@@ -29,3 +29,35 @@ test_that("plasmode draws resample real rows and add simulated columns", {
   expect_true(all(c("a", "b") %in% names(sub)))
   expect_error(sim_plasmode(mtcars, n = 40, replace = FALSE), "cannot exceed")
 })
+
+test_that("plasmode keeps source columns and refuses recycling", {
+  src <- data.frame(x = 1:4, z = 5:8)
+  expect_error(sim_plasmode(src, n = 4, outcome = function(d) list(x = c(99, 100))), "exist in `data`")
+  expect_error(sim_plasmode(src, n = 4, outcome = function(d) list(w = c(99, 100))), "one value per row")
+  pm <- sim_plasmode(src, n = 4, outcome = function(d) list(x = d$x * 2), overwrite = TRUE)
+  expect_equal(pm$x, src$x[attr(pm, "rows")] * 2)
+  expect_error(sim_plasmode(src, n = 4, outcome = function(d) list(a = 1, a = 2)), "uniquely named")
+  expect_equal(sim_plasmode(src, n = 4, outcome = function(d) list(k = 3))$k, rep(3, 4))
+})
+
+test_that("copula margins must return one atomic value per draw", {
+  expect_error(sim_rcopula(3, list(x = function(p) as.list(p)), diag(1)), "vector with one value")
+  expect_error(sim_rcopula(4, list(x = function(p) matrix(p, 1)), diag(1)), "vector with one value")
+  expect_error(sim_rcopula(3, list(x = qnorm, x = qnorm), diag(2)), "unique names")
+  cm <- diag(2)
+  dimnames(cm) <- list(c("b", "a"), c("b", "a"))
+  expect_error(sim_rcopula(3, list(a = qnorm, b = qnorm), cm), "match the names")
+  d <- sim_rcopula(5, list(a = qnorm, b = qexp), diag(2))
+  expect_equal(dim(d), c(5L, 2L))
+})
+
+test_that("censoring calibration handles never-events and validates its inputs", {
+  # half the subjects never have the event; they are censored at every rate
+  sampler <- function(n) ifelse(seq_len(n) %% 2 == 0, Inf, rexp(n))
+  cal <- sim_calibrate_censoring(0.7, sampler, n = 1e4, seed = 1)
+  expect_equal(cal$minimum, 0.5)
+  expect_equal(cal$achieved, 0.7, tolerance = 1e-6)
+  expect_error(sim_calibrate_censoring(c(0.3, 0.4), sampler), "single number")
+  expect_error(sim_calibrate_censoring(0.7, sampler, upper = Inf), "finite")
+  expect_error(sim_calibrate_censoring(0.7, sampler, n = 1.5), "whole number")
+})
