@@ -79,6 +79,16 @@ execute_task_seeded <- function(study, task, dgp_stage = "dgp", keep_data = FALS
   attempts <- list()
   estimates <- list()
   diagnostics <- list()
+  # A committed data set regenerated only to run further methods (an added,
+  # changed or retried method) keeps its committed generation: a failure to
+  # regenerate it is not a new outcome of the data generating mechanism and
+  # must not be committed next to the successful one. The run stops before
+  # anything of this chunk is committed, and the further methods stay
+  # pending until the generator works again.
+  if (!is.null(gen$error) && length(task$expect_md5) && !is.na(task$expect_md5)) {
+    stopf("Replication %d of scenario %s could not be regenerated to run further methods on its committed data set: %s. The committed results are unchanged and the further methods stay pending; restore what the generator needs and run again.",
+          rep, short_hash(key), conditionMessage(gen$error))
+  }
   if (!is.null(gen$error)) {
     return(list(replication = repl, attempts = NULL, estimates = NULL,
                 dataset_truth = NULL, artifacts = artifacts, diagnostics = NULL))

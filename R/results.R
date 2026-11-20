@@ -51,6 +51,17 @@ current_records <- function(df, man) {
 # The selected generation of every data set: repeated deliveries checked
 # for conflicts, then the latest retry round.
 select_generations <- function(reps) {
+  # Runs written before failed regenerations were refused may hold, for a
+  # committed data set, a failed regeneration next to its successful
+  # generation in the same round. A generator with a fixed stream cannot
+  # both succeed and fail; the failure came from a changed environment
+  # while further methods were added, so the successful generation (whose
+  # fits are committed) is the generation of that data set.
+  if (!is.null(reps) && nrow(reps)) {
+    id <- paste(reps$scenario_key, reps$replication, reps$generator_fp, reps$round, sep = "\r")
+    ok_ids <- id[reps$generation_status == "ok"]
+    reps <- reps[!(reps$generation_status != "ok" & id %in% ok_ids), , drop = FALSE]
+  }
   latest_round(dedup_table(reps, c("scenario_key", "replication", "generator_fp", "round"),
                            c("generation_status", "generation_message", "data_md5"),
                            "generation"),
