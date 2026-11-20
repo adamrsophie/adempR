@@ -59,3 +59,14 @@ test_that("an indefinite block is found next to a large variance", {
   expect_error(sim_check_matrix(m, "covariance"), "not positive semidefinite")
   expect_error(sim_rmvnorm(5, c(0, 0, 0), m), "not positive semidefinite")
 })
+
+test_that("symmetry is checked on the correlation scale", {
+  m <- diag(c(1e14, 1, 1))
+  m[2, 3] <- 2
+  m[3, 2] <- 0
+  expect_error(sim_check_matrix(m, "covariance"), "not symmetric")
+  # a large but symmetric covariance passes
+  ok <- diag(c(1e14, 1, 1))
+  ok[2, 3] <- ok[3, 2] <- 0.5
+  expect_silent(sim_check_matrix(ok, "covariance"))
+})

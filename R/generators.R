@@ -35,18 +35,20 @@ sim_check_matrix <- function(m, type = c("correlation", "covariance"), tol = 1e-
   if (!is.matrix(m) || !is.numeric(m) || nrow(m) != ncol(m) || anyNA(m) || any(!is.finite(m))) {
     stopf("The %s matrix must be a finite numeric square matrix.", type)
   }
-  if (max(abs(m - t(m))) > 1e-12 * max(1, max(abs(m)))) stopf("The %s matrix is not symmetric.", type)
   d <- diag(m)
   if (type == "correlation") {
     if (any(abs(d - 1) > 1e-12)) stopf("A correlation matrix must have a unit diagonal.")
-    if (any(abs(m) > 1 + 1e-12)) stopf("Correlations must lie in [-1, 1].")
   } else if (any(d <= 0)) {
     stopf("A covariance matrix must have a positive diagonal.")
   }
-  # Checked on the correlation scale, so that a large variance elsewhere in
-  # the matrix cannot hide an indefinite block within the tolerance.
+  # Symmetry and definiteness are checked on the correlation scale, so that
+  # a large variance elsewhere in the matrix cannot hide an asymmetric or
+  # indefinite block within the tolerance.
   s <- 1 / sqrt(d)
-  ev <- eigen(m * outer(s, s), symmetric = TRUE, only.values = TRUE)$values
+  r <- m * outer(s, s)
+  if (max(abs(r - t(r))) > 1e-12) stopf("The %s matrix is not symmetric.", type)
+  if (type == "correlation" && any(abs(m) > 1 + 1e-12)) stopf("Correlations must lie in [-1, 1].")
+  ev <- eigen(r, symmetric = TRUE, only.values = TRUE)$values
   if (min(ev) < -tol * max(abs(ev))) {
     stopf("The %s matrix is not positive semidefinite (smallest eigenvalue %s). It is not repaired automatically.",
           type, format(min(ev), digits = 4))
