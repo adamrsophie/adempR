@@ -375,18 +375,23 @@ k_be_coverage <- function(rows, sel, center_rows, truth, level = 0.95) {
   idx <- which(sel)
   cen <- which(center_rows)
   prop <- function(drop = integer()) {
-    shift <- mean(err[setdiff(cen, drop)])
     i <- setdiff(idx, drop)
+    k <- setdiff(cen, drop)
+    if (!length(i) || !length(k)) return(NA_real_)
+    shift <- mean(err[k])
     mean(rows$lower[i] <= truth[i] + shift & truth[i] + shift <= rows$upper[i])
   }
   p <- prop()
   n <- length(idx)
-  G <- min(n, 50L)
+  # The jackknife deletes whole replications: every row that enters the
+  # coverage or the mean error, so both are recomputed without them.
+  all <- sort(union(idx, cen))
+  G <- min(length(all), 50L)
   mcse <- NA_real_
   if (G >= 2L) {
-    grp <- split(idx, cut(seq_along(idx), G, labels = FALSE))
+    grp <- split(all, cut(seq_along(all), G, labels = FALSE))
     th <- vapply(grp, prop, numeric(1))
-    mcse <- sqrt((G - 1) / G * sum((th - mean(th))^2))
+    if (!anyNA(th)) mcse <- sqrt((G - 1) / G * sum((th - mean(th))^2))
   }
   z <- stats::qnorm(1 - (1 - level) / 2)
   kernel_result(value = p, mcse = mcse, lower = max(0, p - z * mcse), upper = min(1, p + z * mcse),

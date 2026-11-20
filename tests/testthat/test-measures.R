@@ -338,3 +338,28 @@ test_that("a numerical truth error bound gives a sensitivity range", {
   expect_equal(c(b$truth_sens_lower, b$truth_sens_upper), b$value + c(-0.25, 0.25))
   expect_true(is.na(b$mcse_total))
 })
+
+test_that("bias eliminated coverage deletes whole replications and handles a fixed unknown truth", {
+  # rows 1 to 4 have intervals, rows 5 and 6 only estimates that move the center
+  rows <- data.frame(estimate = c(0, 0.2, -0.2, 0.1, 6, -6), lower = c(-1, -1, -1, -1, NA, NA),
+                     upper = c(1, 1, 1, 1, NA, NA))
+  sel <- c(rep(TRUE, 4), FALSE, FALSE)
+  r <- adempR:::k_be_coverage(rows, sel, rep(TRUE, 6), rep(0, 6))
+  # deleting replication 5 or 6 moves the center by 1, out of every interval
+  th <- c(rep(1, 4), 0, 0)
+  expect_equal(r$mcse, sqrt(5 / 6 * sum((th - mean(th))^2)))
+  # with a fixed unknown truth the target is the mean estimate
+  st <- sim_study("unk", scenarios = sim_scenarios(n = 20L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n, 3)),
+    estimands = list(sim_estimand("m", sim_truth_unknown())),
+    methods = list(t = function(data) {
+      ci <- t.test(data$y)$conf.int
+      sim_estimate("m", mean(data$y), lower = ci[1], upper = ci[2], level = 0.95)
+    }), measures = "be_coverage")
+  run <- sim_run(st, replications = 30, seed = 1, path = run_path())
+  s <- as.data.frame(sim_summarise(run))
+  b <- s[s$measure == "be_coverage", ]
+  e <- sim_results(run)$estimates
+  expect_equal(b$value, mean(e$lower <= mean(e$estimate) & mean(e$estimate) <= e$upper))
+  expect_match(b$note, "mean estimate")
+})

@@ -129,8 +129,12 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
       sel <- int_ok & has_truth
       k_prop(truth[sel] > rows$upper[sel], level)
     },
-    be_coverage = k_be_coverage(rows, int_ok & usable & has_truth, usable & has_truth,
-                                truth, level),
+    be_coverage = if (identical(estimand$truth$kind, "unknown")) {
+      # a fixed truth cancels: truth plus the mean error is the mean estimate
+      r <- k_be_coverage(rows, int_ok & usable, usable, rep(0, nrow(rows)), level)
+      r$note <- paste(r$note, "(truth unknown but fixed, so the target is the mean estimate)")
+      r
+    } else k_be_coverage(rows, int_ok & usable & has_truth, usable & has_truth, truth, level),
     width = k_mean((rows$upper - rows$lower)[int_ok], level),
     rejection = k_prop(reject_indicator(rows[test_ok, , drop = FALSE], study$alpha), level),
     usable = k_prop(usable, level),
