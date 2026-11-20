@@ -353,7 +353,10 @@ sim_pareto <- function(summary, criteria = c(rmse = "min", usable = "max", runti
   }
   s <- as.data.frame(summary)
   rt <- attr(summary, "runtime")
-  cells <- unique(s[s$scenario_key != "weighted", c("scenario_key", "scenario_id", "estimand", "method")])
+  # every weighted row (overall, or within a level of `by`) is a summary
+  # over scenarios, not a scenario
+  cells <- unique(s[!startsWith(s$scenario_key, "weighted"),
+                    c("scenario_key", "scenario_id", "estimand", "method")])
   vals <- sapply(names(criteria), function(cr) {
     vapply(seq_len(nrow(cells)), function(i) {
       if (cr == "runtime") {

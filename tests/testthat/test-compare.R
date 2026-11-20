@@ -165,3 +165,13 @@ test_that("the RMSE ratio reports its sensitivity to a Monte Carlo truth", {
   expect_equal(rr$sens, range(grid))
   expect_true(rr$sens[1] < rr$value && rr$value < rr$sens[2])
 })
+
+test_that("the Pareto view leaves out weighted rows formed within factor levels", {
+  st <- normal_study(n = c(10L, 20L), mu = c(0, 1), measures = c("bias", "mse"))
+  st$scenarios$weights <- rep(0.25, 4)
+  run <- sim_run(st, replications = 5, seed = 1, path = run_path())
+  pv <- sim_pareto(sim_summarise(run, c("mse", "usable"), weighted = TRUE, by = "mu"),
+                   c(mse = "min", usable = "max"))
+  expect_false(any(startsWith(pv$scenario_key, "weighted")))
+  expect_setequal(unique(pv$scenario_key), st$scenarios$keys)
+})
