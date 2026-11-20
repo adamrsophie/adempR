@@ -53,6 +53,55 @@ test_that("a control variate with known mean reduces the Monte Carlo error", {
   expect_error(sim_control_variate(run, "nope", 0), "No recorded quantity")
 })
 
+test_that("selected contributions block the control variate adjustment and are counted", {
+  # the method fails when the first observation is large, so the fits that
+  # contribute are a selection whose control mean is not the known one
+  st <- sim_study("vr", scenarios = sim_scenarios(n = 20L, mu = 0),
+    generate = sim_generator(function(scenario, context) {
+      x <- rnorm(scenario$n)
+      data.frame(y = scenario$mu + x + rnorm(scenario$n, 0, 0.2), x = x)
+    }, record = function(data) c(xbar = mean(data$x))),
+    estimands = list(sim_estimand("mean", sim_truth_unknown())),
+    methods = list(mean = function(data) {
+      if (data$x[1] > 1) stop("large first value")
+      sim_estimate("mean", mean(data$y))
+    }), measures = c("bias"))
+  run <- sim_run(st, replications = 40, seed = 4, path = run_path())
+  e <- sim_results(run)$estimates
+  n_ok <- sum(e$valid & is.finite(e$estimate))
+  expect_lt(n_ok, 40)
+  cv <- sim_control_variate(run, "xbar", 0, "mean")
+  # the mean needs no truth: every successful fit contributes
+  expect_equal(cv$n, n_ok)
+  expect_equal(cv$n_generated, 40L)
+  expect_identical(cv$status, "selected")
+  expect_true(is.na(cv$value_adjusted) && is.na(cv$mcse_adjusted) && is.na(cv$coefficient))
+  expect_match(cv$note, sprintf("%d of 40", n_ok))
+  expect_equal(cv$value, mean(e$estimate[e$valid & is.finite(e$estimate)]))
+})
+
+test_that("antithetic summaries count the pairs left incomplete by a failed member", {
+  st <- sim_study("vr", scenarios = sim_scenarios(n = 20L, mu = 0),
+    generate = sim_generator(function(scenario, context) {
+      z <- rnorm(scenario$n)
+      if (context$antithetic) z <- -z
+      data.frame(y = scenario$mu + z)
+    }, antithetic = TRUE),
+    estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) scenario$mu))),
+    methods = list(mean = function(data) {
+      if (data$y[1] > 1) stop("large first value")
+      sim_estimate("mean", mean(data$y))
+    }), measures = c("bias"))
+  run <- sim_run(st, replications = 20, seed = 5, path = run_path())
+  e <- sim_results(run)$estimates
+  ok <- e$replication[e$valid & is.finite(e$estimate)]
+  pair <- (ok + 1L) %/% 2L
+  a <- sim_summarise_antithetic(run, "bias")
+  expect_equal(a$pairs, sum(table(pair) == 2L))
+  expect_equal(a$incomplete_pairs, length(unique(pair)) - a$pairs)
+  expect_gt(a$incomplete_pairs, 0L)
+})
+
 test_that("every summary, comparison and ranking of antithetic runs uses the pairs", {
   gen <- sim_generator(function(scenario, context) {
     z <- rnorm(scenario$n)

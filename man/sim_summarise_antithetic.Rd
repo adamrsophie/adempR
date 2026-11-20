@@ -13,13 +13,18 @@ sim_summarise_antithetic(run, measure = c("bias", "mse", "coverage", "mean"))
 estimate).}
 }
 \value{
-A data frame per scenario, method and estimand.
+A data frame per scenario, method and estimand: \code{value},
+\code{mcse}, \code{pairs}, \code{incomplete_pairs}, \code{mcse_independent} and
+\code{variance_ratio}.
 }
 \description{
 With \code{sim_generator(antithetic = TRUE)}, replications 2k - 1 and 2k use
 antithetic draws and are dependent. The pair average of each
 contribution is the independent unit, so the value is the mean over
-complete pairs and its MCSE is \verb{sd(pair means) / sqrt(pairs)}. The
+complete pairs and its MCSE is \verb{sd(pair means) / sqrt(pairs)}. Pairs
+with only one eligible member are left out and counted in
+\code{incomplete_pairs}; when there are any, the value is the mean over the
+pairs where both members succeeded, not over all pairs. The
 result also gives the MCSE that independent replications with the same
 variance would have had, and the ratio of variances (above 1 when the
 antithetic design helped).

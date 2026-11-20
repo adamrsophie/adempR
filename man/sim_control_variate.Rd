@@ -23,9 +23,10 @@ scenario.}
 \item{measure}{\code{"bias"}, \code{"mse"}, \code{"coverage"} or \code{"mean"}.}
 }
 \value{
-A data frame per scenario, method and estimand with the
-unadjusted and adjusted values and MCSEs, the coefficient and the
-ratio of variances.
+A data frame per scenario, method and estimand with the number
+of contributions and of generated data sets, the unadjusted and
+adjusted values and MCSEs, the coefficient, the ratio of variances, a
+status and a note.
 }
 \description{
 A quantity recorded for every data set whose mean is known exactly (for
@@ -36,4 +37,12 @@ measure correlated with it. With contributions \code{x} and control values
 \code{mean(x) - b (mean(c) - mu)} with \code{b = cov(x, c) / var(c)}, and its MCSE
 is the standard deviation of \verb{x - b c} over \code{sqrt(n)} (the usual
 large-sample approximation that ignores the estimation of \code{b}).
+}
+\details{
+The known mean is the control's expectation over all generated data
+sets. The adjustment is therefore made only when every generated data
+set contributes (no failed fit, no missing control); otherwise the
+selected data sets can have another control mean, the adjustment would
+change the target, and the row gets status \code{selected} with no adjusted
+value. The mean estimate (\code{measure = "mean"}) needs no truth.
 }
