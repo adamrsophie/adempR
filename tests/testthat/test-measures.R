@@ -383,3 +383,21 @@ test_that("a custom aggregate without a value or with an infinite MCSE is not ok
                     aggregate = function(x) list(value = 1, mcse = Inf))
   expect_error(adempR:::k_custom(m2, rows), "finite")
 })
+
+test_that("relative bias stays finite near the largest double and only exact zero is undefined", {
+  st <- sim_study("huge", scenarios = sim_scenarios(n = 2L),
+    generate = function(scenario, context) {
+      sim_data(data.frame(y = 1), truth = list(m = if (context$replication %% 2) 1e308 else 1.1e308))
+    },
+    estimands = list(sim_estimand("m", sim_truth_dataset())),
+    methods = list(zero = function(data) sim_estimate("m", 0)), measures = "relbias")
+  s <- as.data.frame(sim_summarise(sim_run(st, replications = 4, seed = 1, path = run_path())))
+  expect_equal(s$value[s$measure == "relbias"], -1)
+  expect_identical(s$status[s$measure == "relbias"], "ok")
+  # a tiny nonzero truth gives a value, flagged as unstable, not undefined
+  st2 <- normal_study(n = 10L, mu = 1e-10, measures = "relbias")
+  s2 <- as.data.frame(sim_summarise(sim_run(st2, replications = 5, seed = 1, path = run_path())))
+  r <- s2[s2$measure == "relbias", ]
+  expect_true(is.finite(r$value))
+  expect_identical(r$status, "unstable")
+})

@@ -62,9 +62,15 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
         return(kernel_result(n = length(t), status = "infinite",
                              note = "nonfinite errors"))
       }
+      # Work on a common scale so that sums and spreads of values near the
+      # largest double cannot overflow.
+      sc <- max(abs(c(t, e[sel], rows$estimate[sel])))
+      if (!is.finite(sc) || sc == 0) sc <- 1
+      ts <- t / sc
+      es <- e[sel] / sc
       # A truth that is small next to the spread of the estimates makes the
       # ratio unstable: it is reported, but flagged.
-      spread <- if (length(t) > 1L) stats::sd(rows$estimate[sel]) else 0
+      spread <- if (length(t) > 1L) stats::sd(rows$estimate[sel] / sc) else 0
       unstable <- function(r, ref) {
         if (abs(ref) < spread) {
           r$status <- "unstable"
@@ -72,23 +78,25 @@ measure_cell <- function(m, rows, study, estimand, shift = 0) {
         }
         r
       }
+      # only an exact zero makes the ratio undefined; a tiny truth gives a
+      # value flagged as unstable
       if (all(t == t[1])) {
-        if (abs(t[1]) < .Machine$double.eps^0.5) {
+        if (t[1] == 0) {
           kernel_result(n = length(t), status = "undefined",
                         note = "relative bias is undefined at zero truth")
         } else {
-          r <- k_mean(e[sel] / t[1], level)
+          r <- k_mean(es / ts[1], level)
           r$note <- "bias divided by the (constant) truth"
-          unstable(r, t[1])
+          unstable(r, ts[1])
         }
       } else {
-        mt <- mean(t)
-        if (abs(mt) < .Machine$double.eps^0.5) {
+        mt <- mean(ts)
+        if (mt == 0) {
           return(kernel_result(n = length(t), status = "undefined",
                                note = "mean truth is zero"))
         }
-        val <- sum(e[sel]) / sum(t)
-        lin <- (e[sel] - val * t) / mt
+        val <- sum(es) / sum(ts)
+        lin <- (es - val * ts) / mt
         mc <- if (length(t) > 1L) stats::sd(lin) / sqrt(length(t)) else NA_real_
         z <- stats::qnorm(1 - (1 - level) / 2)
         unstable(kernel_result(value = val, mcse = mc, lower = val - z * mc, upper = val + z * mc,
