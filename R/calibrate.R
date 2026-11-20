@@ -29,8 +29,10 @@
 #' averaged over scenarios with the design weights when the scenarios have
 #' them, else equally. A setting without a loss in a scenario (it never
 #' produced a usable result there) cannot be chosen; a scenario where no
-#' setting has a loss (for example an unknown truth) is left out and
-#' named in `excluded`. The MCSE of the mean loss treats scenarios as
+#' setting has a loss (for example an unknown truth), or whose weight is
+#' 0, is left out and named in `excluded`. When no scenario is left, or no
+#' setting has a loss in every remaining scenario, nothing is chosen and
+#' the call is an error. The MCSE of the mean loss treats scenarios as
 #' independent; differences between settings evaluated on the same data
 #' sets are usually more precise than the two MCSEs suggest (see
 #' [sim_compare()] on the calibration run).
@@ -110,9 +112,18 @@ sim_calibrate_method <- function(study, method, grid, measure = "mse", estimand 
   # cannot inform the choice and is reported. Elsewhere a setting without a
   # loss failed there and cannot be chosen, so a setting that fails in a
   # hard scenario is not rescued by dropping that scenario.
-  informative <- vapply(keys, function(k) any(is.finite(tab$loss[tab$scenario_key == k])), logical(1))
-  excluded <- cal$scenarios$labels[!informative]
   w <- cal$scenarios$weights %||% rep(1, length(keys))
+  # a scenario informs the choice only with a loss for some setting and a
+  # positive weight; without any such scenario an empty sum would look
+  # like a perfect loss of 0, so nothing is chosen
+  informative <- vapply(keys, function(k) any(is.finite(tab$loss[tab$scenario_key == k])), logical(1)) &
+    is.finite(w) & w > 0
+  excluded <- cal$scenarios$labels[!informative]
+  if (!any(informative)) {
+    why <- unique(tab$status[!is.finite(tab$loss)])
+    stopf("No scenario with a positive weight has a %s loss for any setting (statuses: %s); no setting can be chosen.",
+          measure, if (length(why)) paste(why, collapse = ", ") else "zero weights")
+  }
   w <- stats::setNames(w / sum(w[informative]), keys)
   use <- tab$scenario_key %in% keys[informative]
   overall <- do.call(rbind, lapply(ids, function(id) {

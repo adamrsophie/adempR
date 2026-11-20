@@ -47,3 +47,27 @@ test_that("calibration penalizes settings that fail, uses weights and reports un
   expect_length(cal$excluded, 0L)
   expect_output(print(cal), "design weights")
 })
+
+test_that("calibration chooses nothing without an informative loss", {
+  mk <- function(truth, method = function(data) sim_estimate("mean", mean(data$y)), w = NULL) {
+    sc <- sim_scenarios(n = c(5L, 6L), .weights = w)
+    sim_study("cal_none", scenarios = sc,
+      generate = function(scenario, context) data.frame(y = stats::rnorm(scenario$n)),
+      estimands = list(sim_estimand("mean", truth)),
+      methods = list(avg = method), measures = "mse")
+  }
+  cal <- function(st, f = function(offset) function(data) sim_estimate("mean", mean(data$y) + offset))
+    sim_calibrate_method(st, method = f, grid = list(offset = c(0, 1)), measure = "mse",
+                         replications = 3, seed = 1, path = run_path())
+  # every truth unknown
+  expect_error(cal(mk(sim_truth_unknown())), "no setting can be chosen")
+  # every setting fails
+  expect_error(cal(mk(sim_truth_exact(function(scenario) 0)),
+                   function(offset) function(data) stop("fails")), "can be chosen")
+  # the only scenario with a loss has weight 0
+  expect_error(cal(mk(sim_truth_exact(function(scenario) 0), w = c(0, 1)),
+                   function(offset) function(data) {
+                     if (nrow(data) == 6L) stop("fails")
+                     sim_estimate("mean", mean(data$y) + offset)
+                   }), "no setting can be chosen")
+})
