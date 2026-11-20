@@ -283,7 +283,7 @@ sim_results <- function(run) {
   truth <- sim_truth(run)
   if (!is.null(est) && nrow(est)) {
     common <- truth[truth$truth_status == "ok", c("scenario_key", "estimand", "truth",
-                                                    "truth_se", "truth_kind")]
+                                                    "truth_se", "truth_error", "truth_kind")]
     est <- merge(est, common, by = c("scenario_key", "estimand"), all.x = TRUE, sort = FALSE)
     dtr <- keep_rep(raw$dataset_truth)
     if (!is.null(dtr) && nrow(dtr)) {
@@ -332,6 +332,7 @@ empty_estimates <- function(study) {
   row$round <- 0L
   row$truth <- NA_real_
   row$truth_se <- NA_real_
+  row$truth_error <- NA_real_
   row$truth_kind <- NA_character_
   classify_rows(row, study$estimands, study$failure)[0, , drop = FALSE]
 }

@@ -17,6 +17,9 @@ rejection_label <- function(rows, estimand) {
   # whether the null holds: use the neutral label.
   tse <- rows$truth_se
   if (any(!is.na(tse) & tse > 0 & abs(rows$truth - h0) <= 3 * tse)) return("rejection")
+  # likewise a numerical truth whose error bound reaches the null
+  ter <- rows$truth_error
+  if (!is.null(ter) && any(!is.na(ter) & ter > 0 & abs(rows$truth - h0) <= ter)) return("rejection")
   nt <- null_true(rows$truth, h0, alt)
   if (anyNA(nt)) return("rejection")
   if (all(nt)) "type_i_error" else if (!any(nt)) "power" else "rejection"
@@ -594,16 +597,20 @@ sim_flow <- function(run) {
 #' interval lies in the range, `"outside"` when it lies entirely outside,
 #' and `"uncertain"` otherwise (more replications are needed to decide).
 #' For the rejection rate the default range is Bradley's (1978) liberal
-#' criterion, `alpha / 2` to `3 alpha / 2`; it applies to type I error, so
-#' use it on scenarios where the null hypothesis is true. Other measures
-#' need an explicit range.
+#' criterion, `alpha / 2` to `3 alpha / 2`, with the study's `alpha` by
+#' default. It applies to type I error, so it is used only on cells whose
+#' label is `type_i_error` (the null hypothesis holds); other cells get no
+#' verdict and a note. Other measures need an explicit range. For a run
+#' made by [sim_run_sequential()], a monitored measure is judged with the
+#' design's monitoring intervals, which stay valid after the stopping.
 #'
 #' @param run A run or results.
 #' @param measure A built in measure.
 #' @param range Two numbers, the acceptable range.
-#' @param alpha Nominal level for the default rejection range.
+#' @param alpha Nominal level for the default rejection range; defaults to
+#'   the study's `alpha`.
 #' @return The rows of [sim_summarise()] for the measure with columns
-#'   `range_lower`, `range_upper` and `verdict`.
+#'   `range_lower`, `range_upper`, `verdict` and `verdict_note`.
 #' @references Bradley JV (1978). Robustness? British Journal of
 #'   Mathematical and Statistical Psychology 31, 144-152.
 #' @examples
@@ -616,26 +623,47 @@ sim_flow <- function(run) {
 #' run <- sim_run(study, replications = 100, seed = 1, path = tempfile("adempR-run-"))
 #' sim_acceptable(run)
 #' @export
-sim_acceptable <- function(run, measure = "rejection", range = NULL, alpha = 0.05) {
+sim_acceptable <- function(run, measure = "rejection", range = NULL, alpha = NULL) {
   if (!is_scalar_character(measure) || !(measure %in% MEASURE_INFO$measure)) {
     stopf("`measure` must be one built in measure; see sim_measure_info().")
   }
-  if (is.null(range)) {
+  res <- sim_results(run)
+  null_only <- is.null(range)
+  if (null_only) {
     if (measure != "rejection") stopf("Give an acceptable `range` for %s.", measure)
+    alpha <- alpha %||% res$manifest$study$alpha
     if (!is_scalar_number(alpha) || alpha <= 0 || alpha >= 1) stopf("`alpha` must be in (0, 1).")
     range <- c(alpha / 2, 3 * alpha / 2)
   }
   if (!is.numeric(range) || length(range) != 2L || anyNA(range) || range[1] > range[2]) {
     stopf("`range` must be two increasing numbers.")
   }
-  s <- as.data.frame(sim_summarise(run, measures = measure))
+  s <- as.data.frame(sim_summarise(res, measures = measure))
   s <- s[s$measure == measure, , drop = FALSE]
+  # A sequential run was stopped by its monitoring intervals; only those
+  # (Clopper-Pearson at the per cell level of the design) stay valid after
+  # the stopping, so the verdict uses them.
+  design <- res$manifest$sequential$design
+  if (!is.null(design) && measure %in% design$measures && nrow(s)) {
+    ok <- s$n_eligible > 0 & !is.na(s$value)
+    ci <- cp_interval(round(s$value[ok] * s$n_eligible[ok]), s$n_eligible[ok],
+                      design$conf_level_per_interval)
+    s$lower[ok] <- ci[, "lower"]
+    s$upper[ok] <- ci[, "upper"]
+    s$interval <- "sequential monitoring"
+  }
   s$range_lower <- range[1]
   s$range_upper <- range[2]
   s$verdict <- ifelse(is.na(s$lower) | is.na(s$upper), NA_character_,
                       ifelse(s$lower >= range[1] & s$upper <= range[2], "inside",
                              ifelse(s$upper < range[1] | s$lower > range[2], "outside",
                                     "uncertain")))
+  s$verdict_note <- NA_character_
+  if (null_only) {
+    off <- s$label != "type_i_error"
+    s$verdict[off] <- NA_character_
+    s$verdict_note[off] <- "the type I error range applies only where the null hypothesis holds"
+  }
   rownames(s) <- NULL
   s
 }

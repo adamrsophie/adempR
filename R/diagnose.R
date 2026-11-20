@@ -112,7 +112,7 @@ sim_diagnose <- function(run, outlier_z = 5) {
   disagree <- NULL
   degenerate <- NULL
   if (!is.null(est) && nrow(est)) {
-    a <- ifelse(is.na(est$alpha), 1 - est$level, est$alpha)
+    a <- ifelse(is.na(est$alpha), study$alpha, est$alpha)
     both <- est$test_status == "valid" & est$interval_status == "valid" &
       est$alternative == "two.sided" & !is.na(est$null) & !is.na(est$level) &
       !is.na(est$p_value) & abs(a - (1 - est$level)) < 1e-12
@@ -120,7 +120,7 @@ sim_diagnose <- function(run, outlier_z = 5) {
     if (any(both)) {
       b <- est[both, , drop = FALSE]
       excl <- b$null < b$lower | b$null > b$upper
-      b$disagree <- (b$p_value <= a[both]) != excl
+      b$disagree <- reject_indicator(b, study$alpha) != excl
       cells <- unique(b[c("scenario_key", "method", "estimand")])
       disagree <- bind_rows(lapply(seq_len(nrow(cells)), function(i) {
         r <- b[b$scenario_key == cells$scenario_key[i] & b$method == cells$method[i] &

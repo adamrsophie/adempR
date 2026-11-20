@@ -4,7 +4,7 @@
 \alias{sim_acceptable}
 \title{Acceptability of a performance measure}
 \usage{
-sim_acceptable(run, measure = "rejection", range = NULL, alpha = 0.05)
+sim_acceptable(run, measure = "rejection", range = NULL, alpha = NULL)
 }
 \arguments{
 \item{run}{A run or results.}
@@ -13,11 +13,12 @@ sim_acceptable(run, measure = "rejection", range = NULL, alpha = 0.05)
 
 \item{range}{Two numbers, the acceptable range.}
 
-\item{alpha}{Nominal level for the default rejection range.}
+\item{alpha}{Nominal level for the default rejection range; defaults to
+the study's \code{alpha}.}
 }
 \value{
 The rows of \code{\link[=sim_summarise]{sim_summarise()}} for the measure with columns
-\code{range_lower}, \code{range_upper} and \code{verdict}.
+\code{range_lower}, \code{range_upper}, \code{verdict} and \code{verdict_note}.
 }
 \description{
 Classifies each cell of a measure against an acceptable range, taking
@@ -25,9 +26,12 @@ the Monte Carlo interval into account: \code{"inside"} when the whole
 interval lies in the range, \code{"outside"} when it lies entirely outside,
 and \code{"uncertain"} otherwise (more replications are needed to decide).
 For the rejection rate the default range is Bradley's (1978) liberal
-criterion, \code{alpha / 2} to \verb{3 alpha / 2}; it applies to type I error, so
-use it on scenarios where the null hypothesis is true. Other measures
-need an explicit range.
+criterion, \code{alpha / 2} to \verb{3 alpha / 2}, with the study's \code{alpha} by
+default. It applies to type I error, so it is used only on cells whose
+label is \code{type_i_error} (the null hypothesis holds); other cells get no
+verdict and a note. Other measures need an explicit range. For a run
+made by \code{\link[=sim_run_sequential]{sim_run_sequential()}}, a monitored measure is judged with the
+design's monitoring intervals, which stay valid after the stopping.
 }
 \examples{
 study <- sim_study("demo", scenarios = sim_scenarios(n = c(10L, 40L)),

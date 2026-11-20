@@ -29,10 +29,48 @@ test_that("acceptability uses the Monte Carlo interval", {
   run <- sim_run(st, replications = 60, seed = 1, path = run_path())
   a <- sim_acceptable(run)
   expect_equal(a$range_lower[1], 0.025)
-  expect_true(all(a$verdict %in% c("inside", "outside", "uncertain")))
-  # power near one is far outside the type I error range
-  expect_equal(a$verdict[a$scenario_id == st$scenarios$labels[2]], "outside")
+  expect_true(a$verdict[a$label == "type_i_error"] %in% c("inside", "outside", "uncertain"))
+  # the type I error range is not applied to a power cell
+  pw <- a$scenario_id == st$scenarios$labels[2]
+  expect_identical(a$label[pw], "power")
+  expect_true(is.na(a$verdict[pw]))
+  expect_match(a$verdict_note[pw], "null hypothesis holds")
+  # an explicit range applies everywhere
+  b <- sim_acceptable(run, range = c(0.8, 1))
+  expect_equal(b$verdict[pw], "inside")
   expect_error(sim_acceptable(run, "bias"), "range")
+})
+
+test_that("rejection decisions use the study alpha and numerical truth bounds", {
+  st <- normal_study(n = 10L, mu = 0, measures = "rejection", alpha = 0.1)
+  run <- sim_run(st, replications = 20, seed = 1, path = run_path())
+  # the default range uses the study's alpha
+  expect_equal(sim_acceptable(run)$range_lower, 0.05)
+  # diagnostics compare a test at the study's alpha with an interval at
+  # 1 - alpha; a 95% interval is not compared with a test at 0.1
+  expect_null(sim_diagnose(run)$test_interval_disagreement)
+  # a numerical truth whose error bound reaches the null is not labeled power
+  st2 <- sim_study("numnull", scenarios = sim_scenarios(n = 10L),
+    generate = function(scenario, context) data.frame(y = rnorm(scenario$n)),
+    estimands = list(sim_estimand("mean", sim_truth_numeric(function(scenario) list(value = 0.01, error = 0.1)))),
+    methods = list(t = function(data) sim_estimate("mean", mean(data$y), p_value = t.test(data$y)$p.value, null = 0)),
+    measures = "rejection")
+  s <- as.data.frame(sim_summarise(sim_run(st2, replications = 5, seed = 1, path = run_path())))
+  expect_identical(s$label[s$measure == "rejection"], "rejection")
+})
+
+test_that("a sequential run is judged with its monitoring intervals", {
+  st <- normal_study(n = 10L, mu = 0, measures = "rejection")
+  sq <- sim_run_sequential(st, looks = c(100, 200), half_width = 0.2, seed = 1,
+                           path = run_path(), measures = "rejection")
+  a <- sim_acceptable(sq$run)
+  s <- as.data.frame(sim_summarise(sq$run, measures = "rejection"))
+  s <- s[s$measure == "rejection", ]
+  ci <- adempR:::cp_interval(round(s$value * s$n_eligible), s$n_eligible,
+                             sq$conf_level_per_interval)
+  expect_equal(a$lower, unname(ci[, "lower"]))
+  expect_equal(a$upper, unname(ci[, "upper"]))
+  expect_identical(a$interval, "sequential monitoring")
 })
 
 test_that("a large sample run flags a method aimed at a different quantity", {
