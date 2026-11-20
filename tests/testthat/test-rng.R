@@ -266,3 +266,23 @@ test_that("a numerical truth must be deterministic", {
   expect_true(any(grepl("random", v$message)))
   expect_error(sim_run(st, replications = 1, seed = 1, path = run_path()), "validation failed")
 })
+
+test_that("substream jumps equal repeated substream steps", {
+  old <- RNGkind()[1]
+  on.exit(RNGkind(old), add = TRUE)
+  RNGkind("L'Ecuyer-CMRG")
+  set.seed(11)
+  seed <- .Random.seed
+  step <- seed
+  for (k in 1:300) {
+    step <- parallel::nextRNGSubStream(step)
+    if (k %in% c(1, 2, 31, 33, 64, 100, 257, 300)) {
+      expect_identical(rng_substream_jump(seed, k), step, info = k)
+    }
+  }
+  # scattered and repeated replications through the stepping and jumping paths
+  reps <- c(300L, 5L, 40L, 41L, 5L, 299L)
+  ref <- lapply(reps, function(r) Reduce(function(s, i) parallel::nextRNGSubStream(s),
+                                         seq_len(r), seed))
+  expect_identical(rng_substreams(seed, reps), ref)
+})

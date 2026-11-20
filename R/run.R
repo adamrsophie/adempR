@@ -511,14 +511,18 @@ sim_run <- function(study, replications, seed, path, backend = c("sequential", "
               cache = new.env(parent = emptyenv()),
               dgp_stage = "dgp", method_stage = "method")
   if (nrow(todo)) {
-    tasks <- build_tasks(study, ctx, todo, attr(done, "data_md5"))
-    chunks <- if (is.null(weights)) split(tasks, ceiling(seq_along(tasks) / chunk_size)) else
-      lpt_chunks(tasks, weights, chunk_size)
+    # a compact table of pending tasks; each batch gets its tasks and
+    # random number states only when it is executed
+    tab <- task_table(study, todo, attr(done, "data_md5"))
+    n_tasks <- nrow(tab)
+    chunks <- if (is.null(weights)) unname(split(seq_len(n_tasks), ceiling(seq_len(n_tasks) / chunk_size))) else
+      lpt_index(tab$scenario_key, weights, chunk_size)
     if (progress) {
       message(sprintf("Running %d task(s) in %d batch(es) with the %s backend.",
-                      length(tasks), length(chunks), backend))
+                      n_tasks, length(chunks), backend))
     }
-    run_chunks(study, chunks, p, backend, workers, progress, gpus)
+    run_chunks(study, chunks, p, backend, workers, progress, gpus,
+               materialize = function(idx) tasks_for(study, ctx, tab[idx, , drop = FALSE]))
   }
   man$status <- "complete"
   man$completed <- now_utc()
@@ -696,26 +700,59 @@ plan_tasks <- function(study, R, done) {
   do.call(rbind, out)
 }
 
-build_tasks <- function(study, ctx, todo, data_md5 = NULL) {
+# One row per pending task (scenario and replication) in canonical order:
+# scenarios in order of first appearance, replications ascending, with the
+# methods to fit (in study order, joined by "\r") and the expected data
+# checksum. A few dozen bytes per task, without random number states.
+task_table <- function(study, todo, data_md5 = NULL) {
   all_m <- names(study$methods)
-  # one pass over the pending rows: split by scenario, then by replication
-  # (sorted), instead of rescanning every row for each replication
+  empty <- data.frame(scenario_key = character(), replication = integer(), methods = character(),
+                      expect_md5 = character(), stringsAsFactors = FALSE)
+  if (!nrow(todo)) return(empty)
   by_key <- split(todo, factor(todo$scenario_key, levels = unique(todo$scenario_key)))
-  out <- lapply(names(by_key), function(key) {
+  rows <- lapply(names(by_key), function(key) {
     sub <- by_key[[key]]
     ms_by_rep <- split(sub$method, sub$replication)
     reps <- sort(as.integer(names(ms_by_rep)))
-    ms_by_rep <- ms_by_rep[as.character(reps)]
-    seeds <- task_seeds(ctx, key, reps, study, all_m)
-    md5 <- unname(data_md5[paste(key, reps, sep = "\r")])
-    lapply(seq_along(reps), function(j) {
-      list(scenario_key = key, replication = reps[j], seeds = seeds[[j]],
-           methods = all_m[all_m %in% ms_by_rep[[j]]],
-           expect_md5 = if (is.null(data_md5)) NULL else md5[j])
-    })
+    ms <- vapply(ms_by_rep[as.character(reps)], function(m) paste(all_m[all_m %in% m], collapse = "\r"),
+                 character(1))
+    data.frame(scenario_key = key, replication = reps, methods = unname(ms),
+               expect_md5 = if (is.null(data_md5)) NA_character_ else
+                 unname(data_md5[paste(key, reps, sep = "\r")]),
+               stringsAsFactors = FALSE)
   })
-  if (length(out)) unlist(out, recursive = FALSE) else list()
+  out <- do.call(rbind, rows)
+  attr(out, "has_md5") <- !is.null(data_md5)
+  rownames(out) <- NULL
+  out
 }
+
+# The executable tasks (with their random number states) of some rows of
+# a task table.
+tasks_for <- function(study, ctx, tab) {
+  all_m <- names(study$methods)
+  has_md5 <- isTRUE(attr(tab, "has_md5"))
+  out <- vector("list", nrow(tab))
+  for (key in unique(tab$scenario_key)) {
+    i <- which(tab$scenario_key == key)
+    seeds <- task_seeds(ctx, key, tab$replication[i], study, all_m)
+    for (j in seq_along(i)) {
+      r <- i[j]
+      out[[r]] <- list(scenario_key = key, replication = tab$replication[r], seeds = seeds[[j]],
+                       methods = if (nzchar(tab$methods[r])) strsplit(tab$methods[r], "\r", fixed = TRUE)[[1]] else character(),
+                       expect_md5 = if (has_md5) tab$expect_md5[r] else NULL)
+    }
+  }
+  out
+}
+
+# All tasks of a plan, materialized at once (used for inspection and tests).
+build_tasks <- function(study, ctx, todo, data_md5 = NULL) {
+  tab <- task_table(study, todo, data_md5)
+  if (!nrow(tab)) return(list())
+  tasks_for(study, ctx, tab)
+}
+
 
 run_chunk <- function(study, chunk) {
   lapply(chunk, function(task) execute_task_seeded(study, task))
@@ -835,11 +872,12 @@ with_device <- function(chunk, dev) {
   lapply(chunk, function(t) { t$gpu <- as.character(dev); t })
 }
 
-run_chunks <- function(study, chunks, p, backend, workers, progress, gpus = NULL) {
+run_chunks <- function(study, chunks, p, backend, workers, progress, gpus = NULL,
+                       materialize = identity) {
   dev_of <- function(k) if (is.null(gpus)) NULL else gpus[(k - 1L) %% length(gpus) + 1L]
   if (backend == "sequential") {
     for (i in seq_along(chunks)) {
-      chunks[[i]] <- with_device(chunks[[i]], dev_of(i))
+      chunks[[i]] <- with_device(materialize(chunks[[i]]), dev_of(i))
       commit_chunk(study, run_chunk(study, chunks[[i]]), p)
       if (progress) message(sprintf("  batch %d/%d committed", i, length(chunks)))
     }
@@ -867,7 +905,7 @@ run_chunks <- function(study, chunks, p, backend, workers, progress, gpus = NULL
   starts <- seq(1L, length(chunks), by = wave)
   for (s in starts) {
     idx <- s:min(s + wave - 1L, length(chunks))
-    batch <- lapply(seq_along(idx), function(k) with_device(chunks[[idx[k]]], dev_of(k)))
+    batch <- lapply(seq_along(idx), function(k) with_device(materialize(chunks[[idx[k]]]), dev_of(k)))
     res <- future.apply::future_lapply(batch, chunk_worker, study = shipped,
                                        packages = pkgs, future.seed = FALSE,
                                        future.packages = "adempR", future.globals = FALSE,
@@ -944,9 +982,16 @@ cost_weights <- function(study, cost) {
 # parallel backend groups consecutive batches onto workers cannot leave
 # one worker with all the costly scenarios. Costly batches go first.
 lpt_chunks <- function(tasks, w, chunk_size) {
-  n <- length(tasks)
+  keys <- vapply(tasks, `[[`, character(1), "scenario_key")
+  lapply(lpt_index(keys, w, chunk_size), function(i) tasks[i])
+}
+
+# Longest processing time first: positions of the tasks in each batch,
+# heaviest batch first.
+lpt_index <- function(keys, w, chunk_size) {
+  n <- length(keys)
   nb <- ceiling(n / chunk_size)
-  tw <- unname(w[vapply(tasks, `[[`, character(1), "scenario_key")])
+  tw <- unname(w[keys])
   ord <- order(-tw, seq_len(n))
   load <- numeric(nb)
   size <- integer(nb)
@@ -958,7 +1003,7 @@ lpt_chunks <- function(tasks, w, chunk_size) {
     load[b] <- load[b] + tw[i]
     size[b] <- size[b] + 1L
   }
-  chunks <- lapply(seq_len(nb), function(b) tasks[ord[bin[ord] == b]])
+  chunks <- lapply(seq_len(nb), function(b) ord[bin[ord] == b])
   chunks[order(-load, seq_len(nb))]
 }
 

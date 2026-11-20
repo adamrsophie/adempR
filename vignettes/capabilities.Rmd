@@ -86,7 +86,7 @@ on one machine; nothing has been run on a real cluster scheduler or a GPU.
 | Duplicate deduplication and conflict detection | verified | test-recovery.R |
 | Selective invalidation from stored fingerprints (method refit, truth and measure re-evaluation, DGP refusal, recorded revisions) | verified | test-replay-invalidation.R |
 | Refits that cannot regenerate the committed data set stop without changing results; failed regeneration rows never shadow the committed generation; a damaged truth cache is recomputed only from the definition the run used; declared generator packages are part of the data fingerprint | verified | test-regeneration.R, test-truth-cache.R, test-identity-2.R |
-| Task planning in one pass over the pending cells, with identical task identities, seeds and order | verified | test-planning-tasks.R (fresh, resumed, method addition, reordered scenarios) |
+| Task planning in one pass over the pending cells into a compact task table; each batch gets its tasks and random number states only when it runs, reaching distant substreams by a jump instead of stepping | verified | test-planning-tasks.R (identical task identities, seeds and order for fresh, resumed, method addition and reordered scenarios), test-rng.R (jumps equal repeated `nextRNGSubStream()` steps) |
 | Replay of one replication: one generation, recorded generation failures, warning flags, checksum verified artifacts | verified | test-replay-invalidation.R |
 | Retention: artifacts indexed by method version; capability report from what was actually retained | verified | test-replay-invalidation.R |
 | Regeneration from an export bundle with the recorded stream registry | verified | test-bundle.R |
@@ -183,7 +183,11 @@ Two analysis paths were also timed before and after they were rewritten
 
 Planning time now grows linearly with the number of replications
 instead of quadratically; the jackknife MCSEs agree with the direct
-pair calculation to within 2e-16.
+pair calculation to within 2e-16. Tasks and their random number states
+are now built per batch: the table kept for a run of 32,000 pending
+tasks takes 0.86 MiB instead of the 44 MiB of the materialized list, and
+the states of a batch at the end of the run take about 3 milliseconds,
+since distant substreams are reached by a jump.
 
 ## Known limitations
 
@@ -202,10 +206,10 @@ pair calculation to within 2e-16.
   cannot be checked and must be released with `sim_unlock()`.
 * Export bundles contain R code; their checksums detect corruption, not
   tampering.
-* The pending task list of a run (scenario, replication, methods and
-  stream seeds) is built in memory before execution, about 1.4 KiB per
-  task; `chunk_size` limits what is executed and committed at once, not
-  this list.
+* The table of pending tasks (scenario, replication, methods, data
+  checksum) is still built before execution, about 28 bytes per task;
+  the tasks themselves and their random number states are built one
+  batch at a time.
 * Ranking probabilities from `sim_rank()` are conditional on the reported
   truth; with an uncertain truth only the sensitivity of first place is
   assessed, not a joint probability.

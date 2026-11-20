@@ -205,7 +205,10 @@ rng_stream_seeds <- function(base, k, cache = NULL) {
   cache$streams[k]
 }
 
-# Substream states for replications `reps` of a stream.
+# Substream states for replications `reps` of a stream. Nearby
+# replications are reached by stepping with parallel::nextRNGSubStream();
+# a long gap (or a first replication far from the start) is crossed with a
+# jump, so the cost does not grow with the replication number.
 rng_substreams <- function(stream_seed, reps) {
   reps <- as.integer(reps)
   if (!length(reps)) return(list())
@@ -215,12 +218,91 @@ rng_substreams <- function(stream_seed, reps) {
   cur <- stream_seed
   pos <- 0L
   for (j in ord) {
+    gap <- reps[j] - pos
+    if (gap > 32L) {
+      cur <- rng_substream_jump(cur, gap)
+      pos <- reps[j]
+    }
     while (pos < reps[j]) {
       cur <- parallel::nextRNGSubStream(cur)
       pos <- pos + 1L
     }
     out[[j]] <- cur
   }
+  out
+}
+
+# MRG32k3a substream advance: the state components are multiplied by
+# A^(2^76) modulo m1 and m2 (the matrices of L'Ecuyer et al. 2002, as in
+# parallel::nextRNGSubStream()). Jumping k substreams multiplies by the
+# powers A^(2^76 2^i) for the set bits i of k, kept in a table.
+MRG_M1 <- 4294967087
+MRG_M2 <- 4294944443
+mrg_state <- new.env(parent = emptyenv())
+
+# a * b mod m for whole numbers below 2^32, exact in double precision
+mulmod <- function(a, b, m) {
+  bh <- floor(b / 65536)
+  bl <- b - bh * 65536
+  ((a * bh) %% m * 65536 + a * bl) %% m
+}
+
+matmulmod <- function(A, B, m) {
+  C <- matrix(0, 3, 3)
+  for (i in 1:3) for (j in 1:3) {
+    s <- 0
+    for (k in 1:3) s <- (s + mulmod(A[i, k], B[k, j], m)) %% m
+    C[i, j] <- s
+  }
+  C
+}
+
+matvecmod <- function(A, v, m) {
+  vapply(1:3, function(i) {
+    s <- 0
+    for (k in 1:3) s <- (s + mulmod(A[i, k], v[k], m)) %% m
+    s
+  }, numeric(1))
+}
+
+mrg_jump_tables <- function() {
+  if (is.null(mrg_state$t1)) {
+    A1 <- matrix(c(82758667, 1871391091, 4127413238, 3672831523, 69195019, 1871391091,
+                   3672091415, 3528743235, 69195019), 3, byrow = TRUE)
+    A2 <- matrix(c(1511326704, 3759209742, 1610795712, 4292754251, 1511326704, 3889917532,
+                   3859662829, 4292754251, 3708466080), 3, byrow = TRUE)
+    t1 <- t2 <- vector("list", 31L)
+    t1[[1]] <- A1
+    t2[[1]] <- A2
+    for (i in 2:31) {
+      t1[[i]] <- matmulmod(t1[[i - 1L]], t1[[i - 1L]], MRG_M1)
+      t2[[i]] <- matmulmod(t2[[i - 1L]], t2[[i - 1L]], MRG_M2)
+    }
+    mrg_state$t1 <- t1
+    mrg_state$t2 <- t2
+  }
+  mrg_state
+}
+
+# The state `k` substreams after `seed` (a .Random.seed of kind
+# L'Ecuyer-CMRG), equal to k calls of parallel::nextRNGSubStream().
+rng_substream_jump <- function(seed, k) {
+  k <- as.integer(k)
+  if (k == 0L) return(seed)
+  tb <- mrg_jump_tables()
+  u <- as.numeric(seed[2:7])
+  u[u < 0] <- u[u < 0] + 2^32
+  x1 <- u[1:3]
+  x2 <- u[4:6]
+  bits <- as.integer(intToBits(k))[1:31]
+  for (i in which(bits == 1L)) {
+    x1 <- matvecmod(tb$t1[[i]], x1, MRG_M1)
+    x2 <- matvecmod(tb$t2[[i]], x2, MRG_M2)
+  }
+  v <- c(x1, x2)
+  v[v >= 2^31] <- v[v >= 2^31] - 2^32
+  out <- seed
+  out[2:7] <- as.integer(v)
   out
 }
 
