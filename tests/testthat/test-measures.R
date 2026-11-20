@@ -425,3 +425,10 @@ test_that("precision measures follow the declared truth kind, not the values see
   rk <- sim_rank(run, "empse", B = 20)
   expect_equal(rk$value[rk$method == "a"], v)
 })
+
+test_that("`by` is refused when no weighted rows can be formed", {
+  run <- sim_run(normal_study(n = 10L, mu = c(0, 1), measures = "bias"), replications = 2, seed = 1,
+                 path = run_path())
+  expect_error(sim_summarise(run, by = "mu"), "weighted = TRUE")
+  expect_error(sim_summarise(run, weighted = TRUE, by = "mu"), "with weights")
+})

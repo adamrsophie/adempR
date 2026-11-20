@@ -271,6 +271,13 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
   res <- sim_results(run)
   man <- res$manifest
   study <- man$study
+  if (!is.null(by)) {
+    # `by` only shapes the weighted rows; asking for it otherwise is a mistake
+    if (!isTRUE(weighted)) stopf("`by` needs `weighted = TRUE`.")
+    if (is.null(study$scenarios$weights)) stopf("`by` needs a scenario design with weights.")
+    bad <- setdiff(by, names(as.data.frame(study$scenarios)))
+    if (length(bad)) stopf("Unknown scenario field(s) in `by`: %s.", paste(bad, collapse = ", "))
+  }
   if (is.null(measures)) measures <- study$measures
   if (is.character(measures)) measures <- do.call(sim_measures, as.list(measures))
   mlist <- unclass(measures)
