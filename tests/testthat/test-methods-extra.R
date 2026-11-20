@@ -44,7 +44,7 @@ test_that("memory failures, fit diagnostics and reference checks are recorded", 
   expect_error(sim_method(function(data) 1, reference = c(nope = 1)), "reference")
 })
 
-test_that("a changed record function or package list extends a run", {
+test_that("a changed record function extends a run; changed generator packages do not", {
   gen <- function(scenario, context) data.frame(y = rnorm(scenario$n))
   mk <- function(g) sim_study("rec2", scenarios = sim_scenarios(n = 10L), generate = g,
     estimands = list(sim_estimand("mean", sim_truth_exact(function(scenario) 0))),
@@ -65,14 +65,12 @@ test_that("a changed record function or package list extends a run", {
   expect_match(unlist(lapply(res$manifest$revisions, `[[`, "changes")),
                "record function of the generator changed", all = FALSE)
   expect_false("record_fp" %in% names(res$records))
-  # declared packages: a revision, not a stop
-  run3 <- sim_run(mk(sim_generator(gen, record = function(data) c(sd = sd(data$y)), packages = "stats")),
-                  replications = 6, seed = 1, path = path)
-  res3 <- sim_results(run3)
-  expect_equal(res3$estimates$estimate[1:5], res$estimates$estimate)
-  expect_match(unlist(lapply(res3$manifest$revisions, `[[`, "changes")),
-               "packages declared by the generator changed (none to stats)", fixed = TRUE, all = FALSE)
-  expect_setequal(res3$records$replication, 4:6)
+  # declared packages change what unqualified calls resolve to: a
+  # different mechanism, refused
+  expect_error(sim_run(mk(sim_generator(gen, record = function(data) c(sd = sd(data$y)),
+                                        packages = "stats")),
+                       replications = 6, seed = 1, path = path),
+               "data-generating mechanism differs")
 })
 
 test_that("generators record realized properties of each data set", {

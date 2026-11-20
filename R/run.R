@@ -103,11 +103,8 @@ reconcile_manifest <- function(man, study, seed, replications, update) {
       "record function of the generator changed: records of earlier replications came from the earlier function and are excluded from diagnostics; new replications record with the new one",
       FALSE)
   }
-  if (!identical(old$generator_packages, new$generator_packages)) {
-    chg(sprintf("packages declared by the generator changed (%s to %s): data sets regenerated for existing replications must match their stored checksums",
-                paste(old$generator_packages %||% "none", collapse = ", "),
-                paste(new$generator_packages %||% "none", collapse = ", ")), FALSE)
-  }
+  # declared generator packages are part of the generator fingerprint, so
+  # a change of them is refused above
   added_scen <- setdiff(names(new$scenarios), names(old$scenarios))
   if (length(added_scen)) chg(sprintf("added %d scenario(s)", length(added_scen)), FALSE)
   if (!identical(old$design, new$design)) {
