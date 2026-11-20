@@ -111,16 +111,56 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
   # pass 2: accumulate eligible contributions, once per task and estimand
   seen <- new.env(hash = TRUE, parent = emptyenv())
   acc <- new.env(hash = TRUE, parent = emptyenv())
-  add <- function(cell, what, x) {
+  # With antithetic pairs, the pair (the independent unit) can span
+  # batches, so the sums of every pair are kept (one entry per pair and
+  # cell, like the task keys kept above) and the MCSE comes from them at
+  # the end, as in sim_summarise().
+  anti <- isTRUE(study$generator$antithetic)
+  add <- function(cell, what, x, reps = NULL) {
     k <- paste(cell, what, sep = "\r")
     a <- acc[[k]] %||% list(acc = sim_accumulator(), pos = 0, neg = 0, other = 0,
-                            tmin = Inf, tmax = -Inf, levels = numeric())
+                            tmin = Inf, tmax = -Inf, levels = numeric(),
+                            units = if (anti) new.env(hash = TRUE, parent = emptyenv()), shift = NA_real_)
     fin <- is.finite(x)
     a$acc <- sim_accumulate(a$acc, x[fin])
     a$pos <- a$pos + sum(x == Inf, na.rm = TRUE)
     a$neg <- a$neg + sum(x == -Inf, na.rm = TRUE)
     a$other <- a$other + sum(is.na(x))
+    if (anti && any(fin)) {
+      # sums of x - shift and its square per pair; the shift (the first
+      # value seen) keeps the squares of large values well conditioned
+      if (is.na(a$shift)) a$shift <- x[fin][1]
+      xs <- x[fin] - a$shift
+      u <- as.character(rep_units(study, reps[fin]))
+      s1 <- rowsum(xs, u, reorder = FALSE)
+      s2 <- rowsum(xs^2, u, reorder = FALSE)
+      nk <- rowsum(rep(1, length(u)), u, reorder = FALSE)
+      for (j in seq_len(nrow(s1))) {
+        id <- rownames(s1)[j]
+        old <- a$units[[id]] %||% c(0, 0, 0)
+        assign(id, old + c(s1[j, 1], s2[j, 1], nk[j, 1]), envir = a$units)
+      }
+    }
     assign(k, a, envir = acc)
+  }
+  # pair based MCSE of a streamed measure
+  unit_stream <- function(r, a, m) {
+    if (!anti || is.null(a) || !r$status %in% c("ok", "boundary") || !is.finite(r$value) ||
+        a$pos + a$neg + a$other > 0) return(r)
+    u <- do.call(rbind, mget(ls(a$units), envir = a$units))
+    if (is.null(u)) return(r)
+    if (m == "empse") {
+      # leave-one-pair-out SD from the remaining sums
+      n <- sum(u[, 3]) - u[, 3]
+      s1 <- sum(u[, 1]) - u[, 1]
+      s2 <- sum(u[, 2]) - u[, 2]
+      th <- sqrt(pmax(0, (s2 - s1^2 / n) / (n - 1)))
+      th[n < 2] <- NA_real_
+      return(unit_jackknife(r, th, level))
+    }
+    means <- u[, 1] / u[, 3] + a$shift
+    unit_jackknife(r, unit_loo_means(u[, 1], u[, 3]) + a$shift, level,
+                   proportion = m == "coverage", unit_means = means)
   }
   note_cell <- function(cell, truth, lv) {
     k <- paste(cell, ".meta", sep = "\r")
@@ -166,16 +206,16 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
     for (cl in unique(cell)) {
       i <- cell == cl
       note_cell(cl, e$truth[i & usable & has_truth], e$level[i & int_ok & has_truth])
-      if ("bias" %in% measures) add(cl, "bias", err[i & usable & has_truth])
-      if ("mse" %in% measures) add(cl, "mse", err[i & usable & has_truth]^2)
+      if ("bias" %in% measures) add(cl, "bias", err[i & usable & has_truth], e$replication[i & usable & has_truth])
+      if ("mse" %in% measures) add(cl, "mse", err[i & usable & has_truth]^2, e$replication[i & usable & has_truth])
       if ("empse" %in% measures) {
-        add(cl, "empse", e$estimate[i & usable])
-        add(cl, "empse_err", err[i & usable & has_truth])
+        add(cl, "empse", e$estimate[i & usable], e$replication[i & usable])
+        add(cl, "empse_err", err[i & usable & has_truth], e$replication[i & usable & has_truth])
       }
-      if ("mean_se" %in% measures) add(cl, "mean_se", e$se[i & usable & se_ok])
+      if ("mean_se" %in% measures) add(cl, "mean_se", e$se[i & usable & se_ok], e$replication[i & usable & se_ok])
       if ("coverage" %in% measures) {
         j <- i & int_ok & has_truth
-        add(cl, "coverage", as.numeric(e$lower[j] <= e$truth[j] & e$truth[j] <= e$upper[j]))
+        add(cl, "coverage", as.numeric(e$lower[j] <= e$truth[j] & e$truth[j] <= e$upper[j]), e$replication[j])
       }
     }
   }
@@ -212,6 +252,7 @@ sim_summarise_stream <- function(run, measures = c("bias", "mse", "empse", "cove
         },
         k_mean_moments(n, st$mean_x, st$var_x, if (is.null(a)) 0 else a$pos,
                        if (is.null(a)) 0 else a$neg, level))
+      r <- unit_stream(r, a, m)
       out[[length(out) + 1L]] <- data.frame(scenario_key = k,
         scenario_id = study$scenarios$labels[match(k, keys)], method = mn, estimand = en,
         measure = m, value = r$value, mcse = r$mcse, lower = r$lower, upper = r$upper,

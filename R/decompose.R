@@ -28,7 +28,9 @@
 #' @param label Name of the reference (shown in the result).
 #' @return A data frame with one row per scenario and method: `truth`,
 #'   `reference`, `reference_error`, `total_bias`, `statistical_bias` and
-#'   `identification_bias`, each with its MCSE, and `n`.
+#'   `identification_bias`, each with its MCSE, `n` and `n_units` (the
+#'   independent units, antithetic pairs or replications, over which the
+#'   MCSEs are taken).
 #' @examples
 #' # the sample mean of log-normal data identifies exp(mu + 1/2), not exp(mu)
 #' study <- sim_study("lognormal", scenarios = sim_scenarios(n = 50L, mu = 0),
@@ -68,7 +70,10 @@ sim_bias_decomposition <- function(run, reference, estimand = NULL, methods = NU
       r <- est[est$scenario_key == key & est$method == mn, , drop = FALSE]
       n <- nrow(r)
       if (!n) next
-      mcse <- function(x) if (n > 1) stats::sd(x) / sqrt(n) else NA_real_
+      # MCSEs over the independent units (antithetic pairs or replications)
+      units <- rep_units(study, r$replication)
+      mcse <- function(x) linear_unit_result(kernel_result(value = mean(x), n = n), x, units,
+                                             study$level)$mcse
       # a shared truth estimated by simulation adds its own error to every
       # replication alike; a data set truth varies and is in the spread
       shared <- !all(r$truth_kind == "dataset")
@@ -83,7 +88,7 @@ sim_bias_decomposition <- function(run, reference, estimand = NULL, methods = NU
         statistical_bias = mean(d_stat), statistical_mcse = mcse(d_stat),
         identification_bias = ref$truth - mean(r$truth),
         identification_mcse = if (shared) tse else mcse(r$truth),
-        n = n, stringsAsFactors = FALSE)
+        n = n, n_units = length(unique(units)), stringsAsFactors = FALSE)
     }
   }
   out <- bind_rows(out)

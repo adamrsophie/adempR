@@ -33,34 +33,21 @@ cluster_mcse <- function(x, units) {
 # sd(pair means) / sqrt(pairs) for a mean over complete pairs.
 pair_jackknife <- function(m, rows, study, estimand, r) {
   if (!r$status %in% c("ok", "boundary", "unstable") || !is.finite(r$value)) return(r)
+  # a mean of one contribution per replication: closed form from the pair
+  # sums (the same jackknife, without refitting the measure per pair)
+  lc <- linear_contributions(m, rows, study, estimand)
+  if (!is.null(lc) && length(lc$x) && all(is.finite(lc$x)) &&
+      isTRUE(all.equal(mean(lc$x), r$value, tolerance = 1e-10))) {
+    return(linear_unit_result(r, lc$x, rep_units(study, lc$replication), study$level,
+                              is_proportion_measure(m)))
+  }
   units <- rep_units(study, rows$replication)
   u <- unique(units)
-  np <- length(u)
-  note <- function(txt) paste(c(if (!is.na(r$note)) r$note, txt), collapse = "; ")
-  if (np < 2L) {
-    r$mcse <- r$lower <- r$upper <- NA_real_
-    r$note <- note("antithetic pairs: fewer than two pairs, no MCSE")
-    return(r)
-  }
-  th <- vapply(u, function(k) {
+  th <- if (length(u) < 2L) numeric(length(u)) else vapply(u, function(k) {
     v <- measure_cell(m, rows[units != k, , drop = FALSE], study, estimand)$value
     if (is.null(v)) NA_real_ else v
   }, numeric(1))
-  if (anyNA(th)) {
-    r$mcse <- r$lower <- r$upper <- NA_real_
-    r$note <- note("antithetic pairs: the measure is undefined without some pair, no MCSE")
-    return(r)
-  }
-  r$mcse <- sqrt((np - 1) / np * sum((th - mean(th))^2))
-  z <- stats::qnorm(1 - (1 - study$level) / 2)
-  r$lower <- r$value - z * r$mcse
-  r$upper <- r$value + z * r$mcse
-  if (identical(m, "coverage") || (is.character(m) && m %in% PROPORTION_MEASURES)) {
-    r$lower <- max(0, r$lower)
-    r$upper <- min(1, r$upper)
-  }
-  r$note <- note(sprintf("MCSE from %d antithetic pairs (delete-one-pair jackknife)", np))
-  r
+  unit_jackknife(r, th, study$level, is_proportion_measure(m))
 }
 
 vr_contributions <- function(res, measure) {
@@ -134,7 +121,10 @@ sim_summarise_antithetic <- function(run, measure = c("bias", "mse", "coverage",
 #' `c` of known mean `mu`, the adjusted estimate is
 #' `mean(x) - b (mean(c) - mu)` with `b = cov(x, c) / var(c)`, and its MCSE
 #' is the standard deviation of `x - b c` over `sqrt(n)` (the usual
-#' large-sample approximation that ignores the estimation of `b`).
+#' large-sample approximation that ignores the estimation of `b`). With
+#' antithetic pairs the independent unit is the pair: `b` is estimated from
+#' pair means and both MCSEs come from the pairs (delete-one-pair
+#' jackknife), as in [sim_summarise()].
 #'
 #' The known mean is the control's expectation over all generated data
 #' sets. The adjustment is therefore made only when every generated data
@@ -150,7 +140,8 @@ sim_summarise_antithetic <- function(run, measure = c("bias", "mse", "coverage",
 #'   scenario.
 #' @param measure `"bias"`, `"mse"`, `"coverage"` or `"mean"`.
 #' @return A data frame per scenario, method and estimand with the number
-#'   of contributions and of generated data sets, the unadjusted and
+#'   of contributions, of independent units (`n_units`) and of generated
+#'   data sets, the unadjusted and
 #'   adjusted values and MCSEs, the coefficient, the ratio of variances, a
 #'   status and a note.
 #' @export
@@ -182,18 +173,28 @@ sim_control_variate <- function(run, control, control_mean,
     # controls), the control's mean on the selected data sets is unknown and
     # the adjustment would move the estimate towards another target.
     complete <- n == n_gen
-    vc <- stats::var(grp$c)
-    b <- if (vc > 0) stats::cov(grp$x, grp$c) / vc else 0
+    # the coefficient and both MCSEs come from the independent units
+    # (antithetic pairs or single replications)
+    units <- rep_units(study, grp$replication)
+    xb <- tapply(grp$x, units, mean)
+    cb <- tapply(grp$c, units, mean)
+    vc <- if (length(cb) > 1L) stats::var(cb) else 0
+    b <- if (vc > 0) stats::cov(xb, cb) / vc else 0
     adj <- grp$x - b * (grp$c - mu)
+    unit_mcse <- function(v) linear_unit_result(kernel_result(value = mean(v), n = length(v)),
+                                                v, units, study$level)$mcse
+    mc_x <- unit_mcse(grp$x)
+    mc_adj <- unit_mcse(adj)
     out[[length(out) + 1L]] <- data.frame(
       scenario_id = study$scenarios$labels[match(grp$scenario_key[1], study$scenarios$keys)],
       method = grp$method[1], estimand = grp$estimand[1], measure = measure, n = n,
       n_generated = n_gen,
-      value = mean(grp$x), mcse = stats::sd(grp$x) / sqrt(n),
+      n_units = length(unique(units)),
+      value = mean(grp$x), mcse = mc_x,
       value_adjusted = if (complete) mean(adj) else NA_real_,
-      mcse_adjusted = if (complete) stats::sd(adj) / sqrt(n) else NA_real_,
+      mcse_adjusted = if (complete) mc_adj else NA_real_,
       coefficient = if (complete) b else NA_real_,
-      variance_ratio = if (complete) stats::var(grp$x) / stats::var(adj) else NA_real_,
+      variance_ratio = if (complete && isTRUE(mc_adj > 0)) (mc_x / mc_adj)^2 else NA_real_,
       status = if (complete) "ok" else "selected",
       note = if (complete) NA_character_ else
         sprintf("%d of %d generated data sets contribute; the control mean is known only over all of them, so no adjustment",

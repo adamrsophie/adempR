@@ -362,6 +362,7 @@ sim_summarise <- function(run, measures = NULL, weighted = FALSE, by = NULL) {
             scenario_key = key, scenario_id = labels[si], method = mn, estimand = en,
             measure = mid, label = label, value = r$value, mcse = r$mcse,
             lower = r$lower, upper = r$upper, n_eligible = r$n,
+            n_units = as.integer(r$n_units %||% if (isTRUE(study$generator$antithetic)) NA_integer_ else r$n),
             n_planned = unname(planned_replications(man, key)), n_generated = length(gen_ok),
             n_generation_failed = n_gen_attempted - length(gen_ok),
             n_attempted = nrow(rows), n_completed = sum(rows$attempt_status == "ok"),
@@ -448,15 +449,35 @@ weighted_rows <- function(summ, study, by = NULL, prop_ids = PROPORTION_MEASURES
     boundary <- s$status %in% "boundary"
     if (all(have) && any(boundary)) {
       if (grp$measure[i] %in% prop_ids) {
-        # A plug-in MCSE of 0 is not certainty. Exact per scenario intervals
-        # at level 1 - (1 - level) / S all hold with probability at least
+        # A plug-in MCSE of 0 is not certainty. Per scenario intervals at
+        # level 1 - (1 - level) / S all hold with probability at least
         # `level`, so their weighted sum bounds the weighted proportion.
         S <- nrow(s)
-        k <- round(s$value * s$n_eligible)
-        ci <- cp_interval(k, s$n_eligible, 1 - (1 - study$level) / S)
-        lo <- sum(ww * ci[, "lower"])
-        hi <- sum(ww * ci[, "upper"])
-        note <- "weighted average; interval from exact per scenario intervals with a Bonferroni split, because some scenarios observed no or only events"
+        conf <- 1 - (1 - study$level) / S
+        if (isTRUE(study$generator$antithetic)) {
+          # dependent pairs: exact limits are taken over the independent
+          # pairs, for the shares of pairs at 1 and above 0 (scenarios
+          # with all pair means equal), and Wald limits from the pair
+          # jackknife MCSE elsewhere
+          G <- s$n_units
+          zs <- stats::qnorm(1 - (1 - conf) / 2)
+          bnd <- s$status %in% "boundary"
+          lo_s <- pmax(0, s$value - zs * s$mcse)
+          hi_s <- pmin(1, s$value + zs * s$mcse)
+          kone <- ifelse(s$value >= 1, G, 0)
+          kpos <- ifelse(s$value > 0, G, 0)
+          lo_s[bnd] <- cp_interval(kone[bnd], G[bnd], conf)[, "lower"]
+          hi_s[bnd] <- cp_interval(kpos[bnd], G[bnd], conf)[, "upper"]
+          lo <- if (anyNA(G[bnd])) NA_real_ else sum(ww * lo_s)
+          hi <- if (anyNA(G[bnd])) NA_real_ else sum(ww * hi_s)
+          note <- "weighted average; interval from per scenario intervals over independent antithetic pairs with a Bonferroni split, because some scenarios have all pair means equal"
+        } else {
+          k <- round(s$value * s$n_eligible)
+          ci <- cp_interval(k, s$n_eligible, conf)
+          lo <- sum(ww * ci[, "lower"])
+          hi <- sum(ww * ci[, "upper"])
+          note <- "weighted average; interval from exact per scenario intervals with a Bonferroni split, because some scenarios observed no or only events"
+        }
       } else {
         lo <- hi <- mc <- NA_real_
         note <- "weighted average; no interval, because some scenarios have a degenerate MCSE"
@@ -472,7 +493,7 @@ weighted_rows <- function(summ, study, by = NULL, prop_ids = PROPORTION_MEASURES
     s1$lower <- lo
     s1$upper <- hi
     # counts are totals over the weighted scenarios
-    for (cn in c("n_eligible", "n_planned", "n_generated", "n_attempted", "n_completed",
+    for (cn in c("n_eligible", "n_units", "n_planned", "n_generated", "n_attempted", "n_completed",
                  "n_valid", "n_generation_failed")) {
       s1[[cn]] <- sum(s[[cn]])
     }

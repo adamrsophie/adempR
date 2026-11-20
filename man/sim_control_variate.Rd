@@ -24,7 +24,8 @@ scenario.}
 }
 \value{
 A data frame per scenario, method and estimand with the number
-of contributions and of generated data sets, the unadjusted and
+of contributions, of independent units (\code{n_units}) and of generated
+data sets, the unadjusted and
 adjusted values and MCSEs, the coefficient, the ratio of variances, a
 status and a note.
 }
@@ -36,7 +37,10 @@ measure correlated with it. With contributions \code{x} and control values
 \code{c} of known mean \code{mu}, the adjusted estimate is
 \code{mean(x) - b (mean(c) - mu)} with \code{b = cov(x, c) / var(c)}, and its MCSE
 is the standard deviation of \verb{x - b c} over \code{sqrt(n)} (the usual
-large-sample approximation that ignores the estimation of \code{b}).
+large-sample approximation that ignores the estimation of \code{b}). With
+antithetic pairs the independent unit is the pair: \code{b} is estimated from
+pair means and both MCSEs come from the pairs (delete-one-pair
+jackknife), as in \code{\link[=sim_summarise]{sim_summarise()}}.
 }
 \details{
 The known mean is the control's expectation over all generated data

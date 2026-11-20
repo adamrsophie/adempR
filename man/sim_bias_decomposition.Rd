@@ -27,7 +27,9 @@ value, or a \code{\link[=sim_truth_exact]{sim_truth_exact()}} or \code{\link[=si
 \value{
 A data frame with one row per scenario and method: \code{truth},
 \code{reference}, \code{reference_error}, \code{total_bias}, \code{statistical_bias} and
-\code{identification_bias}, each with its MCSE, and \code{n}.
+\code{identification_bias}, each with its MCSE, \code{n} and \code{n_units} (the
+independent units, antithetic pairs or replications, over which the
+MCSEs are taken).
 }
 \description{
 The truth of an estimand is the causal (or target) quantity; a method

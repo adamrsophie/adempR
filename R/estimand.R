@@ -398,7 +398,8 @@ sim_summarise_grid <- function(run, id, measure = "bias") {
   s <- as.data.frame(sim_summarise(res, measures = measure))
   s <- s[s$estimand %in% ids & s$measure == measure, , drop = FALSE]
   s$at <- at[match(s$estimand, ids)]
-  point <- s[c("scenario_id", "method", "estimand", "at", "measure", "value", "mcse", "n_eligible")]
+  point <- s[c("scenario_id", "method", "estimand", "at", "measure", "value", "mcse", "n_eligible",
+               "n_units", "status")]
   # grid average: the equally weighted mean over the grid points of each
   # replication's contributions (a discrete average, not an integral), so
   # its MCSE uses the replication-level averages and is valid under any
@@ -411,7 +412,7 @@ sim_summarise_grid <- function(run, id, measure = "bias") {
     e <- e[e$estimand %in% ids, , drop = FALSE]
     elig <- !is.na(e$truth) & if (measure == "coverage") {
       e$estimate_status %in% USABLE_FOR_INTERVAL & e$interval_status == "valid"
-    } else e$valid & is.finite(e$estimate)
+    } else e$valid
     e$contrib <- switch(measure, bias = e$estimate - e$truth, mse = (e$estimate - e$truth)^2,
                         coverage = as.numeric(e$lower <= e$truth & e$truth <= e$upper))
     e$contrib[!elig] <- NA_real_
@@ -419,19 +420,35 @@ sim_summarise_grid <- function(run, id, measure = "bias") {
     for (grp in split(e, list(e$scenario_key, e$method), drop = TRUE)) {
       per <- tapply(seq_len(nrow(grp)), grp$replication, function(j) {
         v <- grp$contrib[j]
-        if (length(v) == length(ids) && !anyNA(v)) mean(v) else NA_real_
+        if (length(v) == length(ids) && !any(is.na(v) & !is.nan(v))) mean(v) else NA_real_
       })
       n_rep <- length(per)
-      per <- per[!is.na(per)]
+      reps <- as.integer(names(per))
+      # an eligible infinite estimate (allowed by the failure policy) gives
+      # an infinite replication average; opposite infinities give NaN,
+      # which is kept as eligible but undefined
+      keep <- !is.na(per) | is.nan(per)
+      per <- per[keep]
+      reps <- reps[keep]
       n <- length(per)
+      units <- rep_units(study, reps)
+      val <- if (n) mean(per) else NA_real_
+      status <- if (!n) "no_eligible" else if (is.nan(val)) "undefined" else
+        if (!is.finite(val)) "infinite" else "ok"
+      r <- kernel_result(value = if (is.nan(val)) NA_real_ else val, n = n, status = status)
+      if (status == "ok") r <- linear_unit_result(r, per, units, study$level,
+                                                  what = if (isTRUE(study$generator$antithetic)) "antithetic pairs" else "replications")
       rows[[length(rows) + 1L]] <- data.frame(
         scenario_id = study$scenarios$labels[match(grp$scenario_key[1], study$scenarios$keys)],
         method = grp$method[1], estimand = id, at = NA_real_,
-        measure = paste0("grid_mean_", measure), value = if (n) mean(per) else NA_real_,
-        mcse = if (n > 1) stats::sd(per) / sqrt(n) else NA_real_,
-        n_eligible = n, n_incomplete = n_rep - n,
-        note = sprintf("equally weighted mean over %d grid points; %d of %d replications have every point eligible",
-                       length(ids), n, n_rep),
+        measure = paste0("grid_mean_", measure), value = r$value, mcse = r$mcse,
+        n_eligible = n, n_incomplete = n_rep - n, n_units = length(unique(units)),
+        status = r$status,
+        note = paste(c(sprintf("equally weighted mean over %d grid points; %d of %d replications have every point eligible",
+                               length(ids), n, n_rep),
+                       if (status == "infinite") "infinite eligible estimates, no MCSE",
+                       if (status == "undefined") "infinite eligible estimates of both signs, the average is undefined"),
+                     collapse = "; "),
         stringsAsFactors = FALSE)
     }
     avg <- bind_rows(rows)
